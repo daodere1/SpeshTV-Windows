@@ -3,6 +3,7 @@ import 'package:server_core/server_core.dart';
 
 import '../../preference/user_preferences.dart';
 import '../services/member_list_changes.dart';
+import '../services/user_data_sync.dart';
 
 class ItemMutationRepository {
   final MediaServerClient _client;
@@ -20,6 +21,7 @@ class ItemMutationRepository {
     if (owner == _client.userId && server == _client.baseUrl) {
       MemberListChanges.saved(_client, itemId, MemberListKind.favorite, isFavorite);
     }
+    userDataSync.publish(itemId, {'IsFavorite': isFavorite});
   }
 
   Future<void> setPlayed(String itemId, {required bool isPlayed}) async {
@@ -31,10 +33,18 @@ class ItemMutationRepository {
     } else {
       await _client.userLibraryApi.unmarkPlayed(itemId);
     }
+    // Either way the server drops the resume point, so say so here too rather
+    // than leave a progress bar under a watched tick.
+    userDataSync.publish(itemId, {
+      'Played': isPlayed,
+      'PlayedPercentage': null,
+      'PlaybackPositionTicks': 0,
+    });
   }
 
   Future<void> setRating(String itemId, {required bool likes}) async {
     await _client.userLibraryApi.updateUserRating(itemId, likes: likes);
+    userDataSync.publish(itemId, {'Likes': likes});
   }
 
   Future<void> setNumericRating(String itemId, {required double rating}) async {
@@ -42,10 +52,12 @@ class ItemMutationRepository {
       itemId,
       rating: rating,
     );
+    userDataSync.publish(itemId, {'Rating': rating});
   }
 
   Future<void> clearRating(String itemId) async {
     await _client.userLibraryApi.deleteUserRating(itemId);
+    userDataSync.publish(itemId, {'Rating': null, 'Likes': null});
   }
 
   Future<void> addToCollection(String collectionId, List<String> itemIds) async {

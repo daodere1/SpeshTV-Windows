@@ -137,6 +137,19 @@ class _GeneralStyleScreenState extends State<_GeneralStyleScreen> {
                       subtitle: l10n.gamepadNavigationDescription,
                       icon: Icons.sports_esports_outlined,
                     ),
+                    if (PlatformDetection.isAppleTV)
+                      EnumPreferenceTile<SiriRemoteSwipeSensitivity>(
+                        preference: UserPreferences.siriRemoteSwipeSensitivity,
+                        title: l10n.siriRemoteSwipeSensitivity,
+                        description:
+                            l10n.siriRemoteSwipeSensitivityDescription,
+                        icon: Icons.swipe,
+                        labelOf: (v) => switch (v) {
+                          SiriRemoteSwipeSensitivity.low => l10n.settingsLow,
+                          SiriRemoteSwipeSensitivity.medium => l10n.medium,
+                          SiriRemoteSwipeSensitivity.high => l10n.settingsHigh,
+                        },
+                      ),
                   ],
                 ),
               ],
@@ -184,6 +197,7 @@ class _GeneralStyleScreenState extends State<_GeneralStyleScreen> {
                       DesktopUiScale.medium => l10n.medium,
                       DesktopUiScale.large => l10n.large,
                       DesktopUiScale.extraLarge => l10n.extraLarge,
+                      DesktopUiScale.grandparents => l10n.uiScaleGrandparents,
                     },
                     onChanged: _pushPersonalizationSync,
                   ),
@@ -243,6 +257,71 @@ class _GeneralStyleScreenState extends State<_GeneralStyleScreen> {
                   ),
                 ],
               ),
+              if (!PlatformDetection.useMobileUi) ...[
+                _SectionHeader(l10n.settingsAnimationSpeed),
+                adaptiveListSection(
+                  children: [
+                    EnumPreferenceTile<PageTransitionSpeed>(
+                      preference: UserPreferences.pageTransitionSpeed,
+                      title: l10n.pageTransitions,
+                      description: l10n.pageTransitionsSubtitle,
+                      icon: Icons.animation_outlined,
+                      labelOf: (v) => switch (v) {
+                        PageTransitionSpeed.slow => l10n.pageTransitionFadeLong,
+                        PageTransitionSpeed.medium => l10n.pageTransitionFadeMedium,
+                        PageTransitionSpeed.fast => l10n.pageTransitionFadeShort,
+                        PageTransitionSpeed.off => l10n.pageTransitionFadeNone,
+                      },
+                    ),
+                    EnumPreferenceTile<NavigationAnimationSpeed>(
+                      preference: UserPreferences.navigationAnimationSpeed,
+                      title: l10n.navigationSpeed,
+                      description: l10n.navigationSpeedSubtitle,
+                      icon: Icons.speed_outlined,
+                      labelOf: (v) => switch (v) {
+                        NavigationAnimationSpeed.extraSlow =>
+                          l10n.animationSpeedExtraSlow,
+                        NavigationAnimationSpeed.slow =>
+                          l10n.animationSpeedSlow,
+                        NavigationAnimationSpeed.medium =>
+                          l10n.animationSpeedMedium,
+                        NavigationAnimationSpeed.fast =>
+                          l10n.animationSpeedFast,
+                      },
+                    ),
+                    if (GetIt.instance<UserPreferences>().get(
+                          UserPreferences.homeRowsStyle,
+                        ) ==
+                        HomeRowsStyle.v2) ...[
+                      EnumPreferenceTile<ModernCardTransitionSpeed>(
+                        preference: UserPreferences.modernCardTransitionSpeed,
+                        title: l10n.modernCardsTransitionSpeed,
+                        description: l10n.modernCardsTransitionSpeedSubtitle,
+                        icon: Icons.auto_awesome_motion_outlined,
+                        labelOf: (v) => switch (v) {
+                          ModernCardTransitionSpeed.extraSlow =>
+                            l10n.animationSpeedExtraSlow,
+                          ModernCardTransitionSpeed.slow =>
+                            l10n.animationSpeedSlow,
+                          ModernCardTransitionSpeed.medium =>
+                            l10n.animationSpeedMedium,
+                          ModernCardTransitionSpeed.fast =>
+                            l10n.animationSpeedFast,
+                          ModernCardTransitionSpeed.off =>
+                            l10n.animationSpeedOff,
+                        },
+                      ),
+                      SwitchPreferenceTile(
+                        preference:
+                            UserPreferences.delayCardExpansionOnRapidScroll,
+                        title: l10n.delayCardExpansionOnRapidScroll,
+                        subtitle: l10n.delayCardExpansionOnRapidScrollSubtitle,
+                        icon: Icons.hourglass_empty_rounded,
+                      ),
+                    ],
+                  ],
+                ),
+              ],
             ],
           ),
         ),

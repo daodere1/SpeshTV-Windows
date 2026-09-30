@@ -72,7 +72,11 @@ abstract class ItemsApi {
     String? fields,
   });
   Future<List<Map<String, dynamic>>> getAncestors(String itemId);
-  Future<Map<String, dynamic>> getSimilarItems(String itemId, {int? limit});
+  Future<Map<String, dynamic>> getSimilarItems(
+    String itemId, {
+    int? limit,
+    String? bypass,
+  });
 
   Future<Map<String, dynamic>> getNextUp({
     String? seriesId,
@@ -89,6 +93,7 @@ abstract class ItemsApi {
   Future<Map<String, dynamic>> getResumeItems({
     String? parentId,
     List<String>? includeItemTypes,
+    String? mediaTypes,
     int? startIndex,
     int? limit,
     String? fields,
@@ -118,7 +123,7 @@ abstract class ItemsApi {
     bool recursive = false,
   });
 
-  Future<Map<String, dynamic>> getSeasons(String seriesId);
+  Future<Map<String, dynamic>> getSeasons(String seriesId, {String? fields});
 
   Future<Map<String, dynamic>> getEpisodes(
     String seriesId, {
@@ -180,6 +185,8 @@ abstract class ItemsApi {
   Future<void> addToPlaylist(String playlistId, List<String> itemIds);
 
   Future<void> addToCollection(String collectionId, List<String> itemIds);
+
+  Future<void> removeFromCollection(String collectionId, List<String> itemIds);
 
   Future<void> removeFromPlaylist(String playlistId, List<String> entryIds);
 

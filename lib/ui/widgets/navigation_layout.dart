@@ -50,6 +50,12 @@ class NavigationLayout extends StatefulWidget {
     ),
   );
 
+  /// Focus roots of the navigation chrome, registered by the sidebar and
+  /// toolbar while mounted. The route focus observer refuses to land inside
+  /// these, so a fresh route waits for content instead of starting the d-pad
+  /// in the rail and popping it open before anything has loaded.
+  static final Set<FocusNode> chromeFocusRoots = <FocusNode>{};
+
   static final focusNavbarNotifier = ValueNotifier<VoidCallback?>(null);
   static final focusNavbarAvatarNotifier = ValueNotifier<VoidCallback?>(null);
   static final focusContentFromNavbarNotifier = ValueNotifier<VoidCallback?>(
@@ -57,9 +63,35 @@ class NavigationLayout extends StatefulWidget {
   );
   static final focusDetailsPlayButtonNotifier = ValueNotifier<FocusNode?>(null);
 
+  /// Hands focus to the play button a details page registered, and says
+  /// whether it took it so the caller can fall back to its own choice.
+  static bool focusDetailsPlayButton() {
+    final node = focusDetailsPlayButtonNotifier.value;
+    if (node == null || node.context == null || !node.canRequestFocus) {
+      return false;
+    }
+    node.requestFocus();
+    return true;
+  }
+
   /// True while a media-bar trailer is playing; the toolbar and sidebar fade
   /// out on TV. Focusing chrome cancels the trailer, which fades them back in.
   static final trailerImmersiveNotifier = ValueNotifier<bool>(false);
+
+  /// Hands focus to the navbar and reports whether there was one to take it.
+  /// Callers need the answer so they only report a key as handled when focus
+  /// really moved.
+  static bool focusNavbar() {
+    final callback = focusNavbarNotifier.value;
+
+    if (callback == null) {
+      return false;
+    }
+
+    callback();
+
+    return true;
+  }
 
   const NavigationLayout({
     super.key,
@@ -77,6 +109,7 @@ class NavigationLayout extends StatefulWidget {
 class _NavigationLayoutState extends State<NavigationLayout> with WidgetsBindingObserver {
   final _prefs = GetIt.instance<UserPreferences>();
   final _contentFocusNode = FocusNode(debugLabel: 'NavigationContent');
+  final _contentKey = GlobalKey(debugLabel: 'navigationLayoutContent');
   final ValueNotifier<double> _toolbarScrollOffset = ValueNotifier<double>(0.0);
   late NavbarPosition _position;
   final _playbackManager = GetIt.instance<PlaybackManager>();
@@ -160,28 +193,44 @@ class _NavigationLayoutState extends State<NavigationLayout> with WidgetsBinding
         : layout;
   }
 
-  Widget _buildBottomBar() {
-    final content = Focus(
+  /// Keyed so moving the navbar reparents the page that is already on screen
+  /// instead of tearing it down and building it again.
+  Widget get _content => KeyedSubtree(
+    key: _contentKey,
+    child: Focus(
       focusNode: _contentFocusNode,
       skipTraversal: true,
       child: widget.child,
-    );
+    ),
+  );
+
+  Widget _buildBottomBar() {
+    final content = _content;
     return Stack(
       children: [
-        Column(
-          children: [
-            Expanded(child: content),
-            const DownloadProgressBar(),
-            const BottomMusicBar(),
-            AnimatedOpacity(
-              opacity: widget.showNavigationChrome ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 200),
-              child: IgnorePointer(
-                ignoring: !widget.showNavigationChrome,
-                child: MobileBottomNavBar(activeRoute: widget.activeRoute),
+        Positioned.fill(child: content),
+        // The navbar goes last because it is the one that pads the system
+        // inset underneath itself. Above the bars it pads for an edge it no
+        // longer touches and leaves the music bar under the gesture area.
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const DownloadProgressBar(),
+              const BottomMusicBar(),
+              AnimatedOpacity(
+                opacity: widget.showNavigationChrome ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 200),
+                child: IgnorePointer(
+                  ignoring: !widget.showNavigationChrome,
+                  child: MobileBottomNavBar(activeRoute: widget.activeRoute),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         if (widget.showBackButton)
           Positioned(
@@ -197,11 +246,7 @@ class _NavigationLayoutState extends State<NavigationLayout> with WidgetsBinding
 
   Widget _buildToolbar() {
     final translateWithScroll = PlatformDetection.isTV && !widget.pinTopToolbar;
-    final content = Focus(
-      focusNode: _contentFocusNode,
-      skipTraversal: true,
-      child: widget.child,
-    );
+    final content = _content;
     final toolbar = ValueListenableBuilder<bool>(
       valueListenable: NavigationLayout.trailerImmersiveNotifier,
       builder: (context, trailerImmersive, child) {
@@ -300,11 +345,7 @@ class _NavigationLayoutState extends State<NavigationLayout> with WidgetsBinding
   }
 
   Widget _buildSidebar() {
-    final content = Focus(
-      focusNode: _contentFocusNode,
-      skipTraversal: true,
-      child: widget.child,
-    );
+    final content = _content;
 
     final sidebar = ValueListenableBuilder<bool>(
       valueListenable: NavigationLayout.trailerImmersiveNotifier,

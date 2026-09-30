@@ -359,7 +359,184 @@ AudioCapabilityProfile _capabilityProfile({
   );
 }
 
+// The sample-rate cap as the server reads it, flattened for the assertions.
+Map<String, dynamic>? _sampleRateCap(Map<String, dynamic> profile) {
+  final codecProfiles = profile['CodecProfiles'] as List<dynamic>? ?? const [];
+  for (final rawProfile in codecProfiles) {
+    final codecProfile = rawProfile as Map<dynamic, dynamic>;
+    final conditions = codecProfile['Conditions'] as List<dynamic>? ?? const [];
+    for (final rawCondition in conditions) {
+      final condition = rawCondition as Map<dynamic, dynamic>;
+      if (condition['Property'] == 'AudioSampleRate') {
+        return <String, dynamic>{
+          'type': codecProfile['Type'],
+          'codecs': (codecProfile['Codec'] as String).split(','),
+          'condition': condition['Condition'],
+          'value': condition['Value'],
+        };
+      }
+    }
+  }
+  return null;
+}
+
+// The fewest channels a codec may carry and still direct play, or null when
+// the profile sets no floor for it.
+String? _videoAudioChannelFloor(Map<String, dynamic> profile, String codec) {
+  final codecProfiles = profile['CodecProfiles'] as List<dynamic>? ?? const [];
+
+  for (final rawProfile in codecProfiles) {
+    final codecProfile = rawProfile as Map<dynamic, dynamic>;
+    if (codecProfile['Type'] != 'VideoAudio' ||
+        codecProfile['Codec'] != codec) {
+      continue;
+    }
+
+    final conditions = codecProfile['Conditions'] as List<dynamic>? ?? const [];
+    for (final rawCondition in conditions) {
+      final condition = rawCondition as Map<dynamic, dynamic>;
+      if (condition['Property'] == 'AudioChannels' &&
+          condition['Condition'] == 'GreaterThanEqual') {
+        return condition['Value']?.toString();
+      }
+    }
+  }
+
+  return null;
+}
+
 void main() {
+  group('DeviceProfileBuilder transcode target audio codecs', () {
+    List<String> targets({
+      AudioFallbackCodec fallbackCodec = AudioFallbackCodec.auto,
+      bool forAvFoundation = false,
+    }) => DeviceProfileBuilder.transcodeTargetAudioCodecs(
+      fallbackCodec: fallbackCodec,
+      forAvFoundation: forAvFoundation,
+    );
+
+    test("never offers a codec the server can't encode to", () {
+      for (final forAvFoundation in [false, true]) {
+        final codecs = targets(forAvFoundation: forAvFoundation);
+        for (final codec in ['truehd', 'mlp', 'dca']) {
+          expect(codecs, isNot(contains(codec)), reason: codec);
+        }
+      }
+    });
+
+    test("AVFoundation drops the codecs it can't play out of HLS", () {
+      expect(targets(), containsAll(<String>['dts', 'mp2', 'mp3']));
+      final apple = targets(forAvFoundation: true);
+      for (final codec in ['dts', 'mp2', 'mp3']) {
+        expect(apple, isNot(contains(codec)), reason: codec);
+      }
+    });
+
+    test('the fallback preference leads the list', () {
+      expect(targets(fallbackCodec: AudioFallbackCodec.flac).first, 'flac');
+      expect(targets().first, 'aac');
+    });
+
+    test('lists each codec once', () {
+      final codecs = targets(fallbackCodec: AudioFallbackCodec.eac3);
+      expect(codecs.toSet().length, codecs.length);
+    });
+
+    test('matches what the device profile offers the server', () {
+      for (final forAvFoundation in [false, true]) {
+        final profile = DeviceProfileBuilder.build(
+          universalAudioDecode: true,
+          hlsAudioForAvFoundation: forAvFoundation,
+        );
+        final offered = <String>{
+          for (final entry
+              in (profile['TranscodingProfiles'] as List<dynamic>)
+                  .cast<Map<String, dynamic>>())
+            ...(entry['AudioCodec'] as String).split(','),
+        };
+        expect(
+          targets(forAvFoundation: forAvFoundation).toSet(),
+          offered,
+          reason: 'forAvFoundation=$forAvFoundation',
+        );
+      }
+    });
+  });
+
+  group('DeviceProfileBuilder bridged audio sample rate', () {
+    test('a player that bridges audio caps the codecs it has to re-encode', () {
+      final cap = _sampleRateCap(
+        DeviceProfileBuilder.build(universalAudioDecode: true),
+      );
+
+      expect(cap, isNotNull);
+      expect(cap!['type'], 'VideoAudio');
+      expect(cap['condition'], 'LessThanEqual');
+      expect(cap['value'], '48000');
+      expect(cap['codecs'], contains('truehd'));
+      expect(cap['codecs'], contains('mlp'));
+    });
+
+    test('codecs the container carries untouched are left alone', () {
+      final cap = _sampleRateCap(
+        DeviceProfileBuilder.build(universalAudioDecode: true),
+      );
+
+      // These are stream copied, so their rate never reaches an encoder and
+      // capping them would transcode for nothing.
+      for (final codec in ['aac', 'ac3', 'eac3', 'flac', 'alac', 'opus']) {
+        expect(cap!['codecs'], isNot(contains(codec)), reason: codec);
+      }
+    });
+
+    test('a player that decodes natively gets no cap', () {
+      expect(_sampleRateCap(DeviceProfileBuilder.build()), isNull);
+    });
+  });
+
+  group('DeviceProfileBuilder stereo TrueHD', () {
+    test('a player whose decoder stalls on it asks for surround only', () {
+      expect(
+        _videoAudioChannelFloor(
+          DeviceProfileBuilder.build(playerDecodesStereoTrueHd: false),
+          'truehd',
+        ),
+        '3',
+      );
+    });
+
+    test('a bitstreamed route never decodes, so it keeps stereo', () {
+      expect(
+        _videoAudioChannelFloor(
+          DeviceProfileBuilder.build(
+            playerDecodesStereoTrueHd: false,
+            trueHdPassthroughEnabled: true,
+            audioCapabilityProfile: _capabilityProfile(
+              canPassthroughTrueHd: true,
+            ),
+          ),
+          'truehd',
+        ),
+        isNull,
+      );
+    });
+
+    test('a player that decodes it is left alone', () {
+      expect(
+        _videoAudioChannelFloor(DeviceProfileBuilder.build(), 'truehd'),
+        isNull,
+      );
+    });
+
+    test('surround TrueHD still direct plays either way', () {
+      final profile = DeviceProfileBuilder.build(
+        playerDecodesStereoTrueHd: false,
+      );
+
+      expect(_videoDirectPlayAudioCodecs(profile), contains('truehd'));
+    });
+  });
+
   group('DeviceProfileBuilder AVC High 10', () {
     test('a device without a 10 bit AVC decoder transcodes Hi10p, since the '
         'decoder rejects the format once playback has already started', () {
@@ -647,6 +824,86 @@ void main() {
       final unsupportedRanges = _codecUnsupportedRangeTypes(profile, 'hevc');
 
       expect(unsupportedRanges, contains('DOVI_INVALID'));
+    });
+  });
+
+  group('DeviceProfileBuilder AV1 Dolby Vision range filtering', () {
+    test('a base-layer renderer direct plays profile 10.1, including its '
+        'HDR10+ variant, on AV1 HDR10 alone', () {
+      final profile = DeviceProfileBuilder.build(
+        supportsAv1: true,
+        supportsAv1Main10: true,
+        supportsAv1Hdr10: true,
+        supportsAv1Hdr10Plus: false,
+        supportsAv1DolbyVision: false,
+        rendersAv1DoviViaHdr10BaseLayer: true,
+      );
+
+      final unsupportedRanges = _codecUnsupportedRangeTypes(profile, 'av1');
+
+      expect(unsupportedRanges, isNot(contains('DOVI_WITH_HDR10')));
+      expect(unsupportedRanges, isNot(contains('DOVI_WITH_HDR10_PLUS')));
+    });
+
+    test('every other backend keeps the HDR10+ gate on DoVi HDR10+, so an '
+        'HDR10-only client is never offered it', () {
+      final profile = DeviceProfileBuilder.build(
+        supportsAv1: true,
+        supportsAv1Main10: true,
+        supportsAv1Hdr10: true,
+        supportsAv1Hdr10Plus: false,
+        supportsAv1DolbyVision: false,
+      );
+
+      final unsupportedRanges = _codecUnsupportedRangeTypes(profile, 'av1');
+
+      expect(unsupportedRanges, contains('DOVI_WITH_HDR10_PLUS'));
+      // The plain HDR10 variant is unaffected: it never depended on HDR10+.
+      expect(unsupportedRanges, isNot(contains('DOVI_WITH_HDR10')));
+    });
+
+    test('HDR10+ support alone still lifts the gate without the opt-in', () {
+      final profile = DeviceProfileBuilder.build(
+        supportsAv1: true,
+        supportsAv1Main10: true,
+        supportsAv1Hdr10: true,
+        supportsAv1Hdr10Plus: true,
+        supportsAv1DolbyVision: false,
+      );
+
+      final unsupportedRanges = _codecUnsupportedRangeTypes(profile, 'av1');
+
+      expect(unsupportedRanges, isNot(contains('DOVI_WITH_HDR10_PLUS')));
+    });
+
+    test('a client that renders neither AV1 DoVi nor AV1 HDR10 excludes both '
+        'profile 10 range types, opt-in or not', () {
+      final profile = DeviceProfileBuilder.build(
+        supportsAv1: true,
+        supportsAv1Main10: true,
+        supportsAv1Hdr10: false,
+        supportsAv1DolbyVision: false,
+        rendersAv1DoviViaHdr10BaseLayer: true,
+      );
+
+      final unsupportedRanges = _codecUnsupportedRangeTypes(profile, 'av1');
+
+      expect(unsupportedRanges, contains('DOVI_WITH_HDR10'));
+      expect(unsupportedRanges, contains('DOVI_WITH_HDR10_PLUS'));
+    });
+
+    test('an AV1 DoVi decoder keeps every profile 10 range type direct '
+        'playable', () {
+      final profile = DeviceProfileBuilder.build(
+        supportsAv1: true,
+        supportsAv1Main10: true,
+        supportsAv1Hdr10: true,
+        supportsAv1DolbyVision: true,
+      );
+
+      final unsupportedRanges = _codecUnsupportedRangeTypes(profile, 'av1');
+
+      expect(unsupportedRanges, isEmpty);
     });
   });
 

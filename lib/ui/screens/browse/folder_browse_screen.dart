@@ -14,7 +14,9 @@ import '../../widgets/focus/request_initial_focus.dart';
 import '../../widgets/media_card.dart';
 import '../../widgets/navigation_layout.dart';
 import '../../widgets/quick_return_wrapper.dart';
+import '../../widgets/skeleton/skeleton_library_grid.dart';
 import '../../../l10n/app_localizations.dart';
+import '../../util/error_message.dart';
 
 class FolderBrowseScreen extends StatefulWidget {
   final String folderId;
@@ -298,13 +300,12 @@ class _FolderBrowseScreenState extends State<FolderBrowseScreen> {
   Widget _buildBody() {
     switch (_vm.state) {
       case FolderBrowseState.loading:
-        return const Center(child: CircularProgressIndicator());
+        return const SkeletonLibraryGrid();
       case FolderBrowseState.error:
+        final l10n = AppLocalizations.of(context);
         return Center(
           child: Text(
-            AppLocalizations.of(
-              context,
-            ).failedToLoadFolderError(_vm.errorMessage),
+            l10n.failedToLoadFolderError(describeError(_vm.error!, l10n)),
             style: TextStyle(color: AppColorScheme.onSurface.withAlpha(179)),
           ),
         );

@@ -82,6 +82,7 @@ class SearchViewModel extends ChangeNotifier {
 
   String _errorMessage = '';
   String get errorMessage => _errorMessage;
+  Object? get error => _errorMessage.isEmpty ? null : StateError(_errorMessage);
 
   Timer? _debounceTimer;
   int _generation = 0;

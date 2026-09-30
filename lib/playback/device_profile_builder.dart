@@ -84,6 +84,15 @@ class DeviceProfileBuilder {
     'dts',
   ];
 
+  /// Codecs the HLS container can't carry as a stream copy, so a player that
+  /// leans on it has to decode and re-encode them on the way through.
+  static final String _bridgedAudioCodecs = _supportedAudioCodecs
+      .where((codec) => !_hlsFmp4AudioCodecs.contains(codec))
+      .join(',');
+
+  /// The highest rate the EAC3 encoder that bridge uses will open at.
+  static const int _bridgedAudioMaxSampleRate = 48000;
+
   static const List<String> _audioDirectPlayContainers = <String>[
     'aac',
     'ac3',
@@ -125,6 +134,10 @@ class DeviceProfileBuilder {
     // locally. Detection never subtracts from the advertised list.
     bool universalAudioDecode = false,
     bool playerDecodesTrueHd = true,
+    // Whether the player can decode a stereo TrueHD track. One that can't asks
+    // the server for surround TrueHD only, so the rest transcodes instead of
+    // reaching a decoder that stalls on it.
+    bool playerDecodesStereoTrueHd = true,
     MaxVideoResolution maxResolution = MaxVideoResolution.auto,
     bool pgsDirectPlay = true,
     bool assDirectPlay = true,
@@ -163,6 +176,7 @@ class DeviceProfileBuilder {
     bool supportsAv1DolbyVision = false,
     bool supportsAv1Hdr10 = false,
     bool supportsAv1Hdr10Plus = false,
+    bool rendersAv1DoviViaHdr10BaseLayer = false,
     bool supportsVc1 = false,
     bool supportsMpeg4 = false,
     int maxResolutionAvcWidth = 0,
@@ -422,6 +436,8 @@ class DeviceProfileBuilder {
     final codecProfiles = _codecProfiles(
       maxAudioChannels: advertisedMaxChannels,
       passthroughAudioCodecs: passthroughAudioCodecs,
+      universalAudioDecode: universalAudioDecode,
+      playerDecodesStereoTrueHd: playerDecodesStereoTrueHd,
       forceStereo: limitStereoDirectPlay,
       maxResolution: maxResolution,
       supportsAvc: effectiveSupportsAvc,
@@ -440,6 +456,7 @@ class DeviceProfileBuilder {
       supportsAv1DolbyVision: effectiveSupportsAv1DolbyVision,
       supportsAv1Hdr10: effectiveSupportsAv1Hdr10,
       supportsAv1Hdr10Plus: effectiveSupportsAv1Hdr10Plus,
+      rendersAv1DoviViaHdr10BaseLayer: rendersAv1DoviViaHdr10BaseLayer,
       supportsVc1: effectiveSupportsVc1,
       // Passed straight through, since the browser capability probe has nothing to say
       // about MPEG-4 Part 2 for the web build to override this with.
@@ -929,6 +946,22 @@ class DeviceProfileBuilder {
         .toList(growable: false);
   }
 
+  /// Every audio codec the HLS transcoding profiles offer the server, with the
+  /// fallback preference first. Built from the same lists the device profile
+  /// sends, so the settings screen can't drift from what the server sees.
+  static List<String> transcodeTargetAudioCodecs({
+    required AudioFallbackCodec fallbackCodec,
+    required bool forAvFoundation,
+  }) => _hlsAudioCodecsForFallback(
+    effectiveAudioFallbackCodec: fallbackCodec,
+    allowedAudioCodecs: _supportedAudioCodecs,
+    containerAudioCodecs: const [
+      ..._hlsMpegTsAudioCodecs,
+      ..._hlsFmp4AudioCodecs,
+    ],
+    forAvFoundation: forAvFoundation,
+  );
+
   static bool _isAudioCodecAllowed({
     required String codec,
     required AudioCapabilityProfile capabilityProfile,
@@ -1023,6 +1056,8 @@ class DeviceProfileBuilder {
   static List<Map<String, dynamic>> _codecProfiles({
     required int maxAudioChannels,
     required Set<String> passthroughAudioCodecs,
+    required bool universalAudioDecode,
+    required bool playerDecodesStereoTrueHd,
     required bool forceStereo,
     required MaxVideoResolution maxResolution,
     required bool supportsAvc,
@@ -1041,6 +1076,7 @@ class DeviceProfileBuilder {
     required bool supportsAv1DolbyVision,
     required bool supportsAv1Hdr10,
     required bool supportsAv1Hdr10Plus,
+    required bool rendersAv1DoviViaHdr10BaseLayer,
     required bool supportsVc1,
     required bool supportsMpeg4,
     required int maxResolutionAvcWidth,
@@ -1353,7 +1389,15 @@ class DeviceProfileBuilder {
         // same way as DOVIWithHDR10 rather than always rejecting it.
         unsupportedRangeTypesAv1.add('DOVI_INVALID');
       }
-      if (!supportsAv1Hdr10Plus) {
+      // The HDR10+ dynamic metadata degrades to HDR10 on its own, so a player
+      // that renders the profile 10 base layer needs AV1 HDR10 and nothing
+      // more. That is only true where the backend says so: a decoder that
+      // engages Dolby Vision on this stream instead has to keep the stricter
+      // gate, which is what every non-AetherEngine backend still gets.
+      final av1DoviHdr10PlusDirectPlayable =
+          supportsAv1Hdr10Plus ||
+          (rendersAv1DoviViaHdr10BaseLayer && supportsAv1Hdr10);
+      if (!av1DoviHdr10PlusDirectPlayable) {
         unsupportedRangeTypesAv1.add('DOVI_WITH_HDR10_PLUS');
       }
     }
@@ -1496,6 +1540,43 @@ class DeviceProfileBuilder {
         ],
       ),
     );
+
+    // Past the bridge encoder's ceiling it refuses to open and the player has
+    // nothing left to fall back to, so the track direct plays as silence.
+    // Saying so here is what gets the server to re-encode it instead.
+    if (universalAudioDecode) {
+      profiles.add(
+        _codecProfile(
+          type: 'VideoAudio',
+          codec: _bridgedAudioCodecs,
+          conditions: <Map<String, dynamic>>[
+            _condition(
+              condition: 'LessThanEqual',
+              property: 'AudioSampleRate',
+              value: '$_bridgedAudioMaxSampleRate',
+            ),
+          ],
+        ),
+      );
+    }
+
+    // A route that bitstreams TrueHD never decodes it, so it keeps stereo.
+    if (!playerDecodesStereoTrueHd &&
+        !passthroughAudioCodecs.contains('truehd')) {
+      profiles.add(
+        _codecProfile(
+          type: 'VideoAudio',
+          codec: 'truehd',
+          conditions: <Map<String, dynamic>>[
+            _condition(
+              condition: 'GreaterThanEqual',
+              property: 'AudioChannels',
+              value: '3',
+            ),
+          ],
+        ),
+      );
+    }
 
     if (forceStereo) {
       profiles.add(

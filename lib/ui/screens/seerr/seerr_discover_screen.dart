@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -22,6 +21,7 @@ import '../../widgets/media_card.dart';
 import '../../widgets/navigation_layout.dart';
 import '../../widgets/fullscreen_backdrop_switcher.dart';
 import '../../../l10n/app_localizations.dart';
+import '../../util/error_message.dart';
 import '../../widgets/focus/request_initial_focus.dart';
 import '../../widgets/focus/locked_focus_row.dart';
 import '../../widgets/seerr/seerr_shortcuts.dart';
@@ -30,6 +30,9 @@ import '../../widgets/horizontal_scroll_section.dart';
 import '../../widgets/quick_return_wrapper.dart';
 import '../../../util/seerr_genre_art.dart';
 import '../../widgets/seerr/seerr_genre_label.dart';
+import '../../widgets/skeleton/skeleton_home_row.dart';
+import '../../widgets/skeleton/skeleton_shimmer.dart';
+import '../../widgets/offline_aware_image.dart';
 
 const _tmdbPosterBase = 'https://image.tmdb.org/t/p/w300';
 const _tmdbBackdropBase = 'https://image.tmdb.org/t/p/w1280';
@@ -380,11 +383,44 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
     );
   }
 
+  Widget _buildSkeleton({double rowLeftInset = 0.0}) {
+    final desktopScale = GetIt.instance<UserPreferences>()
+        .get(UserPreferences.desktopUiScale)
+        .scaleFactor;
+    final cardWidth = 130.0 * desktopScale;
+    final imageHeight = 195.0 * desktopScale;
+    return SkeletonShimmer(
+      child: ListView(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: EdgeInsets.only(left: rowLeftInset, top: 16, bottom: 32),
+        children: [
+          for (int i = 0; i < 4; i++) ...[
+            Padding(
+              padding: EdgeInsets.fromLTRB(20 * desktopScale, 16, 20 * desktopScale, 8),
+              child: SkeletonBox(
+                width: 140.0 + (i * 25),
+                height: 18,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            SkeletonHomeRow(
+              cardWidth: cardWidth,
+              imageHeight: imageHeight,
+              leadingPadding: 20 * desktopScale,
+              itemSpacing: 12 * desktopScale,
+            ),
+            const SizedBox(height: 16),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildContent({double rowLeftInset = 0.0}) {
     final l10n = AppLocalizations.of(context);
     final vm = _viewModel;
     if (vm == null) {
-      return const Center(child: CircularProgressIndicator());
+      return _buildSkeleton(rowLeftInset: rowLeftInset);
     }
 
     if (vm.error != null && vm.rows.isEmpty) {
@@ -393,7 +429,7 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              vm.error!,
+              describeError(vm.error!, AppLocalizations.of(context)),
               style: TextStyle(
                 color: AppColorScheme.onSurface.withValues(alpha: 0.7),
               ),
@@ -410,7 +446,7 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
 
     final rows = vm.rows;
     if (rows.isEmpty && vm.isLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return _buildSkeleton(rowLeftInset: rowLeftInset);
     }
 
     _firstFocusableVisibleIndex = -1;
@@ -584,6 +620,15 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
         .get(UserPreferences.desktopUiScale)
         .scaleFactor;
 
+    final upwardGrowth = cardExpansion && !PlatformDetection.useMobileUi
+        ? (195.0 * (MediaCard.focusScale - 1.0))
+        : 0.0;
+    final itemSpacing = cardExpansion && !PlatformDetection.useMobileUi
+        ? MediaCard.focusGap(130.0, minimum: 12.0 * desktopScale)
+        : 12.0 * desktopScale;
+    final rowHeight = (260.0 * desktopScale) + upwardGrowth;
+    final topPadding = (5.0 * desktopScale) + upwardGrowth;
+
     final focusKey = _getRowKey(rowIndex);
     final child = NotificationListener<ScrollNotification>(
       onNotification: (notification) {
@@ -601,12 +646,12 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
         hubKey: 'seerr_discover_media_${rowIndex}_${row.type.name}',
         controller: _getRowScroll(rowIndex),
         itemExtent: 130,
-        itemSpacing: 12 * desktopScale,
-        height: 260 * desktopScale,
+        itemSpacing: itemSpacing,
+        height: rowHeight,
         clipBehavior: Clip.none,
         padding: EdgeInsets.fromLTRB(
           20 * desktopScale,
-          5 * desktopScale,
+          topPadding,
           20 * desktopScale,
           5 * desktopScale,
         ),
@@ -651,7 +696,7 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
 
     return _buildRowContainer(
       type: row.type,
-      rowHeight: 260,
+      rowHeight: 260.0 + (upwardGrowth / desktopScale),
       isLoading: row.isLoading && row.items.isEmpty,
       hasItems: row.items.isNotEmpty,
       scrollController: _getRowScroll(rowIndex),
@@ -1206,7 +1251,7 @@ class _GenreCardState extends State<_GenreCard> with FocusStateMixin {
                 fit: StackFit.expand,
                 children: [
                   if (widget.imageUrl != null)
-                    CachedNetworkImage(
+                    OfflineAwareImage(
                       imageUrl: widget.imageUrl!,
                       fit: BoxFit.cover,
                       errorWidget: (_, _, _) => Container(
@@ -1217,7 +1262,7 @@ class _GenreCardState extends State<_GenreCard> with FocusStateMixin {
                     Container(color: AppColorScheme.surfaceVariant),
                   // A genre card carries its name across the middle. A
                   // shortcut keeps the bottom gradient its lower-left label
-                  // needs, under the icon it shows instead.
+                  // needs, with the icon positioned inline with the text.
                   if (widget.icon != null)
                     Container(
                       decoration: BoxDecoration(
@@ -1231,14 +1276,6 @@ class _GenreCardState extends State<_GenreCard> with FocusStateMixin {
                         ),
                       ),
                     ),
-                  if (widget.icon != null)
-                    Center(
-                      child: Icon(
-                        widget.icon,
-                        size: 32,
-                        color: AppColorScheme.onSurface.withValues(alpha: 0.8),
-                      ),
-                    ),
                   if (widget.icon == null)
                     SeerrGenreLabel(name: widget.name)
                   else
@@ -1246,21 +1283,41 @@ class _GenreCardState extends State<_GenreCard> with FocusStateMixin {
                       bottom: 8,
                       left: 8,
                       right: 8,
-                      child: Text(
-                        widget.name,
-                        style: TextStyle(
-                          color: AppColorScheme.onSurface,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                          shadows: [
-                            Shadow(
-                              blurRadius: 4,
-                              color: AppColorScheme.scrim,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Icon(
+                            widget.icon,
+                            size: 16,
+                            color: AppColorScheme.onSurface,
+                            shadows: [
+                              Shadow(
+                                blurRadius: 4,
+                                color: AppColorScheme.scrim,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              widget.name,
+                              style: TextStyle(
+                                color: AppColorScheme.onSurface,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                                shadows: [
+                                  Shadow(
+                                    blurRadius: 4,
+                                    color: AppColorScheme.scrim,
+                                  ),
+                                ],
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                          ],
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ),
                     ),
                   if (effectiveFocused)
@@ -1357,7 +1414,7 @@ class _LogoCardState extends State<_LogoCard> with FocusStateMixin {
               child: widget.logoUrl != null
                   ? Padding(
                       padding: const EdgeInsets.all(16),
-                      child: CachedNetworkImage(
+                      child: OfflineAwareImage(
                         imageUrl: widget.logoUrl!,
                         fit: BoxFit.contain,
                         errorWidget: (_, _, _) => Center(

@@ -4,6 +4,25 @@ Based on the existing Moonfin-Core checkout at upstream commit
 f18c45b1fbf9b63871b4f93237179f9706154763, including the local SpeshTV changes.
 Upstream: https://github.com/Moonfin-Client/Moonfin-Core
 
+## Moonfin 2.6 Upgrade
+
+The upgrade/moonfin-2.6.0 branch merges official tag 2.6.0
+(b86bbe6021eff5befdf311134bf3e831c032f21f). The speshmedia-android branch
+retains the working 2.5.1 checkpoint c9061b6; nothing is pushed upstream.
+The upgrade uses an isolated Flutter 3.47.2 SDK in .toolchains and mobile
+version 2.6.0, build 30000154. It preserves the SpeshMedia application ID.
+
+The customized Live TV guide/player and search view model are retained rather
+than replaced by upstream's redesigned versions. This is a customized 2.6
+integration, not a claim that every upstream guide/search behavior is present.
+Upstream carousel callers are adapted to the retained guide interface.
+The Android launcher icon uses the existing teal SpeshTV television mark,
+including adaptive, round and monochrome resources.
+Full lib analysis reports no errors (124 warnings/style notices remain).
+104 selected regression tests pass on Flutter 3.47.2, including Kids Mode,
+custom guide, Android-only native startup, search and progress cache refresh.
+Device playback and HDR validation are still required after APK installation.
+
 The original LICENSE and copyright notices are preserved. This fork follows
 the upstream GPLv2 license. Distributions must include corresponding source
 and the required license notices; do not publish an APK without its source.

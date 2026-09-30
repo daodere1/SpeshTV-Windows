@@ -1,3 +1,5 @@
+import 'letterbox_crop.dart';
+
 enum SubtitleRendererMode { native, assOverlay }
 
 /// A caption track the player found inside the video itself, like the CEA-608
@@ -71,6 +73,13 @@ abstract class PlayerBackend {
   Stream<bool> get bufferingStream;
   Stream<bool> get completedStream;
   Stream<Map<String, dynamic>>? get errorStream => null;
+
+  /// A correction the backend applies to sideloaded subtitles on its own,
+  /// in seconds, positive meaning later. It sits on top of the delay the
+  /// user set and is shown next to it, never added into it. Only a backend
+  /// that measures one provides it.
+  double get subtitleAutoOffsetSeconds => 0.0;
+  Stream<double>? get subtitleAutoOffsetStream => null;
 
   Map<String, dynamic> getDeviceProfile({bool useProgressiveTranscode = false});
 
@@ -148,6 +157,34 @@ abstract class PlayerBackend {
   /// the video turn up part way through playback, so a menu built when the
   /// stream started has to be rebuilt when this fires.
   Stream<void> get tracksChangedStream => const Stream.empty();
+
+  /// How long this player usually takes to render again after a seek. Only
+  /// paces how often SyncPlay may correct: the cost it actually compensates
+  /// for is measured from the player, never taken from here.
+  Duration get typicalSeekLatency => const Duration(milliseconds: 1500);
+
+  /// The longest a seek on this player may plausibly take. SyncPlay treats a
+  /// gap larger than this as the client being genuinely late rather than as
+  /// the seek still landing, and stops waiting on a seek that exceeds it.
+  /// Backends that restart a transcode to seek need this much higher than the
+  /// in-buffer seek a desktop player does.
+  Duration get maxSeekLatency => const Duration(seconds: 8);
+
+  /// Whether the rate can be changed a few percent mid-playback without the
+  /// audio dropping or glitching. mpv and ExoPlayer stretch audio in place;
+  /// the AVPlayer-based engines rebuild the audio pipeline on every rate write
+  /// and cannot pass Dolby audio through at anything but 1x. SyncPlay only
+  /// nudges the rate where this is true, and holds the player instead where
+  /// it is not.
+  bool get supportsSmoothRateChange => true;
+
+  /// Detect encoded letterbox and crop it. Cover-zoom is not this.
+  ///
+  /// Desktop libmpv ships a cropper. Media3 / Aether / Tizen / HTML return
+  /// [UnsupportedLetterboxCropper] until they implement [LetterboxCropper].
+  LetterboxCropper get letterboxCropper => const UnsupportedLetterboxCropper();
+
+  bool get supportsLetterboxCrop => letterboxCropper.isSupported;
 
   void dispose();
 }

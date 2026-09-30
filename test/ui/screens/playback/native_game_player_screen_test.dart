@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -195,6 +196,8 @@ class _FakeNativeGamePlayer implements NativeGamePlayer {
 
   /// The settings the screen resolved for this game and handed to the core.
   Map<String, String>? loadOptions;
+  bool? hardwareRenderingEnabled;
+  List<GameCoreOption> options = const [];
 
   @override
   Future<GameLoadInfo> load({
@@ -205,8 +208,10 @@ class _FakeNativeGamePlayer implements NativeGamePlayer {
     required String saveDir,
     required String gameId,
     Map<String, String>? options,
+    bool hardwareRenderingEnabled = true,
   }) async {
     loadOptions = options;
+    this.hardwareRenderingEnabled = hardwareRenderingEnabled;
     return const GameLoadInfo(
       textureId: 7,
       width: 256,
@@ -247,7 +252,12 @@ class _FakeNativeGamePlayer implements NativeGamePlayer {
   @override
   Future<void> setInput(int port, int mask) async {}
   @override
-  Future<List<GameCoreOption>> getOptions() async => const [];
+  Future<List<GameCoreOption>> getOptions() async => options;
+  @override
+  Future<List<GameCoreOption>> probeOptions(
+    String corePath,
+    String systemDir,
+  ) async => const [];
   @override
   Future<void> setOption(String id, String value) async {}
 
@@ -283,6 +293,22 @@ class _PopCountingObserver extends NavigatorObserver {
     pops++;
     super.didPop(route, previousRoute);
   }
+}
+
+String? _highlightedOverlayRowLabel(WidgetTester tester) {
+  for (final container in tester.widgetList<Container>(find.byType(Container))) {
+    final decoration = container.decoration;
+    if (decoration is BoxDecoration && decoration.color == Colors.white) {
+      final labels = find.descendant(
+        of: find.byWidget(container),
+        matching: find.byType(Text),
+      );
+      if (labels.evaluate().isNotEmpty) {
+        return (labels.first.evaluate().single.widget as Text).data;
+      }
+    }
+  }
+  return null;
 }
 
 void main() {
@@ -431,6 +457,61 @@ void main() {
     },
   );
 
+  group('the table handed to the native side', () {
+    // This payload IS what the core plays with. The mapping menu resolves the
+    // same way, so a regression here is invisible in the UI -- the menu would
+    // still show the right buttons while the game used the wrong ones.
+    const pad = 'android-p1';
+    const gameId = 'hydro-thunder';
+    final mapping = NativeControllerMapping.empty
+        .withBinding(96, RetroPadButton.a)
+        .withBindingForGame(gameId, 190, RetroPadButton.a)
+        .withControllerType('fbneo', 5)
+        .withSnap(gameId, StickSnapMode.fourWay);
+
+    test('sends the current game own table, not the default', () {
+      final sent =
+          jsonDecode(controllerMappingsPayload({pad: mapping}, gameId))
+              as Map<String, dynamic>;
+
+      expect(sent[pad], {'190': RetroPadButton.a.retroPadIndex});
+    });
+
+    test('sends the default for a game that has not diverged', () {
+      final sent =
+          jsonDecode(controllerMappingsPayload({pad: mapping}, 'burgertime'))
+              as Map<String, dynamic>;
+
+      expect(sent[pad], {'96': RetroPadButton.a.retroPadIndex});
+    });
+
+    test('sends a table for every connected profile', () {
+      final sent =
+          jsonDecode(
+                controllerMappingsPayload({
+                  pad: mapping,
+                  'android-p2': NativeControllerMapping.empty
+                      .withBindingForGame(gameId, 191, RetroPadButton.b),
+                }, gameId),
+              )
+              as Map<String, dynamic>;
+
+      expect(sent.keys, containsAll(<String>[pad, 'android-p2']));
+      expect(sent['android-p2'], {'191': RetroPadButton.b.retroPadIndex});
+    });
+
+    test('emits keycodes only, no metadata the parser would skip', () {
+      final sent =
+          jsonDecode(controllerMappingsPayload({pad: mapping}, gameId))
+              as Map<String, dynamic>;
+
+      final keys = (sent[pad] as Map<String, dynamic>).keys;
+      expect(keys.every((key) => int.tryParse(key) != null), isTrue);
+      expect(keys, isNot(contains('controllerTypes')));
+      expect(keys, isNot(contains('snapByGame')));
+    });
+  });
+
   test('a rebound trigger resolves to the button it was bound to', () {
     final mapping = NativeControllerMapping(const {
       1006: RetroPadButton.a,
@@ -520,6 +601,7 @@ void main() {
                 gameId: 'game1',
                 core: 'snes',
                 startFresh: true,
+                hardwareRenderingEnabled: false,
                 player: player,
               ),
             ),
@@ -560,6 +642,7 @@ void main() {
         // (backed by the fake GamesApi/player above). Now fail the session
         // the way a core crash does.
         expect(find.byType(Texture), findsOneWidget);
+        expect(player.hardwareRenderingEnabled, isFalse);
 
         player.emitError('core crashed');
         await tester.pump();
@@ -678,6 +761,87 @@ void main() {
             'warning is about',
       );
       expect(find.byType(NativeGamePlayerScreen), findsOneWidget);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('returning from an emulator option keeps and centers its cursor',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      player.options = [
+        for (var i = 0; i < 8; i++)
+          GameCoreOption(
+            id: 'option-$i',
+            label: 'Option $i',
+            current: 'Default',
+            choices: const ['Default', 'Alternate'],
+          ),
+      ];
+      final router = GoRouter(
+        initialLocation: '/game',
+        routes: [
+          GoRoute(
+            path: '/game',
+            builder: (context, state) => NativeGamePlayerScreen(
+              libraryId: 'lib1',
+              gameId: 'game1',
+              core: 'snes',
+              startFresh: true,
+              player: player,
+            ),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp.router(
+          routerConfig: router,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+        ),
+      );
+      for (var i = 0; i < 60 && find.byType(Texture).evaluate().isEmpty; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(find.byType(Texture), findsOneWidget);
+
+      player.emitMenuPressed();
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('Emulator settings'),
+        200,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Emulator settings'));
+      await tester.pumpAndSettle();
+
+      for (var i = 0; i < 6; i++) {
+        player.emitButton(5, true);
+        await tester.pump();
+      }
+      expect(_highlightedOverlayRowLabel(tester), startsWith('Option 6:'));
+
+      player.emitButton(0, true);
+      await tester.pumpAndSettle();
+      expect(find.text('Alternate'), findsOneWidget);
+
+      player.emitButton(8, true);
+      await tester.pumpAndSettle();
+
+      expect(_highlightedOverlayRowLabel(tester), startsWith('Option 6:'));
+      final position = tester
+          .state<ScrollableState>(find.byType(Scrollable).last)
+          .position;
+      final expected = (6 * 58 - (position.viewportDimension - 58) / 2)
+          .clamp(position.minScrollExtent, position.maxScrollExtent)
+          .toDouble();
+      expect(position.pixels, closeTo(expected, 1));
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }
@@ -1155,12 +1319,11 @@ void main() {
       player.emitMenuPressed();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
-      await tester.scrollUntilVisible(
-        find.text('Controller mapping'),
-        200,
-        scrollable: find.byType(Scrollable).last,
-      );
-      await tester.tap(find.text('Controller mapping'));
+      for (var i = 0; i < 7; i++) {
+        player.emitButton(5, true);
+        await tester.pump();
+      }
+      player.emitButton(0, true);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
 
@@ -1182,13 +1345,24 @@ void main() {
       player.emitButton(0, true); // confirm the highlighted row
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
+      await tester.pumpAndSettle();
 
       expect(
         find.text('Leave with Player 1 vacant'),
         findsNothing,
         reason: 'confirming must resolve the dialog, not leave it stranded',
       );
-      expect(find.text('Resume'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.text('Controller mapping')).style?.color,
+        Colors.black,
+      );
+      final position = tester
+          .state<ScrollableState>(find.byType(Scrollable).last)
+          .position;
+      final expected = (7 * 58 - (position.viewportDimension - 58) / 2)
+          .clamp(position.minScrollExtent, position.maxScrollExtent)
+          .toDouble();
+      expect(position.pixels, closeTo(expected, 1));
       expect(
         find.byType(Texture),
         findsOneWidget,

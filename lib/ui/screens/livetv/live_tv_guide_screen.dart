@@ -780,8 +780,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
           genreLabel: program == null ? null : epgGenreFor(program).label,
           synopsis: program?.overview,
           channelLogoUrl: logoUrl,
-          channelName: channel?.name,
-          channelNumber: channel?.number,
           isLive: isLive,
           apple: _apple,
         );
@@ -1935,15 +1933,13 @@ class _GuideProgramRowState extends State<_GuideProgramRow> {
           },
           builder: (focused) => EpgProgramCell(
             title: program.name,
-            timeLabel:
-                '${widget.formatTime(program.startDate)} - ${widget.formatTime(program.endDate)}',
+            rating: program.officialRating,
             genre: epgGenreFor(program),
             isLive: isLive,
             progress: isLive ? program.progressAt(now) : 0,
             hasTimer: program.hasTimer,
             focused: focused,
             apple: widget.apple,
-            showMeta: width > 80,
           ),
         ),
       ),

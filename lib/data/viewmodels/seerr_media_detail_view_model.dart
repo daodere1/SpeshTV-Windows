@@ -109,11 +109,17 @@ class SeerrQualityStatus {
         .toList();
   }
 
+  /// Seasons an open request already covers.
+  ///
+  /// A completed request isn't one of them. It says the season arrived once,
+  /// not that it is still there, so a season that has since been removed can
+  /// be requested again.
   Set<int> get requestedSeasons {
     final seasons = <int>{};
     for (final r in requests) {
       if (r.status == SeerrRequest.statusDeclined ||
-          r.status == SeerrRequest.statusFailed) {
+          r.status == SeerrRequest.statusFailed ||
+          r.status == SeerrRequest.statusCompleted) {
         continue;
       }
       if (r.seasons != null) {
@@ -128,7 +134,8 @@ class SeerrQualityStatus {
   /// Seasons the library already holds for this track, fully or partially.
   Set<int> get availableSeasons => {
         for (final s in seasonAvailability)
-          if (((is4k ? s.status4k : s.status) ?? 0) >= 4) s.seasonNumber,
+          if (SeerrMediaStatus.isAvailable(is4k ? s.status4k : s.status))
+            s.seasonNumber,
       };
 
   /// Seasons the request sheet may not offer: already in the library or
@@ -174,7 +181,7 @@ class SeerrQualityStatus {
 
 class SeerrMediaDetailState {
   final bool isLoading;
-  final String? error;
+  final Object? error;
   final SeerrMovieDetails? movie;
   final SeerrTvDetails? tv;
   final List<SeerrDiscoverItem> similar;
@@ -300,7 +307,7 @@ class SeerrMediaDetailState {
 
   SeerrMediaDetailState copyWith({
     bool? isLoading,
-    String? error,
+    Object? error,
     SeerrMovieDetails? movie,
     SeerrTvDetails? tv,
     List<SeerrDiscoverItem>? similar,
@@ -341,6 +348,9 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
   SeerrMediaDetailState _state = const SeerrMediaDetailState();
   SeerrMediaDetailState get state => _state;
 
+  bool _relatedLoadComplete = false;
+  bool get relatedLoadComplete => _relatedLoadComplete;
+
   // Whether the server has a default 4K Radarr or Sonarr. These start true so
   // that until the fetch lands, or if it fails, 4K stays gated on permission
   // alone rather than disappearing.
@@ -348,11 +358,22 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
   bool _series4kEnabled = true;
 
   Timer? _downloadPollTimer;
+  bool _isDisposed = false;
 
   SeerrMediaDetailViewModel(this._repo, this._prefs);
 
   @override
+  void notifyListeners() {
+    if (_isDisposed) {
+      return;
+    }
+
+    super.notifyListeners();
+  }
+
+  @override
   void dispose() {
+    _isDisposed = true;
     _downloadPollTimer?.cancel();
     super.dispose();
   }
@@ -438,6 +459,8 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
   }
 
   Future<void> load(String itemId, String mediaType, {String? title}) async {
+    _relatedLoadComplete = false;
+
     _state = const SeerrMediaDetailState(isLoading: true);
     notifyListeners();
 
@@ -478,7 +501,10 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
         tmdbId = match.id;
         resolvedMediaType = match.mediaType ?? mediaType;
       } else {
-        final parsed = int.tryParse(itemId);
+        // Only the media kinds. A person id reaching here is a routing
+        // mistake, and stripping it would quietly load an unrelated title.
+        final cleanId = itemId.replaceAll(RegExp(r'^tmdb:(?:movie:|tv:)?'), '');
+        final parsed = int.tryParse(cleanId);
         if (parsed == null) {
           throw Exception('Invalid media ID');
         }
@@ -527,7 +553,7 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
         }
       }
     } catch (e) {
-      _state = SeerrMediaDetailState(error: e.toString());
+      _state = SeerrMediaDetailState(error: e);
     }
     notifyListeners();
     _syncDownloadPolling();
@@ -549,8 +575,10 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
         recommendations:
             futures[1].results.where((i) => !i.isBlacklisted).toList(),
       );
-      notifyListeners();
     } catch (_) {
+    } finally {
+      _relatedLoadComplete = true;
+      notifyListeners();
     }
   }
 

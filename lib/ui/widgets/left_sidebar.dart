@@ -14,6 +14,7 @@ import '../../auth/repositories/user_repository.dart';
 import '../../data/models/aggregated_library.dart';
 import '../../data/repositories/multi_server_repository.dart';
 import '../../data/repositories/user_views_repository.dart';
+import '../../data/services/library_scope_service.dart';
 import '../../data/services/plugin_sync_service.dart';
 import '../../preference/preference_constants.dart';
 import '../../preference/seerr_preferences.dart';
@@ -22,6 +23,7 @@ import '../../l10n/app_localizations.dart';
 import '../../util/clock_format.dart';
 import '../../util/focus/dpad_keys.dart';
 import '../../util/game_library.dart';
+import '../../util/live_tv_library.dart';
 import '../../util/overlay_color_palette.dart';
 import '../../util/platform_detection.dart';
 import '../navigation/destinations.dart';
@@ -29,6 +31,8 @@ import '../navigation/home_refresh_bus.dart';
 import '../navigation/route_lifecycle_observer.dart';
 import 'navigation_layout.dart';
 import 'settings/settings_panel.dart';
+import '../screens/downloads/downloads_panel.dart';
+import 'downloads_nav_slot.dart';
 import '../screens/syncplay/syncplay_screen.dart';
 import '../screens/settings/settings_side_panel.dart';
 import 'seerr_icons.dart';
@@ -38,11 +42,11 @@ import 'unread_badge.dart';
 import 'shuffle_overlay.dart';
 import 'user_menu_dialog.dart';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:playback_core/playback_core.dart';
 import '../../data/models/aggregated_item.dart';
 import '../../data/services/media_server_client_factory.dart';
 import '../navigation/app_router.dart';
+import 'offline_aware_image.dart';
 import 'adaptive/sf_symbol.dart';
 
 const _kExpandedWidthDesktop = 240.0;
@@ -149,6 +153,7 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
         NavigationLayout.focusNavbarAvatarNotifier.value;
     NavigationLayout.focusNavbarNotifier.value = _focusNavbarCallback;
     NavigationLayout.focusNavbarAvatarNotifier.value = _focusAvatarCallback;
+    NavigationLayout.chromeFocusRoots.add(_sidebarFocus);
     _updateClock();
     _clockTimer = Timer.periodic(
       const Duration(seconds: 30),
@@ -214,6 +219,7 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
       NavigationLayout.focusNavbarAvatarNotifier.value =
           _previousFocusAvatarCallback;
     }
+    NavigationLayout.chromeFocusRoots.remove(_sidebarFocus);
     FocusManager.instance.removeListener(_trackPreviousFocus);
     if (PlatformDetection.isTV || (PlatformDetection.isDesktop || (PlatformDetection.isWeb && !PlatformDetection.useMobileUi))) {
       _sidebarFocus.removeListener(_onSidebarFocusNodeChanged);
@@ -304,16 +310,11 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
 
       unawaited(GetIt.instance<GameLibraryRegistry>().refresh());
 
-      List<AggregatedLibrary> filtered = libs;
-      if (useMultiServer) {
-        try {
-          final config = await _viewsRepo.getUserConfiguration();
-          final excluded = config.myMediaExcludes.toSet();
-          if (excluded.isNotEmpty) {
-            filtered = libs.where((lib) => !excluded.contains(lib.id)).toList();
-          }
-        } catch (_) {}
-      }
+      final filtered = useMultiServer
+          ? await GetIt.instance<LibraryScopeService>().withoutHiddenLibraries(
+              libs,
+            )
+          : libs;
 
       if (mounted && !_librariesEqual(_libraries, filtered)) {
         setState(() => _libraries = filtered);
@@ -328,6 +329,18 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
     }
     return true;
   }
+
+  // Kids Mode sends /live-tv back to home, so the guide button would only be a
+  // dead end.
+  bool get _showLiveTvButton =>
+      !_kidsMode &&
+      _prefs.get(UserPreferences.showLiveTvButton) &&
+      _libraries.any(isLiveTvLibrary);
+
+  List<AggregatedLibrary> get _navLibraries =>
+      librariesForNav(_libraries, _showLiveTvButton, hideLiveTv: _kidsMode);
+
+  bool get _kidsMode => _prefs.get(UserPreferences.kidsModeEnabled);
 
   Color _overlayColor() {
     return OverlayColorPalette.resolveColor(
@@ -490,6 +503,7 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
   }
 
   void _restoreFocusOutsideSidebar() {
+    if (NavigationLayout.focusDetailsPlayButton()) return;
     final previous = _previousFocus;
     if (previous != null && _isLaidOutFocusNode(previous)) {
       previous.requestFocus();
@@ -806,6 +820,27 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
     );
   }
 
+  /// The downloads row, or nothing while there is nothing saved. The nav
+  /// colour is passed in so the caller decides which palette slot it takes.
+  Widget _downloadsSidebarItem({
+    required Color? navColor,
+    required String label,
+  }) {
+    return DownloadsNavSlot(
+      builder: (context) => _SidebarItem(
+        key: const ValueKey('sidebar-downloads'),
+        icon: Icons.download_for_offline,
+        label: label,
+        baseColor: navColor,
+        showLabel: _showLabels,
+        onPressed: () {
+          _onNavigate();
+          showDownloadsDialog(context);
+        },
+      ),
+    );
+  }
+
   /// The messages row, or nothing when there is nothing to show. The nav colour
   /// is passed in so the caller decides which palette slot it takes.
   Widget _serverMessagesSidebarItem({
@@ -837,9 +872,16 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
     final showShuffle = _prefs.get(UserPreferences.showShuffleButton);
     final showGenres = _prefs.get(UserPreferences.showGenresButton);
     final showFavorites = _prefs.get(UserPreferences.showFavoritesButton);
-    final showLibraries = _prefs.get(UserPreferences.showLibrariesInToolbar);
+    // Checked alongside the show* preferences, never written into them, since
+    // those sync and would follow the account to the parent's other devices.
+    final kidsMode = _kidsMode;
+    final showLiveTv = _showLiveTvButton;
+    final navLibraries = _navLibraries;
+    final showLibraries =
+        !kidsMode && _prefs.get(UserPreferences.showLibrariesInToolbar);
     final showFolders = _prefs.get(UserPreferences.enableFolderView);
     final showSyncPlay =
+        !kidsMode &&
         _prefs.get(UserPreferences.syncPlayEnabled) &&
         _prefs.get(UserPreferences.showSyncPlayButton);
     final seerrPrefs = GetIt.instance<SeerrPreferences>();
@@ -961,6 +1003,23 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                       context.navigateTopLevel(Destinations.allFavorites);
                     },
                   ),
+                if (showLiveTv)
+                  _SidebarItem(
+                    key: const ValueKey('sidebar-livetv'),
+                    icon: Icons.live_tv_rounded,
+                    label: l10n.liveTv,
+                    baseColor: nextMainSidebarColor(),
+                    showLabel: _showLabels,
+                    onPressed: () {
+                      _onNavigate();
+                      if (_isActive(Destinations.liveTvGuide)) {
+                        _exitSidebarToContent();
+                        return;
+                      }
+                      _markNavigationAwayFromSidebar();
+                      context.navigateTopLevel(Destinations.liveTvGuide);
+                    },
+                  ),
                 if (showFolders)
                   _SidebarItem(
                     key: const ValueKey('sidebar-folders'),
@@ -995,7 +1054,8 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                       );
                     },
                   ),
-                if (_prefs.get(UserPreferences.showSeerrButton) &&
+                if (!kidsMode &&
+                    _prefs.get(UserPreferences.showSeerrButton) &&
                     GetIt.instance<PluginSyncService>().seerrAvailable)
                   _SidebarItem(
                     key: const ValueKey('sidebar-seerr'),
@@ -1015,7 +1075,7 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                       context.navigateTopLevel(Destinations.seerrDiscover);
                     },
                   ),
-                if (showLibraries && _libraries.isNotEmpty) ...[
+                if (showLibraries && navLibraries.isNotEmpty) ...[
                   _SidebarItem(
                     key: const ValueKey('sidebar-libraries'),
                     baseColor: nextMainSidebarColor(),
@@ -1053,7 +1113,7 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                     curve: Curves.easeInOut,
                     child: _librariesExpanded
                         ? Column(
-                            children: _libraries
+                            children: navLibraries
                                 .map(
                                   (lib) => _SidebarLibraryItem(
                                     key: ObjectKey(lib.id),
@@ -1063,34 +1123,14 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                                     onPressed: () {
                                       _onNavigate();
                                       _markNavigationAwayFromSidebar();
-                                      if (lib.collectionType == 'music') {
-                                        context.navigateTopLevel(
-                                          '/music/${lib.id}',
-                                        );
-                                      } else if (lib.collectionType ==
-                                              'books' ||
-                                          lib.collectionType == 'audiobooks') {
-                                        context.navigateTopLevel(
-                                          Destinations.bookLibrary(
-                                            lib.id,
-                                            collectionType: lib.collectionType,
-                                          ),
-                                        );
-                                      } else if (lib.collectionType ==
-                                          'livetv') {
-                                        context.navigateTopLevel(
-                                          Destinations.liveTvGuide,
-                                        );
-                                      } else {
-                                        context.navigateTopLevel(
-                                          gameOrLibraryRoute(
-                                            lib.id,
-                                            lib.collectionType,
-                                            lib.name,
-                                            serverId: lib.serverId,
-                                          ),
-                                        );
-                                      }
+                                      context.navigateTopLevel(
+                                        libraryRoute(
+                                          lib.id,
+                                          lib.collectionType,
+                                          lib.name,
+                                          serverId: lib.serverId,
+                                        ),
+                                      );
                                     },
                                   ),
                                 )
@@ -1099,13 +1139,22 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                         : const SizedBox.shrink(),
                   ),
                 ],
+                // The slot is taken here rather than inside the builder, so
+                // the rows below keep their colour whether or not anything is
+                // saved right now.
+                if (DownloadsNavSlot.isOffered())
+                  _downloadsSidebarItem(
+                    navColor: nextMainSidebarColor(),
+                    label: l10n.savedMedia,
+                  ),
                 // The slot is taken here rather than inside the builder, so the
                 // settings row keeps its colour whether or not there are any
                 // messages to show.
-                _serverMessagesSidebarItem(
-                  navColor: nextMainSidebarColor(),
-                  label: l10n.serverMessages,
-                ),
+                if (_prefs.get(UserPreferences.showServerMessagesButton))
+                  _serverMessagesSidebarItem(
+                    navColor: nextMainSidebarColor(),
+                    label: l10n.serverMessages,
+                  ),
                 _SidebarItem(
                   key: const ValueKey('sidebar-settings'),
                   icon: Icons.settings_rounded,
@@ -1232,6 +1281,12 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                 fit: BoxFit.cover,
                 width: 40,
                 height: 40,
+                // The server sends the avatar at its stored size, so decode
+                // at the painted size instead of a full bitmap per user.
+                cacheWidth: ArtworkDecode.widthFor(
+                  40,
+                  MediaQuery.devicePixelRatioOf(context),
+                ),
                 errorBuilder: (_, _, _) => fallback,
               )
             : fallback,
@@ -1738,7 +1793,7 @@ class _SidebarMusicCardState extends State<SidebarMusicCard> {
                     ),
                     child: ClipOval(
                       child: artUrl != null
-                          ? CachedNetworkImage(
+                          ? OfflineAwareImage(
                               imageUrl: artUrl,
                               fit: BoxFit.cover,
                             )
@@ -1802,7 +1857,7 @@ class _SidebarMusicCardState extends State<SidebarMusicCard> {
                     width: 48,
                     height: 48,
                     child: artUrl != null
-                        ? CachedNetworkImage(
+                        ? OfflineAwareImage(
                             imageUrl: artUrl,
                             fit: BoxFit.cover,
                           )

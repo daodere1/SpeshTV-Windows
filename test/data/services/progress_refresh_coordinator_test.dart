@@ -51,11 +51,11 @@ void main() {
     'current-user events invalidate immediately and bursts refresh once',
     () {
       scenario((clock, events, connections, coordinator, calls) {
-        events.add(UserDataChangedMessage(userId: 'other', itemIds: ['one']));
+        events.add(UserDataChangedMessage(userId: 'other', userDataList: [{'ItemId': 'one'}]));
         expect(calls, isEmpty);
         for (var i = 0; i < 5; i++) {
           events.add(
-            UserDataChangedMessage(userId: 'aabb', itemIds: ['new-item']),
+            UserDataChangedMessage(userId: 'aabb', userDataList: [{'ItemId': 'new-item'}]),
           );
         }
         expect(calls.where((c) => c == 'invalidate').length, 5);

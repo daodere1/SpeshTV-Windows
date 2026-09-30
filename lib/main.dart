@@ -20,8 +20,12 @@ import 'data/models/aggregated_item.dart';
 import 'background/watch_next_background.dart' as watch_next_bg;
 import 'data/services/carplay_service.dart';
 import 'data/services/cast/airplay_command_bridge.dart';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 
+import 'background/auto_download_background.dart';
+import 'background/auto_download_background_main.dart' as auto_download_bg;
+import 'data/services/auto_download_service.dart';
 import 'data/services/background_download_coordinator.dart';
 import 'data/services/download_notification_service.dart';
 import 'data/services/push_messaging_service.dart';
@@ -41,9 +45,11 @@ import 'playback/audio_capability_probe.dart';
 import 'playback/audio_handler.dart';
 import 'playback/codec_caps_repair.dart';
 import 'playback/device_capability_cache.dart';
+import 'playback/display_hdr_probe.dart';
 import 'playback/media_browse_service.dart';
 import 'playback/mpris_service.dart';
 import 'playback/playback_lifecycle_handler.dart';
+import 'platform/background_refresh.dart';
 import 'platform/web_runtime_config.dart';
 import 'preference/preference_constants.dart';
 import 'preference/user_preferences.dart';
@@ -52,7 +58,9 @@ import 'util/window_geometry.dart';
 import 'util/http_overrides_stub.dart'
     if (dart.library.io) 'util/http_overrides_io.dart';
 import 'util/game_core_licenses.dart';
+import 'util/device_performance.dart';
 import 'util/platform_detection.dart';
+import 'util/system_ui.dart';
 import 'util/tv_image_cache_stub.dart'
     if (dart.library.io) 'util/tv_image_cache_io.dart';
 
@@ -91,31 +99,41 @@ void _attachIosAudioRouteHandling() {
   });
 }
 
+/// What this device can afford. Its callers size themselves before dependency
+/// injection runs, so it works off [_startupPerformanceMode] rather than off
+/// UserPreferences.
+DevicePerformanceTier _resolvedTier() => resolveDevicePerformanceTierFor(
+  _startupPerformanceMode,
+  PlatformDetection.deviceMemory,
+);
+
 // The entry counts are generous on purpose: a library grid shows dozens of
 // posters at once, so a small count evicts them after about two screenfuls and
 // scrolling back re-decodes everything. maximumSizeBytes is what really bounds
 // memory here.
 void _configureImageCache() {
   final imageCache = PaintingBinding.instance.imageCache;
+  final tier = _resolvedTier();
+  void apply(int entries, int bytes) {
+    imageCache.maximumSize = entries;
+    imageCache.maximumSizeBytes = imageCacheBytesFor(tier, bytes);
+  }
+
   if (PlatformDetection.isWeb) {
-    imageCache.maximumSize = 400;
-    imageCache.maximumSizeBytes = 96 << 20;
+    apply(400, 96 << 20);
     return;
   }
   if (PlatformDetection.isMobile) {
-    imageCache.maximumSize = 400;
-    imageCache.maximumSizeBytes = 120 << 20;
+    apply(400, 120 << 20);
     return;
   }
 
   if (PlatformDetection.isTV) {
-    imageCache.maximumSize = 500;
-    imageCache.maximumSizeBytes = 96 << 20;
+    apply(500, 96 << 20);
     return;
   }
 
-  imageCache.maximumSize = 600;
-  imageCache.maximumSizeBytes = 256 << 20;
+  apply(600, 256 << 20);
 }
 
 Timer? _crashFlushDebounce;
@@ -237,6 +255,19 @@ Future<void> _applyInterfaceLayoutOverride() async {
   } catch (_) {}
 }
 
+/// The user's performance choice, read the same way and for the same reason:
+/// the tier is needed long before sign-in makes a per-user key readable, which
+/// is also why this preference is never stored per server and user.
+DevicePerformanceMode _startupPerformanceMode = DevicePerformanceMode.auto;
+
+Future<void> _readPerformanceModeOverride() async {
+  try {
+    final store = PreferenceStore();
+    await store.init();
+    _startupPerformanceMode = store.get(UserPreferences.performanceMode);
+  } catch (_) {}
+}
+
 /// Resolves whether this Android device is a TV, which decides the leanback UI
 /// and the default playback engine.
 Future<void> _detectAndSetTvMode() async {
@@ -278,11 +309,31 @@ Future<void> _seedCapabilitiesFromCache() async {
   if (audio != null) {
     PlatformDetection.setAudioCapabilities(audio);
   }
-  if (PlatformDetection.isAndroid && PlatformDetection.isTV) {
-    final hdrTypes = await DeviceCapabilityCache.readStringList(
-      DeviceCapabilityCache.displayHdrKey,
+  if (PlatformDetection.isAndroid) {
+    // Read without the build key the probe path checks. Only a firmware
+    // update can make this stale and the probe a moment later corrects it,
+    // where a launch whose probe cant answer would otherwise run on the
+    // H264 floor.
+    final codecs = await DeviceCapabilityCache.readMap(
+      DeviceCapabilityCache.codecKey,
     );
-    if (hdrTypes != null && hdrTypes.isNotEmpty) {
+    if (codecs != null) {
+      PlatformDetection.setMediaCodecCapabilities(codecs);
+    }
+  }
+  if (PlatformDetection.isAndroid) {
+    final memory = await DeviceCapabilityCache.readMap(
+      DeviceCapabilityCache.deviceMemoryKey,
+    );
+    if (memory != null) {
+      PlatformDetection.setDeviceMemory(memory);
+    }
+  }
+  if (DisplayHdrProbe.isSupported) {
+    // Null means the display has never answered. An empty list means it
+    // answered and named nothing, which is a real result worth seeding.
+    final hdrTypes = await DisplayHdrProbe.seedFromCache();
+    if (hdrTypes != null) {
       PlatformDetection.setDisplayHdrTypes(hdrTypes);
     }
   }
@@ -304,50 +355,51 @@ Future<bool> _retryOffLaunchPath(Future<bool> Function() attempt) async {
   return false;
 }
 
-/// One display probe: applies and persists a non-empty answer. Returns false
-/// on an empty one and throws when the channel does.
-Future<bool> _probeDisplayHdrOnce() async {
-  const channel = MethodChannel('org.moonfin.androidtv/platform');
-  final hdrTypes = await channel.invokeMethod<List<dynamic>>('displayHdrTypes');
-  final types = (hdrTypes ?? const [])
-      .map((value) => value.toString())
-      .toList(growable: false);
-  if (types.isEmpty) return false;
-  PlatformDetection.setDisplayHdrTypes(types);
-  unawaited(
-    DeviceCapabilityCache.writeStringList(
-      DeviceCapabilityCache.displayHdrKey,
-      types,
-    ),
-  );
-  return true;
-}
-
-Future<void> _detectAndSetDisplayCapabilities() async {
-  if (!(PlatformDetection.isAndroid && PlatformDetection.isTV)) return;
+/// How much RAM this device has. Fixed for the life of the device, so one
+/// attempt with a deadline and no retry, and a cached answer stands in when the
+/// channel cant reach the platform side. Its own try/catch matters: this runs
+/// inside a Future.wait, which gives up on every sibling the moment one throws.
+Future<void> _detectAndSetDeviceMemory() async {
+  if (!PlatformDetection.isAndroid) return;
   try {
-    if (await _probeDisplayHdrOnce()) return;
+    const channel = MethodChannel('org.moonfin.androidtv/platform');
+    final raw = await channel
+        .invokeMethod<Map<dynamic, dynamic>>('deviceMemory')
+        .timeout(const Duration(seconds: 2));
+    if (raw == null) return;
+    final memory = raw.map((key, value) => MapEntry(key.toString(), value));
+    PlatformDetection.setDeviceMemory(memory);
+    // The facts go in, never the verdict, so moving the threshold later
+    // re-decides an old device instead of reading back a stale answer.
+    unawaited(
+      DeviceCapabilityCache.writeMap(
+        DeviceCapabilityCache.deviceMemoryKey,
+        memory,
+      ),
+    );
   } catch (_) {}
-  // An empty list from a TV is a probe that ran before the display was up,
-  // not an SDR panel, so the cached seed stays in place while the retries
-  // run. Only a whole run of empty answers is believed.
-  unawaited(_retryDisplayHdrOffLaunchPath());
 }
 
-/// When every retry still reports nothing, that emptiness is accepted as a
-/// genuinely SDR display and the cache is cleared, which is how a box moved
-/// to an SDR TV stops advertising HDR. A run where the channel only ever
-/// threw proves nothing about the panel, so the seed stays.
-Future<void> _retryDisplayHdrOffLaunchPath() async {
-  var answered = false;
-  final found = await _retryOffLaunchPath(() async {
-    if (await _probeDisplayHdrOnce()) return true;
-    answered = true;
-    return false;
-  });
-  if (found || !answered) return;
-  PlatformDetection.setDisplayHdrTypes(const []);
-  await DeviceCapabilityCache.remove(DeviceCapabilityCache.displayHdrKey);
+/// Runs before the first frame, so only the single attempt is awaited here.
+/// The retries and the listener are deliberately left to run on their own: a
+/// box whose TV is still asleep would otherwise hold the launch for the whole
+/// half-minute retry window.
+Future<void> _detectAndSetDisplayCapabilities() async {
+  if (!DisplayHdrProbe.isSupported) return;
+  // Its own try/catch for the same reason the memory probe has one: this runs
+  // inside a Future.wait, which gives up on every sibling the moment one
+  // throws.
+  try {
+    final snapshot = await DisplayHdrProbe.query(trigger: 'launch');
+    DisplayHdrProbe.apply(snapshot);
+    if (snapshot == null ||
+        snapshot.verdict == DisplayHdrVerdict.cannotAnswer) {
+      unawaited(DisplayHdrProbe.queryWithRetry().then(DisplayHdrProbe.apply));
+    }
+    // A chain that is still asleep when the retries run out heals from here
+    // instead of waiting for the app to be restarted.
+    DisplayHdrProbe.listenForDisplayChanges();
+  } catch (_) {}
 }
 
 Future<Map<String, dynamic>?> _queryCodecCaps(MethodChannel channel) async {
@@ -372,14 +424,18 @@ Future<Map<String, dynamic>?> _queryCodecCaps(MethodChannel channel) async {
 /// result without it is either a partial enumeration worth another look or a
 /// device that really lacks the decoder and loses nothing to the re-probes.
 Future<void> _retryCodecCapsOffLaunchPath(MethodChannel channel) =>
-    _retryOffLaunchPath(() async {
-      final caps = await _queryCodecCaps(channel);
-      if (caps == null || codecCapsLookDegenerate(caps)) return false;
-      PlatformDetection.setMediaCodecCapabilities(caps);
-      if (codecCapsLookIncomplete(caps)) return false;
-      await _cacheCodecCaps(channel, caps);
-      return true;
-    });
+    _retryOffLaunchPath(() => _applyCodecProbe(channel));
+
+/// One probe: applies a sound answer and persists a complete one. Returns
+/// true once the answer carries HEVC and throws when the channel does.
+Future<bool> _applyCodecProbe(MethodChannel channel) async {
+  final caps = await _queryCodecCaps(channel);
+  if (caps == null || codecCapsLookDegenerate(caps)) return false;
+  PlatformDetection.setMediaCodecCapabilities(caps);
+  if (codecCapsLookIncomplete(caps)) return false;
+  await _cacheCodecCaps(channel, caps);
+  return true;
+}
 
 /// The OS build fingerprint, which is the key the codec cache is valid under.
 /// Codec support only changes with a firmware update, and a firmware update
@@ -456,10 +512,11 @@ Future<void> _detectAndSetCodecCapabilities() async {
   } catch (_) {
     // A probe that never answered, like a channel hit before the plugin
     // registered, leaves every codec flag false and the profile claiming the
-    // device decodes nothing. The floor keeps transcodes playable in the
-    // meantime and the retries are the same recovery a degenerate answer
-    // gets.
-    PlatformDetection.setMediaCodecCapabilities(withAvcFloor(const {}));
+    // device decodes nothing. The floor only lands when the seed left nothing
+    // to keep, and the retries are the same recovery a degenerate answer gets.
+    PlatformDetection.setMediaCodecCapabilities(
+      codecCapsWithoutAProbe(PlatformDetection.mediaCodecCapabilitiesSnapshot),
+    );
     unawaited(_retryCodecCapsOffLaunchPath(channel));
   }
 }
@@ -486,8 +543,11 @@ Future<void> _detectAndSetAetherCapabilities() async {
           'supportsDvP5': true,
           'supportsDvP7': true,
           'supportsDvP8': true,
+          'supportsAv1': true,
+          'supportsAv1Main10': true,
           'maxResolutionAvc': {'width': 3840, 'height': 2160},
           'maxResolutionHevc': {'width': 3840, 'height': 2160},
+          'maxResolutionAv1': {'width': 1920, 'height': 1080},
         },
   );
 }
@@ -592,6 +652,17 @@ void _sweepImageCache(UserPreferences prefs, {bool throttle = false}) {
   unawaited(enforceGameArtworkCacheBudget(throttle: throttle));
 }
 
+/// Runs an auto-download check when the app comes back to the foreground;
+/// the service throttles resumes that follow a recent check.
+class _AutoDownloadResumeObserver with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    if (!GetIt.instance.isRegistered<AutoDownloadService>()) return;
+    GetIt.instance<AutoDownloadService>().onAppResumed();
+  }
+}
+
 class _ImageCacheSweepObserver with WidgetsBindingObserver {
   _ImageCacheSweepObserver(this._prefs);
 
@@ -599,16 +670,27 @@ class _ImageCacheSweepObserver with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) return;
-    _sweepImageCache(_prefs, throttle: true);
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _sweepImageCache(_prefs, throttle: true);
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        // The index is written on a timer. A process killed in the
+        // background never reaches it, so write on the way out.
+        unawaited(flushImageCacheIndex());
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+        break;
+    }
   }
 }
 
-/// Re-probes display and audio capabilities when the app comes back to the
-/// foreground, which on a TV covers being woken from standby, the moment the
-/// HDMI chain has just renegotiated. Only answers that carry something are
-/// applied here: an empty answer mid-renegotiation must not clobber a good
-/// snapshot.
+/// Re-probes display, decoder and audio capabilities when the app comes back
+/// to the foreground, which on a TV covers being woken from standby, the
+/// moment the HDMI chain has just renegotiated, and is also the first moment
+/// an engine that launched without an Activity has a platform channel to ask.
+/// Only answers that carry something are applied here: an empty answer
+/// mid-renegotiation must not clobber a good snapshot.
 class _CapabilityRefreshObserver with WidgetsBindingObserver {
   static const _throttle = Duration(seconds: 30);
   DateTime? _lastRefresh;
@@ -624,9 +706,21 @@ class _CapabilityRefreshObserver with WidgetsBindingObserver {
   }
 
   Future<void> _refresh() async {
-    if (PlatformDetection.isAndroid && PlatformDetection.isTV) {
+    if (DisplayHdrProbe.isSupported) {
+      DisplayHdrProbe.apply(await DisplayHdrProbe.query(trigger: 'resume'));
+    }
+    // The launch retries all run inside the first half minute, which covers
+    // a slow enumeration but not an engine that had no Activity to answer
+    // the probe until now. A device with no HEVC decoder pays one
+    // enumeration per resume for this and keeps its answer.
+    if (PlatformDetection.isAndroid &&
+        codecCapsLookIncomplete(
+          PlatformDetection.mediaCodecCapabilitiesSnapshot,
+        )) {
       try {
-        await _probeDisplayHdrOnce();
+        await _applyCodecProbe(
+          const MethodChannel('org.moonfin.androidtv/platform'),
+        );
       } catch (_) {}
     }
     if (AudioCapabilityProbe.isSupported) {
@@ -680,6 +774,11 @@ class _PreferenceWriteFlushObserver with WidgetsBindingObserver {
 
 @pragma('vm:entry-point')
 Future<void> watchNextBackgroundMain() => watch_next_bg.watchNextBackgroundMain();
+
+/// Entry for the Android auto-download worker's headless engine.
+@pragma('vm:entry-point')
+Future<void> autoDownloadBackgroundMain() =>
+    auto_download_bg.autoDownloadBackgroundMain();
 
 void main() async {
   configureHttpOverrides();
@@ -736,19 +835,20 @@ void main() async {
 
   // Apple runs entirely on AetherEngine, so media_kit isn't initialized there
   // and its native libs are out of those builds.
-  if (!PlatformDetection.isTizen &&
-      !PlatformDetection.isAppleTV &&
+  if (!PlatformDetection.isAppleTV &&
       !PlatformDetection.isIOS &&
       !PlatformDetection.isMacOS) {
     MediaKit.ensureInitialized();
   }
 
   await _applyInterfaceLayoutOverride();
+  await _readPerformanceModeOverride();
   await _detectAndSetTvMode();
   await _seedCapabilitiesFromCache();
   await Future.wait([
     _detectAndSetDisplayCapabilities(),
     _detectAndSetCodecCapabilities(),
+    _detectAndSetDeviceMemory(),
   ]);
 
   if (PlatformDetection.isAppleTV) {
@@ -759,7 +859,7 @@ void main() async {
   }
 
   _configureImageCache();
-  await configureImageDiskCache();
+  await configureImageDiskCache(tier: _resolvedTier());
 
   // On Linux the GTK font pipeline loads fonts asynchronously. The first frame
   // can render before MaterialIcons and other fonts are ready, causing icons to
@@ -767,17 +867,12 @@ void main() async {
   // The issue is intermittent and goes away on re-run once the OS font cache
   // is warm, which confirms the timing root cause.
   if (PlatformDetection.isLinux ||
-      PlatformDetection.isTizen ||
       PlatformDetection.isAppleTV) {
     WidgetsBinding.instance.scheduleWarmUpFrame();
   }
 
   if (PlatformDetection.isMobile) {
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      systemNavigationBarColor: Colors.transparent,
-    ));
+    SystemUi.install();
 
     // Registered before runApp so a background/terminated push can be handled.
     // The handler itself is a no-op; the OS draws these notifications.
@@ -788,6 +883,11 @@ void main() async {
 
   await configureDependencies();
   _installCrashHandlers();
+  // When the system runs the auto-download refresh task against this
+  // engine, the native side retries its call until this handler is bound.
+  if (AutoDownloadService.isSupportedPlatform) {
+    BackgroundRefresh.instance.bind(runAutoDownloadBackgroundRefresh);
+  }
 
   // Registered before runApp so a CarPlay-only launch (no window scene, no
   // widgets) can browse and start playback.
@@ -806,6 +906,7 @@ void main() async {
   WidgetsBinding.instance.addObserver(_PreferenceWriteFlushObserver(prefs));
   WidgetsBinding.instance.addObserver(_ImageCacheSweepObserver(prefs));
   WidgetsBinding.instance.addObserver(_CapabilityRefreshObserver());
+  WidgetsBinding.instance.addObserver(_AutoDownloadResumeObserver());
   WidgetsBinding.instance.addPostFrameCallback((_) => _sweepImageCache(prefs));
 
   GetIt.instance<PlaybackManager>().queueService.queueChangedStream.listen((_) {

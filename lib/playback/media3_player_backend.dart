@@ -12,6 +12,7 @@ import '../util/platform_detection.dart';
 
 import 'device_profile_builder.dart';
 import 'known_defects.dart';
+import 'media3_letterbox_crop.dart';
 import 'server_transcode_capabilities.dart';
 
 class Media3PlayerBackend extends PlayerBackend {
@@ -20,7 +21,12 @@ class Media3PlayerBackend extends PlayerBackend {
   static const _audioSinkErrorThreshold = 2;
 
   Media3PlayerBackend(this._prefs) {
+    _letterboxCropper = Media3LetterboxCropper(
+      _Media3LetterboxHost(this),
+      supported: PlatformDetection.isAndroid,
+    );
     if (!PlatformDetection.isAndroid) return;
+    _prefs.addListener(_onPreferencesChanged);
     _eventSub = _events.receiveBroadcastStream().listen(
       _handleEvent,
       onError: (_) {},
@@ -53,6 +59,12 @@ class Media3PlayerBackend extends PlayerBackend {
           .resolvedPassthroughCodecs()
           .map((codec) => codec.wireName)
           .toList(growable: false),
+      // 'platform' has the HAL pack raw encodings, 'iec' packs IEC 61937 in
+      // the app. Only sent as 'iec' when the choke-point getter says the
+      // mode is actually live here.
+      'passthroughOutput': prefs.media3IecPackerSelected
+          ? AudioPassthroughOutput.iecPacker.wireName
+          : AudioPassthroughOutput.platform.wireName,
       'downmixToStereo': prefs.get(UserPreferences.downmixToStereo),
     };
   }
@@ -86,6 +98,8 @@ class Media3PlayerBackend extends PlayerBackend {
   }
 
   final UserPreferences _prefs;
+  late final Media3LetterboxCropper _letterboxCropper;
+  String? _currentUrl;
 
   StreamSubscription<dynamic>? _eventSub;
 
@@ -98,6 +112,7 @@ class Media3PlayerBackend extends PlayerBackend {
   double _volume = 100.0;
   double _audioDelaySeconds = 0.0;
   double _subtitleDelaySeconds = 0.0;
+  double _subtitleAutoOffsetSeconds = 0.0;
   int _volumeBoostLevel = 0;
   bool _skipSilenceEnabled = false;
   RepeatMode _repeatMode = RepeatMode.none;
@@ -122,8 +137,10 @@ class Media3PlayerBackend extends PlayerBackend {
   // Freeze diagnostics: surface decode/render stalls into the in-app report so
   // a frozen-picture playback is visible without adb. See _checkPlaybackWatchdogs.
   static const _watchdogStallMs = 6000;
+  static const _watchdogBufferingNudgeMs = 10000;
   static const _watchdogBufferingStallMs = 30000;
   static const _watchdogBufferingRepeatMs = 60000;
+  static const _watchdogBufferingRunwayFloorMs = 10000;
   Timer? _watchdogTimer;
   String _watchdogItemLabel = 'item';
   bool _sawFirstFrame = false;
@@ -136,6 +153,10 @@ class Media3PlayerBackend extends PlayerBackend {
   bool _neverStartedWarned = false;
   int _bufferingSinceMs = 0;
   int _bufferingWarnedAtMs = 0;
+  int _bufferingNudgedAtMs = 0;
+  bool _bufferingFailed = false;
+  bool _sourceIsLive = false;
+  String? _lastFrameRateLine;
 
   final _positionStream = StreamController<Duration>.broadcast();
   final _durationStream = StreamController<Duration>.broadcast();
@@ -144,11 +165,18 @@ class Media3PlayerBackend extends PlayerBackend {
   final _bufferingStream = StreamController<bool>.broadcast();
   final _completedStream = StreamController<bool>.broadcast();
   final _errorStream = StreamController<Map<String, dynamic>>.broadcast();
+  final _subtitleAutoOffsetStream = StreamController<double>.broadcast();
 
   int get volumeBoostLevel => _volumeBoostLevel;
 
   @override
   Stream<Map<String, dynamic>> get errorStream => _errorStream.stream;
+
+  @override
+  double get subtitleAutoOffsetSeconds => _subtitleAutoOffsetSeconds;
+
+  @override
+  Stream<double> get subtitleAutoOffsetStream => _subtitleAutoOffsetStream.stream;
 
   Future<T?> _invoke<T>(String method, [dynamic arguments]) async {
     if (_disposed) return null;
@@ -259,8 +287,10 @@ class Media3PlayerBackend extends PlayerBackend {
       case 'activityAction':
         _activityActionController.add(map.cast<String, dynamic>());
       case 'playerError':
+        final cause = map['cause']?.toString();
         _diag(
-          'Media3 player error: ${map['errorCode'] ?? ''} ${map['message'] ?? ''}',
+          'Media3 player error: ${map['errorCode'] ?? ''} ${map['message'] ?? ''}'
+          '${cause == null || cause.isEmpty ? '' : ' caused by $cause'}',
           level: LogLevel.error,
         );
         _errorStream.add(map.cast<String, dynamic>());
@@ -282,6 +312,7 @@ class Media3PlayerBackend extends PlayerBackend {
       case 'syncDelays':
         _audioDelaySeconds = _toInt(map['audioDelayMs']) / 1000.0;
         _subtitleDelaySeconds = _toInt(map['subtitleDelayMs']) / 1000.0;
+        _setSubtitleAutoOffset(_toInt(map['subtitleAutoOffsetMs']));
       case 'volumeBoost':
         _volumeBoostLevel = (_toInt(map['level']).clamp(0, 10)).toInt();
       case 'repeatModeChanged':
@@ -325,11 +356,34 @@ class Media3PlayerBackend extends PlayerBackend {
           level: LogLevel.warning,
         );
       case 'audioSinkError':
+        final deadObject = map['deadObject'] == true;
         _diag(
-          'Media3: audio sink error: ${map['message'] ?? ''}',
+          'Media3: audio sink error: ${map['message'] ?? ''}'
+          '${deadObject ? ' (the route dropped the track)' : ''}',
           level: LogLevel.warning,
         );
-        _onAudioSinkError();
+        // A track the route killed is a route event, not a tunneling fault,
+        // so it must not count toward disabling tunneling for the session.
+        if (!deadObject) _onAudioSinkError();
+      case 'routeFlapResume':
+        _diag(
+          'Media3: resumed after the audio route came back '
+          '(the system had paused for ${map['reason'] ?? ''})',
+          level: LogLevel.warning,
+        );
+      case 'passthroughSilenceRecovery':
+        _diag(
+          'Media3: bitstream audio went silent (${map['reason']}), '
+          'rebuilding the track in place at ${_toInt(map['positionMs'])}ms',
+          level: LogLevel.warning,
+        );
+      case 'audioClockRecovery':
+        _diag(
+          'Media3: audio clock corrupted by a playback head reset '
+          '(head clock ${_toInt(map['reportedPositionUs'])}us), '
+          'reseeking in place at ${_toInt(map['positionMs'])}ms',
+          level: LogLevel.warning,
+        );
       case 'tunnelingDisabledOnAudioTrackFailure':
         _sessionTunnelingDisabled = true;
         _diag(
@@ -341,6 +395,12 @@ class Media3PlayerBackend extends PlayerBackend {
         _diag(
           'Media3: sticky stereo downmix cleared '
           '(${map['reason'] ?? 'route change'})',
+        );
+      case 'stereoDownmixLatched':
+        _diag(
+          'Media3: AudioTrack failure read as a device limit, '
+          'stereo downmix now sticky for this session',
+          level: LogLevel.warning,
         );
       case 'ffmpegDecoderDiagnostics':
         ffmpegDecoderDiagnostics = <String, dynamic>{
@@ -375,6 +435,8 @@ class Media3PlayerBackend extends PlayerBackend {
         _onAudioTrackMapping(map);
       case 'doviCompat':
         _onDoviCompat(map);
+      case 'media3Transfer':
+        _diag(_transferLine(map));
       case 'media3Log':
         final repeats = _toInt(map['repeats']);
         final error = map['error']?.toString();
@@ -388,7 +450,44 @@ class Media3PlayerBackend extends PlayerBackend {
         _diag(
           'Media3: video size ${_toInt(map['width'])}x${_toInt(map['height'])}',
         );
+      case 'frameRate':
+        _onFrameRateEvent(map);
     }
+  }
+
+  void _onFrameRateEvent(Map<String, dynamic> map) {
+    final detected = (map['detectedFrameRate'] as num?)?.toDouble();
+    final applied = (map['appliedFrameRate'] as num?)?.toDouble();
+    final behavior = map['behavior']?.toString() ?? '';
+    final content = detected == null
+        ? 'content of unknown frame rate'
+        : '${detected.toStringAsFixed(3)}fps content';
+
+    final String line;
+    var level = LogLevel.debug;
+    if (map['enabled'] != true) {
+      line = 'Media3: refresh rate switching off for $content';
+    } else if (applied != null) {
+      line =
+          'Media3: refresh rate switch to '
+          '${_toInt(map['appliedWidth'])}x${_toInt(map['appliedHeight'])}'
+          '@${applied.toStringAsFixed(3)} for $content '
+          '($behavior, mode ${_toInt(map['appliedDisplayModeId'])})';
+    } else {
+      final modes = (map['supportedModes'] as List<dynamic>? ?? const [])
+          .join(', ');
+      line =
+          'Media3: no display mode fits $content ($behavior'
+          '${modes.isEmpty ? '' : ', display offers $modes'})';
+      level = LogLevel.warning;
+    }
+    // The native side re-decides on every decoder and size callback, so the
+    // same outcome would otherwise land several times per start.
+    if (line == _lastFrameRateLine) {
+      return;
+    }
+    _lastFrameRateLine = line;
+    _diag(line, level: level);
   }
 
   void _onAudioTrackInitialized(Map<String, dynamic> map) {
@@ -400,7 +499,9 @@ class Media3PlayerBackend extends PlayerBackend {
       'Media3: audio track opened $encodingName ${channels}ch '
       '@${_toInt(map['sampleRate'])}Hz '
       '(passthrough=$passthrough tunneling=${map['tunneling'] == true} '
-      'offload=${map['offload'] == true} buffer=${_toInt(map['bufferSize'])}B)',
+      'offload=${map['offload'] == true} '
+      'buffer=${_toInt(map['bufferSize'])}B '
+      'downmix=${map['stereoDownmix'] ?? 'off'})',
     );
   }
 
@@ -549,6 +650,44 @@ class Media3PlayerBackend extends PlayerBackend {
     unawaited(disableTunnelingFallback(persist: false));
   }
 
+  /// Lines say requesting rather than fetched because the native side logs
+  /// as the request goes out, so one that never returns is still the last
+  /// line for its stream.
+  String _transferLine(Map<String, dynamic> map) {
+    switch (map['reason']?.toString()) {
+      case 'playlist':
+        return 'Media3 HLS: requesting playlist ${map['name'] ?? ''}';
+      case 'outOfOrder':
+        return 'Media3 HLS: requesting segment ${_toInt(map['index'])}, '
+            'previous was ${_toInt(map['previousIndex'])}';
+      case 'progress':
+        return 'Media3 HLS: requesting segment ${_toInt(map['index'])}, '
+            '${_toInt(map['requested'])} asked for, '
+            '${_toInt(map['averageMs'])}ms average';
+      case 'slow':
+        return 'Media3 HLS: segment ${_toInt(map['index'])} took '
+            '${_toInt(map['elapsedMs'])}ms';
+      case 'first':
+      default:
+        return 'Media3 HLS: requesting segment ${_toInt(map['index'])}';
+    }
+  }
+
+  void _setSubtitleAutoOffset(int offsetMs) {
+    final seconds = offsetMs / 1000.0;
+    if (seconds == _subtitleAutoOffsetSeconds) return;
+    _subtitleAutoOffsetSeconds = seconds;
+    if (offsetMs == 0) {
+      _diag('Media3: subtitle auto offset cleared');
+    } else {
+      final sign = offsetMs > 0 ? '+' : '';
+      _diag(
+        'Media3: subtitle auto offset $sign${offsetMs}ms (HLS timestamp adjuster)',
+      );
+    }
+    _subtitleAutoOffsetStream.add(seconds);
+  }
+
   void _diag(String message, {LogLevel level = LogLevel.debug}) {
     if (GetIt.instance.isRegistered<LogService>()) {
       GetIt.instance<LogService>().media(message, level: level);
@@ -566,6 +705,8 @@ class Media3PlayerBackend extends PlayerBackend {
     _loadRequestedAtMs = DateTime.now().millisecondsSinceEpoch;
     _neverStartedWarned = false;
     _bufferingSinceMs = 0;
+    _bufferingNudgedAtMs = 0;
+    _bufferingFailed = false;
     _watchdogTimer ??= Timer.periodic(
       const Duration(seconds: 2),
       (_) => _checkPlaybackWatchdogs(),
@@ -663,10 +804,76 @@ class Media3PlayerBackend extends PlayerBackend {
           level: LogLevel.warning,
         );
       }
+      // Runway this deep means the loader is fine and the renderers are the
+      // ones stuck, which a seek in place restarts. Held to one seek per
+      // repeat window, since a player that flickers in and out of buffering
+      // would otherwise be seeked on every pass and stutter far worse. Live
+      // sources are left alone because a seek there can land on the live edge
+      // rather than where the viewer was.
+      final nudgeDue =
+          _bufferingNudgedAtMs == 0 ||
+          nowMs - _bufferingNudgedAtMs > _watchdogBufferingRepeatMs;
+      if (nudgeDue &&
+          !_sourceIsLive &&
+          bufferingNeedsNudge(
+            stuckMs: stuckMs,
+            bufferedAheadMs: _bufferedAheadMs,
+          )) {
+        _bufferingNudgedAtMs = nowMs;
+        _diag(
+          'Media3 watchdog: "$_watchdogItemLabel" reseeking in place at '
+          '${_position.inMilliseconds}ms after buffering ${stuckMs ~/ 1000}s '
+          'with ${_bufferedAheadMs}ms ahead',
+          level: LogLevel.warning,
+        );
+        unawaited(seekTo(_position));
+      }
+
+      // A wedge that outlasts the seek has stopped for good, so turn it into
+      // the failure the manager can surface instead of an eternal spinner.
+      if (!_bufferingFailed &&
+          bufferingHasWedged(
+            stuckMs: stuckMs,
+            bufferedAheadMs: _bufferedAheadMs,
+          )) {
+        _bufferingFailed = true;
+        _diag(
+          'Media3 watchdog: "$_watchdogItemLabel" wedged buffering for '
+          '${stuckMs ~/ 1000}s with ${_bufferedAheadMs}ms ahead, '
+          'failing playback',
+          level: LogLevel.warning,
+        );
+        _errorStream.add(<String, dynamic>{
+          'event': 'playerError',
+          'kind': 'playback_stalled',
+          'recoverable': false,
+        });
+        _isBuffering = false;
+        _bufferingStream.add(false);
+      }
     } else {
       _bufferingSinceMs = 0;
     }
   }
+
+  /// Static and pure for tests. Buffering this long with media already loaded
+  /// is a renderer that stopped consuming rather than a network that ran dry.
+  static bool bufferingNeedsNudge({
+    required int stuckMs,
+    required int bufferedAheadMs,
+  }) =>
+      stuckMs > _watchdogBufferingNudgeMs &&
+      bufferedAheadMs >= _watchdogBufferingRunwayFloorMs;
+
+  /// Static and pure for tests. A player that sits buffering past the stall
+  /// window while holding this much runway has given up rather than run dry,
+  /// since an ordinary rebuffer resumes after a few seconds of loaded media.
+  static bool bufferingHasWedged({
+    required int stuckMs,
+    required int bufferedAheadMs,
+  }) =>
+      stuckMs > _watchdogBufferingStallMs &&
+      bufferedAheadMs >= _watchdogBufferingRunwayFloorMs;
 
   /// How much play time is loaded past the playhead. The player reports a
   /// buffered position rather than a runway, so the playhead comes off it.
@@ -747,6 +954,7 @@ class Media3PlayerBackend extends PlayerBackend {
         : payload['url']?.toString() ?? '';
     if (_disposed || url.isEmpty) return;
 
+    _currentUrl = url;
     final mediaType = payload['mediaType']?.toString() ?? 'video';
     final container = payload['container']?.toString();
     final videoRangeType = payload['videoRangeType']?.toString();
@@ -824,6 +1032,9 @@ class Media3PlayerBackend extends PlayerBackend {
           .name,
       ...audioDecoderPreferencesPayload(_prefs),
     });
+    _lastFrameRateLine = null;
+    _sourceIsLive = payload['isLive'] == true;
+    _setSubtitleAutoOffset(0);
     await _invoke<void>('setSource', {
       'url': url,
       'headers': headers,
@@ -833,7 +1044,9 @@ class Media3PlayerBackend extends PlayerBackend {
       'videoRangeType': videoRangeType,
       'mediaType': mediaType,
       'videoFrameRate': (payload['videoFrameRate'] as num?)?.toDouble(),
-      'isLive': payload['isLive'] == true,
+      'videoWidth': (payload['videoWidth'] as num?)?.toInt(),
+      'videoHeight': (payload['videoHeight'] as num?)?.toInt(),
+      'isLive': _sourceIsLive,
       'normalizationGainDb': normalizationGainDb,
       'skipSilenceEnabled': _skipSilenceEnabled,
       'preferredAudioLanguage': preferredAudioLanguage,
@@ -868,6 +1081,16 @@ class Media3PlayerBackend extends PlayerBackend {
     });
     if (autoPlay) {
       await _invoke<void>('play');
+    }
+    if (isPreview || mediaType == 'audio') {
+      unawaited(_letterboxCropper.reset());
+    } else {
+      unawaited(() async {
+        await _letterboxCropper.setEnabled(
+          _prefs.get(UserPreferences.cropBlackBars),
+        );
+        await _letterboxCropper.onSourceOpened(url);
+      }());
     }
   }
 
@@ -966,13 +1189,18 @@ class Media3PlayerBackend extends PlayerBackend {
       eac3PassthroughEnabled: _prefs.resolveEac3PassthroughEnabled(),
       dtsCorePassthroughEnabled: _prefs.resolveDtsCorePassthroughEnabled(),
       trueHdPassthroughEnabled: _prefs.resolveTrueHdPassthroughEnabled(),
+      // The bundled FFmpeg decoder leaves the channel layout unset for stereo
+      // TrueHD, so every packet is rejected and playback sits at 0ms with a
+      // black screen. Surround decodes fine. See androidx/media#1843.
+      playerDecodesStereoTrueHd: false,
       maxAudioChannels: _prefs.resolveMaxAudioChannels(),
       downmixToStereo: _prefs.get(UserPreferences.downmixToStereo),
       // Media3 bundles the FFmpeg audio decoder extension, so every advertised
       // codec has a software decoder behind it.
       universalAudioDecode: true,
       maxResolution: maxResolution,
-      pgsDirectPlay: _prefs.get(UserPreferences.pgsDirectPlay) && canRenderBitmapSubtitles,
+      pgsDirectPlay:
+          _prefs.get(UserPreferences.pgsDirectPlay) && canRenderBitmapSubtitles,
       assDirectPlay: _prefs.get(UserPreferences.assDirectPlay),
       supportsAvc: PlatformDetection.supportsAvc,
       supportsAvcHigh10: PlatformDetection.supportsAvcHigh10,
@@ -991,6 +1219,10 @@ class Media3PlayerBackend extends PlayerBackend {
       supportsAv1DolbyVision: PlatformDetection.supportsAv1DolbyVision,
       supportsAv1Hdr10: PlatformDetection.supportsAv1Hdr10,
       supportsAv1Hdr10Plus: PlatformDetection.supportsAv1Hdr10Plus,
+      // Media3 hands a Dolby Vision profile 10 track to a plain AV1 decoder
+      // when it has no Dolby Vision decoder for it, so the base layer plays as
+      // HDR10 and the HDR10+ gate has nothing left to protect here.
+      rendersAv1DoviViaHdr10BaseLayer: true,
       supportsVc1: PlatformDetection.supportsVc1,
       supportsMpeg4: PlatformDetection.supportsMpeg4,
       maxResolutionAvcWidth: PlatformDetection.maxResolutionAvcWidth,
@@ -1073,7 +1305,6 @@ class Media3PlayerBackend extends PlayerBackend {
     await _invoke<void>('setAudioTrack', {'index': index});
   }
 
-
   @override
   Future<void> setSubtitleTrack(
     int index, {
@@ -1092,7 +1323,8 @@ class Media3PlayerBackend extends PlayerBackend {
   }
 
   @override
-  List<EmbeddedCaptionTrack> get embeddedCaptionTracks => _embeddedCaptionTracks;
+  List<EmbeddedCaptionTrack> get embeddedCaptionTracks =>
+      _embeddedCaptionTracks;
 
   @override
   Stream<void> get tracksChangedStream => _tracksChangedController.stream;
@@ -1150,10 +1382,12 @@ class Media3PlayerBackend extends PlayerBackend {
     _audioDelayDebounce = Timer(const Duration(milliseconds: 350), () {
       _audioDelayDebounce = null;
       if (_disposed) return;
-      unawaited(_invoke<void>('setAudioDelay', {
-        'seconds': _audioDelaySeconds,
-        'delayMs': (_audioDelaySeconds * 1000).round(),
-      }));
+      unawaited(
+        _invoke<void>('setAudioDelay', {
+          'seconds': _audioDelaySeconds,
+          'delayMs': (_audioDelaySeconds * 1000).round(),
+        }),
+      );
     });
   }
 
@@ -1240,6 +1474,9 @@ class Media3PlayerBackend extends PlayerBackend {
   bool get supportsRuntimeTrackSelection => true;
 
   @override
+  LetterboxCropper get letterboxCropper => _letterboxCropper;
+
+  @override
   bool get supportsDirectPlayAudioSwitch => true;
 
   @override
@@ -1256,10 +1493,19 @@ class Media3PlayerBackend extends PlayerBackend {
   @override
   bool get canRenderBitmapSubtitles => true;
 
+  void _onPreferencesChanged() {
+    if (_disposed) return;
+    unawaited(
+      _letterboxCropper.setEnabled(_prefs.get(UserPreferences.cropBlackBars)),
+    );
+  }
+
   @override
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _letterboxCropper.cancel();
+    _prefs.removeListener(_onPreferencesChanged);
     _audioDelayDebounce?.cancel();
     _audioDelayDebounce = null;
     _watchdogTimer?.cancel();
@@ -1273,8 +1519,82 @@ class Media3PlayerBackend extends PlayerBackend {
     _bufferingStream.close();
     _completedStream.close();
     _errorStream.close();
+    _subtitleAutoOffsetStream.close();
     _tracksChangedController.close();
   }
+}
+
+class _Media3LetterboxHost implements Media3LetterboxHost {
+  _Media3LetterboxHost(this._backend);
+
+  final Media3PlayerBackend _backend;
+
+  @override
+  Future<Map<String, int>?> detectLetterbox() async {
+    final raw = await _backend._invoke<dynamic>('detectLetterbox');
+    if (raw is! Map) return null;
+    int? n(String key) {
+      final value = raw[key];
+      if (value is int) return value;
+      if (value is num) return value.round();
+      return int.tryParse(value?.toString() ?? '');
+    }
+
+    final w = n('w');
+    final h = n('h');
+    final x = n('x');
+    final y = n('y');
+    final sourceWidth = n('sourceWidth');
+    final sourceHeight = n('sourceHeight');
+    if (w == null ||
+        h == null ||
+        x == null ||
+        y == null ||
+        sourceWidth == null ||
+        sourceHeight == null) {
+      return null;
+    }
+    return <String, int>{
+      'w': w,
+      'h': h,
+      'x': x,
+      'y': y,
+      'sourceWidth': sourceWidth,
+      'sourceHeight': sourceHeight,
+    };
+  }
+
+  @override
+  Future<void> setLetterboxCrop(LetterboxCropRect? rect) async {
+    if (rect == null) {
+      await _backend._invoke<void>('setLetterboxCrop', {'clear': true});
+      return;
+    }
+    await _backend._invoke<void>('setLetterboxCrop', {
+      'w': rect.w,
+      'h': rect.h,
+      'x': rect.x,
+      'y': rect.y,
+    });
+  }
+
+  @override
+  bool get isPlaying => _backend._isPlaying;
+
+  @override
+  Duration get position => _backend._position;
+
+  @override
+  Duration get duration => _backend._duration;
+
+  @override
+  Stream<bool> get playingStream => _backend._playingStream.stream;
+
+  @override
+  String? get currentUrl => _backend._currentUrl;
+
+  @override
+  bool get isDisposed => _backend._disposed;
 }
 
 /// What the native side does with a Dolby Vision profile 7 stream. Names

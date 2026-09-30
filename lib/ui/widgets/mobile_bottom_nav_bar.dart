@@ -10,6 +10,7 @@ import '../../auth/repositories/user_repository.dart';
 import '../../data/models/aggregated_library.dart';
 import '../../data/repositories/multi_server_repository.dart';
 import '../../data/repositories/user_views_repository.dart';
+import '../../data/services/library_scope_service.dart';
 import '../../data/services/plugin_sync_service.dart';
 import '../../data/services/server_messages_service.dart';
 import '../../l10n/app_localizations.dart';
@@ -17,8 +18,12 @@ import '../../preference/seerr_preferences.dart';
 import '../../preference/user_preferences.dart';
 import '../../util/overlay_color_palette.dart';
 import '../../util/game_library.dart';
+import '../../util/live_tv_library.dart';
+import '../../data/services/saved_media_presence.dart';
 import '../navigation/destinations.dart';
 import '../navigation/home_refresh_bus.dart';
+import '../screens/downloads/downloads_panel.dart';
+import 'downloads_nav_slot.dart';
 import '../screens/settings/settings_side_panel.dart';
 import '../screens/syncplay/syncplay_screen.dart';
 import 'adaptive/adaptive_glass.dart';
@@ -29,12 +34,20 @@ import 'settings/settings_panel.dart';
 import 'shuffle_overlay.dart';
 import 'unread_badge.dart';
 import 'user_menu_dialog.dart';
+import 'image_source.dart';
 
 const double _kBarHeight = 54.0;
 const double _kIconSize = 24.0;
 const double _kFloatingInset = 14.0;
 const double _kFloatingRadius = 22.0;
 class MobileBottomNavBar extends StatefulWidget {
+  /// Room the bar takes along the bottom of the screen, including the system
+  /// inset it pads underneath itself.
+  static double heightFor(BuildContext context) {
+    final inset = MediaQuery.of(context).padding.bottom;
+    return _kBarHeight + (inset > 0 ? inset : _kFloatingInset);
+  }
+
   final String? activeRoute;
 
   const MobileBottomNavBar({super.key, this.activeRoute});
@@ -62,6 +75,9 @@ class _MobileBottomNavBarState extends State<MobileBottomNavBar> {
     GetIt.instance<ServerMessagesService>().addListener(
       _onServerMessagesChanged,
     );
+    if (GetIt.instance.isRegistered<SavedMediaPresence>()) {
+      GetIt.instance<SavedMediaPresence>().addListener(_onSavedMediaChanged);
+    }
     _userSub = _userRepo.currentUserStream.listen((_) => _loadUserImage());
     _loadUserImage();
     _loadLibraries();
@@ -74,6 +90,11 @@ class _MobileBottomNavBarState extends State<MobileBottomNavBar> {
       GetIt.instance<ServerMessagesService>().removeListener(
         _onServerMessagesChanged,
       );
+      if (GetIt.instance.isRegistered<SavedMediaPresence>()) {
+        GetIt.instance<SavedMediaPresence>().removeListener(
+          _onSavedMediaChanged,
+        );
+      }
     } catch (_) {}
     _prefs.removeListener(_onPrefsChanged);
     try {
@@ -92,6 +113,10 @@ class _MobileBottomNavBarState extends State<MobileBottomNavBar> {
 
   // Only the button changes, so the libraries are left alone.
   void _onServerMessagesChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _onSavedMediaChanged() {
     if (mounted) setState(() {});
   }
 
@@ -136,16 +161,11 @@ class _MobileBottomNavBarState extends State<MobileBottomNavBar> {
 
       unawaited(GetIt.instance<GameLibraryRegistry>().refresh());
 
-      List<AggregatedLibrary> filtered = libs;
-      if (useMultiServer) {
-        try {
-          final config = await _viewsRepo.getUserConfiguration();
-          final excluded = config.myMediaExcludes.toSet();
-          if (excluded.isNotEmpty) {
-            filtered = libs.where((lib) => !excluded.contains(lib.id)).toList();
-          }
-        } catch (_) {}
-      }
+      final filtered = useMultiServer
+          ? await GetIt.instance<LibraryScopeService>().withoutHiddenLibraries(
+              libs,
+            )
+          : libs;
 
       if (mounted && !_librariesEqual(_libraries, filtered)) {
         setState(() => _libraries = filtered);
@@ -160,6 +180,16 @@ class _MobileBottomNavBarState extends State<MobileBottomNavBar> {
     }
     return true;
   }
+
+  // Kids Mode sends /live-tv back to home, so the guide button would only be a
+  // dead end.
+  bool get _showLiveTvButton =>
+      !_kidsMode &&
+      _prefs.get(UserPreferences.showLiveTvButton) &&
+      _libraries.any(isLiveTvLibrary);
+
+  List<AggregatedLibrary> get _navLibraries =>
+      librariesForNav(_libraries, _showLiveTvButton, hideLiveTv: _kidsMode);
 
   bool _isActive(String route) => widget.activeRoute == route;
 
@@ -237,6 +267,20 @@ class _MobileBottomNavBarState extends State<MobileBottomNavBar> {
       );
     }
 
+    if (_showLiveTvButton) {
+      actions.add(
+        _BottomNavAction(
+          icon: Icons.live_tv_rounded,
+          label: l10n.liveTv,
+          isActive: _isActive(Destinations.liveTvGuide),
+          onTap: () {
+            if (_isActive(Destinations.liveTvGuide)) return;
+            context.navigateTopLevel(Destinations.liveTvGuide);
+          },
+        ),
+      );
+    }
+
     if (_prefs.get(UserPreferences.enableFolderView)) {
       actions.add(
         _BottomNavAction(
@@ -251,7 +295,8 @@ class _MobileBottomNavBarState extends State<MobileBottomNavBar> {
       );
     }
 
-    final showSyncPlay = _prefs.get(UserPreferences.syncPlayEnabled) &&
+    final showSyncPlay = !_kidsMode &&
+        _prefs.get(UserPreferences.syncPlayEnabled) &&
         _prefs.get(UserPreferences.showSyncPlayButton);
     if (showSyncPlay) {
       actions.add(
@@ -285,8 +330,10 @@ class _MobileBottomNavBarState extends State<MobileBottomNavBar> {
     }
 
     final activeRoute = widget.activeRoute ?? '';
-    if (_prefs.get(UserPreferences.showLibrariesInToolbar) &&
-        _libraries.isNotEmpty) {
+    // Kids Mode drops this entry, so the My Media home row takes its place.
+    if (!_kidsMode &&
+        _prefs.get(UserPreferences.showLibrariesInToolbar) &&
+        _navLibraries.isNotEmpty) {
       actions.add(
         _BottomNavAction(
           iconBuilder: (size, color) => Image.asset(
@@ -304,12 +351,31 @@ class _MobileBottomNavBarState extends State<MobileBottomNavBar> {
       );
     }
 
+    // Same gate the sidebar and the toolbar use: downloads exist on phones,
+    // tablets, desktops and Android TV, and nowhere else. The entry also waits
+    // until there is something saved, so it never opens an empty screen.
+    if (DownloadsNavSlot.isOffered() && DownloadsNavSlot.hasSavedMedia()) {
+      actions.add(
+        _BottomNavAction(
+          icon: Icons.download_for_offline,
+          label: l10n.savedMedia,
+          isActive: true,
+          onTap: () {
+            showDownloadsDialog(context);
+          },
+        ),
+      );
+    }
+
     return actions;
   }
 
+  bool get _kidsMode => _prefs.get(UserPreferences.kidsModeEnabled);
+
   bool _seerrEnabled() {
     try {
-      return _prefs.get(UserPreferences.showSeerrButton) &&
+      return !_kidsMode &&
+          _prefs.get(UserPreferences.showSeerrButton) &&
           GetIt.instance<PluginSyncService>().seerrAvailable;
     } catch (_) {
       return false;
@@ -349,25 +415,14 @@ class _MobileBottomNavBarState extends State<MobileBottomNavBar> {
   }
 
   void _navigateToLibrary(AggregatedLibrary lib) {
-    if (lib.collectionType == 'music') {
-      context.navigateTopLevel('/music/${lib.id}');
-    } else if (lib.collectionType == 'books' ||
-        lib.collectionType == 'audiobooks') {
-      context.navigateTopLevel(
-        Destinations.bookLibrary(lib.id, collectionType: lib.collectionType),
-      );
-    } else if (lib.collectionType == 'livetv') {
-      context.navigateTopLevel(Destinations.liveTvGuide);
-    } else {
-      context.navigateTopLevel(
-        gameOrLibraryRoute(
-          lib.id,
-          lib.collectionType,
-          lib.name,
-          serverId: lib.serverId,
-        ),
-      );
-    }
+    context.navigateTopLevel(
+      libraryRoute(
+        lib.id,
+        lib.collectionType,
+        lib.name,
+        serverId: lib.serverId,
+      ),
+    );
   }
 
   Future<void> _showMoreSheet(
@@ -471,7 +526,7 @@ class _MobileBottomNavBarState extends State<MobileBottomNavBar> {
                     shrinkWrap: true,
                     padding: const EdgeInsets.only(bottom: 8),
                     children: [
-                      for (final lib in _libraries)
+                      for (final lib in _navLibraries)
                         ListTile(
                           leading: Image.asset(
                             'assets/icons/clapperboard.png',
@@ -529,6 +584,10 @@ class _MobileBottomNavBarState extends State<MobileBottomNavBar> {
                   _userImageUrl!,
                   headers: serverImageHeaders,
                   fit: BoxFit.cover,
+                  cacheWidth: ArtworkDecode.widthFor(
+                    40,
+                    MediaQuery.devicePixelRatioOf(context),
+                  ),
                   errorBuilder: (_, _, _) => _avatarFallback(initial),
                 )
               : _avatarFallback(initial),

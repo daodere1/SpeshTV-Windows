@@ -3,10 +3,12 @@ import 'dart:collection';
 import 'dart:developer' as developer;
 
 import 'package:flutter/foundation.dart';
+import 'package:get_it/get_it.dart';
 import 'package:server_core/server_core.dart';
 
 import '../../preference/user_preferences.dart';
 import 'media_server_client_factory.dart';
+import 'plugin_sync_service.dart';
 
 enum LogLevel { debug, info, warning, error }
 
@@ -18,6 +20,7 @@ enum LogCategory {
   auth,
   playback,
   sync,
+  artwork,
 }
 
 extension LogLevelLabel on LogLevel {
@@ -38,6 +41,7 @@ extension LogCategoryLabel on LogCategory {
     LogCategory.auth => 'auth',
     LogCategory.playback => 'playback',
     LogCategory.sync => 'sync',
+    LogCategory.artwork => 'artwork',
   };
 }
 
@@ -72,9 +76,44 @@ class LogService extends ChangeNotifier {
 
   static const int _maxEntries = 2000;
 
+  // Stops at the path so the endpoint stays readable. Only the host is
+  // private, and a report of bare hosts cannot say which call misbehaved.
   static final _redactRegex = RegExp(
-    r'((?:https?|wss?)://)[A-Za-z0-9._~%\-:@\[\]]+',
+    r'''((?:https?|wss?)://)[^\s/<>"',;()\]}]+''',
     caseSensitive: false,
+  );
+
+  static final _hostLookupRegex = RegExp(
+    r'''((?:Failed host lookup|Unable to resolve host):? ['"])[^'"]+''',
+    caseSensitive: false,
+  );
+
+  static final _genericErrorRedactRegex = RegExp(
+    r'''\b(host(?:name)?|address|ip|server|url|uri|domain|origin)'''
+    r'''(\s*"?\s*[:=]\s*"?\s*)([^\s,;()<>"{}\[\]']*[.0-9][^\s,;()<>"{}\[\]']*)("?)''',
+    caseSensitive: false,
+  );
+
+  // The host redaction above stops at the path, so a URL keeps the credential
+  // in its query, and these reports get pasted into public issues. The name is
+  // kept and only the value goes, since knowing auth was present still reads.
+  // A hyphenated name like X-Emby-Token is covered by the bare token branch.
+  static final _credentialRegex = RegExp(
+    r"""\b(api[_-]?key|access[_-]?token|auth[_-]?token|authorization|token)"""
+    r"""(\s*[:=]\s*"?)"""
+    r"""((?:(?:Bearer|Basic|MediaBrowser)\s+)?[^\s&"',;<>{}\[\]]+)""",
+    caseSensitive: false,
+  );
+
+  static final _ipv4Regex = RegExp(
+    r'\b(?:\d{1,3}\.){3}\d{1,3}\b',
+  );
+
+  static final _ipv6Regex = RegExp(
+    r'(?<![:.\w])(?:'
+    r'(?:[A-Fa-f0-9]{1,4}:){7}[A-Fa-f0-9]{1,4}'
+    r'|[A-Fa-f0-9:]*::[A-Fa-f0-9:]*'
+    r')(?![:.\w])',
   );
 
   final UserPreferences _prefs;
@@ -220,10 +259,44 @@ class LogService extends ChangeNotifier {
     return buffer.toString();
   }
 
+  /// Whether the active server will take a report right now. Jellyfin has an
+  /// endpoint for this, Emby only gets one from the Moonfin plugin.
+  bool get canUploadToServer {
+    try {
+      return _acceptsReports(_clientFactory.getActiveClient());
+    } on StateError {
+      return false;
+    }
+  }
+
+  bool _acceptsReports(MediaServerClient client) {
+    if (client.clientLogApi == null) return false;
+    if (client.serverType != ServerType.emby) return true;
+    // Tests and background isolates never register the sync service, and the
+    // ping never runs there, so treat it as allowed.
+    if (!GetIt.instance.isRegistered<PluginSyncService>()) return true;
+    return GetIt.instance<PluginSyncService>().clientLogSupported;
+  }
+
+  /// Why [canUploadToServer] is false, worded for the diagnostics screen.
+  String get uploadUnavailableReason {
+    final MediaServerClient client;
+    try {
+      client = _clientFactory.getActiveClient();
+    } on StateError {
+      return 'Sign in to a server to send reports.';
+    }
+    if (client.serverType == ServerType.emby) {
+      return 'This Emby server needs the Moonfin plugin, with client log '
+          'upload turned on.';
+    }
+    return 'The active server does not support report uploads.';
+  }
+
   /// Uploads the current report to the active server.
   ///
   /// Returns the server-assigned file name on success. Throws [StateError] if
-  /// no server is active or the server does not support client log upload.
+  /// no server is active or the server will not take a report.
   Future<String?> uploadToServer() async {
     final MediaServerClient client;
     try {
@@ -232,10 +305,8 @@ class LogService extends ChangeNotifier {
       throw StateError('No active server to send the report to.');
     }
     final api = client.clientLogApi;
-    if (api == null) {
-      throw StateError(
-        'This server does not support diagnostic report uploads.',
-      );
+    if (api == null || !_acceptsReports(client)) {
+      throw StateError(uploadUnavailableReason);
     }
     log(
       LogCategory.general,
@@ -283,11 +354,51 @@ class LogService extends ChangeNotifier {
   };
 
   String _redact(String text) {
-    if (!text.contains('://')) {
-      return text;
+    var result = text;
+
+    final lower = result.toLowerCase();
+    if (lower.contains('host') ||
+        lower.contains('address') ||
+        lower.contains('ip') ||
+        lower.contains('server') ||
+        lower.contains('url') ||
+        lower.contains('uri') ||
+        lower.contains('domain') ||
+        lower.contains('origin')) {
+      result = result.replaceAllMapped(_genericErrorRedactRegex, (match) {
+        return '${match.group(1)}${match.group(2)}[REDACTED]${match.group(4)}';
+      });
+
+      if (lower.contains('host')) {
+        result = result.replaceAllMapped(_hostLookupRegex, (match) {
+          return "${match.group(1)}[REDACTED]";
+        });
+      }
     }
-    return text.replaceAllMapped(_redactRegex, (match) {
-      return '${match.group(1)}[REDACTED]';
-    });
+
+    if (lower.contains('://')) {
+      result = result.replaceAllMapped(_redactRegex, (match) {
+        return '${match.group(1)}[REDACTED]';
+      });
+    }
+
+    if (lower.contains('key') ||
+        lower.contains('token') ||
+        lower.contains('auth')) {
+      result = result.replaceAllMapped(_credentialRegex, (match) {
+        return '${match.group(1)}${match.group(2)}[REDACTED]';
+      });
+    }
+    
+    // catch any ipv4's
+    if (result.contains('.')) {
+      result = result.replaceAll(_ipv4Regex, '[REDACTED]');
+    }
+    // catch any ipv6's
+    if (result.contains(':')) {
+      result = result.replaceAll(_ipv6Regex, '[REDACTED]');
+    }
+
+    return result;
   }
 }

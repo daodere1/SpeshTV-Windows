@@ -464,11 +464,15 @@ class EnumPreferenceTile<T extends Enum> extends StatefulWidget {
 class _EnumPreferenceTileState<T extends Enum>
     extends State<EnumPreferenceTile<T>> {
   late PreferenceBinding<T> _binding;
+  late final FocusNode _focusNode;
   bool _pickerOpen = false;
 
   @override
   void initState() {
     super.initState();
+    _focusNode = FocusNode(
+      debugLabel: 'EnumPreferenceTile_${widget.preference.key}',
+    );
     _binding = PreferenceBinding(
       GetIt.instance<PreferenceStore>(),
       widget.preference,
@@ -487,6 +491,7 @@ class _EnumPreferenceTileState<T extends Enum>
 
   @override
   void dispose() {
+    _focusNode.dispose();
     _binding.dispose();
     super.dispose();
   }
@@ -501,6 +506,7 @@ class _EnumPreferenceTileState<T extends Enum>
           final current = values.contains(value) ? value : values.first;
           final label = widget.labelOf(current);
           return ListTile(
+            focusNode: _focusNode,
             autofocus: widget.autofocus,
             leading: widget.icon != null
                 ? buildSettingsLeadingIconShell(
@@ -606,6 +612,13 @@ class _EnumPreferenceTileState<T extends Enum>
     _binding.value = result;
     widget.onChanged?.call();
     widget.onChangedValue?.call(result);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted &&
+          !_focusNode.hasFocus &&
+          (ModalRoute.of(context)?.isCurrent ?? true)) {
+        _focusNode.requestFocus();
+      }
+    });
   }
 }
 
@@ -1185,10 +1198,33 @@ class _TvFocusHighlightState extends State<TvFocusHighlight> {
                   : AppColorScheme.onSurface.withValues(alpha: 0.7),
               titleTextStyle: _kSettingsTitleTextStyle,
               subtitleTextStyle: _kSettingsSubtitleTextStyle,
-              child: Material(
-                type: MaterialType.transparency,
-                child: Builder(
-                  builder: (ctx) => widget.builder(ctx, focusVisible),
+              child: CheckboxTheme(
+                data: CheckboxThemeData(
+                  side: BorderSide(
+                    color: highlighted
+                        ? AppColors.black.withValues(alpha: 0.8)
+                        : (Theme.of(context).colorScheme.primary),
+                    width: 1.8,
+                  ),
+                  fillColor: WidgetStateProperty.resolveWith((states) {
+                    if (states.contains(WidgetState.selected)) {
+                      return highlighted
+                          ? AppColors.black.withValues(alpha: 0.87)
+                          : Theme.of(context).colorScheme.primary;
+                    }
+                    return Colors.transparent;
+                  }),
+                  checkColor: WidgetStateProperty.all(
+                    highlighted
+                        ? Colors.white
+                        : Theme.of(context).colorScheme.onPrimary,
+                  ),
+                ),
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: Builder(
+                    builder: (ctx) => widget.builder(ctx, focusVisible),
+                  ),
                 ),
               ),
             ),

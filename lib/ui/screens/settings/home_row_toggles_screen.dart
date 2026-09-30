@@ -7,6 +7,7 @@ import 'package:moonfin_design/moonfin_design.dart';
 import '../../../data/services/plugin_sync_service.dart';
 import '../home/home_view_model.dart';
 import '../../../l10n/app_localizations.dart';
+import '../../util/error_message.dart';
 import '../../../preference/home_section_config.dart';
 import '../../../preference/preference_constants.dart';
 import '../../../preference/user_preferences.dart';
@@ -669,8 +670,8 @@ class _HomeRowTogglesScreenState extends State<HomeRowTogglesScreen> {
                   if (showSinceYouWatchedRows) ...[
                     EnumPreferenceTile<SinceYouWatchedSource>(
                       preference: UserPreferences.sinceYouWatchedSource,
-                      title: 'Source',
-                      description: "Choose recommendation source (the local-content-only Moonfin special or TMDB's similarity metric. Note: Online recommendations require Seerr integration).",
+                      title: 'Recommendation Source',
+                      description: "Choose recommendation source (Moonfin Recommends custom local algorithm, Jellyfin Recommends server engine, or TMDb's similarity metrics. Note: Online recommendations require Seerr integration).",
                       icon: Icons.source,
                       values: SinceYouWatchedSource.values,
                       labelOf: (v) => v.displayName,
@@ -1000,7 +1001,7 @@ class _StudioSelectionDialogState extends State<StudioSelectionDialog> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = e.toString();
+          _error = describeError(e, AppLocalizations.of(context));
           _loading = false;
         });
       }

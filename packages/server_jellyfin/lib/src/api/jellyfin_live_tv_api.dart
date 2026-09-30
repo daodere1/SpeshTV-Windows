@@ -34,6 +34,11 @@ class JellyfinLiveTvApi implements LiveTvApi {
     DateTime? startDate,
     DateTime? endDate,
     List<String>? channelIds,
+    bool? isMovie,
+    bool? isSeries,
+    bool? isSports,
+    bool? isNews,
+    bool? isKids,
     String? fields,
     bool? enableTotalRecordCount,
     bool? enableImages,
@@ -51,6 +56,11 @@ class JellyfinLiveTvApi implements LiveTvApi {
     final common = <String, dynamic>{
       if (startDate != null) 'MinEndDate': startDate.toUtc().toIso8601String(),
       if (endDate != null) 'MaxStartDate': endDate.toUtc().toIso8601String(),
+      'IsMovie': ?isMovie,
+      'IsSeries': ?isSeries,
+      'IsSports': ?isSports,
+      'IsNews': ?isNews,
+      'IsKids': ?isKids,
       'Fields': ?fields,
       'EnableTotalRecordCount': ?enableTotalRecordCount,
       'EnableImages': ?enableImages,
@@ -84,6 +94,18 @@ class JellyfinLiveTvApi implements LiveTvApi {
     final response = await _dio.get(
       '/LiveTv/Programs/Recommended',
       queryParameters: {'Limit': ?limit, 'IsAiring': ?isAiring},
+    );
+    return response.data as Map<String, dynamic>;
+  }
+
+  @override
+  Future<Map<String, dynamic>> getProgram(
+    String programId, {
+    String? userId,
+  }) async {
+    final response = await _dio.get(
+      '/LiveTv/Programs/${Uri.encodeComponent(programId)}',
+      queryParameters: {'UserId': ?userId},
     );
     return response.data as Map<String, dynamic>;
   }

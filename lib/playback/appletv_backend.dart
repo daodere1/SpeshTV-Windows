@@ -7,10 +7,14 @@ import 'package:playback_core/playback_core.dart';
 import '../data/services/log_service.dart';
 import '../preference/preference_constants.dart';
 import '../preference/user_preferences.dart';
+import '../util/loggable_url.dart';
 import '../util/platform_detection.dart';
 
 import 'device_profile_builder.dart';
+import 'dolby_vision_av1.dart';
+import 'engine_trust.dart';
 import 'known_defects.dart';
+import 'letterbox_croppers.dart';
 import 'server_transcode_capabilities.dart';
 
 class AppleTvBackend implements PlayerBackend {
@@ -52,7 +56,7 @@ class AppleTvBackend implements PlayerBackend {
 
   bool _disposed = false;
   bool? _engineLogForwarding;
-  bool? _allowUntrustedTls;
+  EngineTrust? _trust;
   bool _playerPresented = false;
   Timer? _audioDelayDebounce;
 
@@ -93,15 +97,6 @@ class AppleTvBackend implements PlayerBackend {
   void _log(String message, {LogLevel level = LogLevel.debug, Object? error}) {
     if (!GetIt.instance.isRegistered<LogService>()) return;
     GetIt.instance<LogService>().playback(message, level: level, error: error);
-  }
-
-  /// The query carries the server token, so only the origin and path go in a
-  /// report a user uploads.
-  String _describeUrl(String url) {
-    final parsed = Uri.tryParse(url);
-    if (parsed == null) return 'unparsable url';
-    final port = parsed.hasPort ? ':${parsed.port}' : '';
-    return '${parsed.scheme}://${parsed.host}$port${parsed.path}';
   }
 
   Future<void> _ensurePlayerPresented({bool audioOnly = false}) async {
@@ -246,10 +241,12 @@ class AppleTvBackend implements PlayerBackend {
   /// callback, so without this a self signed server browses fine and fails
   /// every playback.
   void _syncAllowUntrustedTls() {
-    final enabled = _prefs.get(UserPreferences.allowSelfSignedCerts);
-    if (enabled == _allowUntrustedTls) return;
-    _allowUntrustedTls = enabled;
-    _invoke<void>('setAllowUntrustedTls', {'enabled': enabled});
+    final trust = EngineTrust.current(
+      _prefs.get(UserPreferences.allowSelfSignedCerts),
+    );
+    if (trust.matches(_trust)) return;
+    _trust = trust;
+    _invoke<void>('setAllowUntrustedTls', trust.toChannelArguments());
   }
 
   int _toInt(dynamic value) {
@@ -302,7 +299,7 @@ class AppleTvBackend implements PlayerBackend {
     final audioOnly =
         (payload['mediaType']?.toString() ?? 'video') == 'audio';
     _log(
-      'play ${_describeUrl(url)} live=${payload['isLive'] == true} '
+      'play ${loggableUrl(url)} live=${payload['isLive'] == true} '
       'audioOnly=$audioOnly startMs=${startPosition.inMilliseconds} '
       'headers=${(headers.keys.toList()..sort()).join(',')} '
       'autoPlay=$autoPlay',
@@ -318,6 +315,8 @@ class AppleTvBackend implements PlayerBackend {
       'videoRangeType': payload['videoRangeType']?.toString(),
       'videoCodec': payload['videoCodec']?.toString(),
       'videoDvProfile': payload['videoDvProfile'],
+      'dolbyVisionBaseLayerOnly': needsBaseLayerOnlyForDolbyVisionAv1(payload),
+      'externalSubtitles': payload['externalSubtitles'] ?? const [],
       'videoFrameRate': payload['videoFrameRate'],
       'videoWidth': payload['videoWidth'],
       'videoHeight': payload['videoHeight'],
@@ -407,6 +406,12 @@ class AppleTvBackend implements PlayerBackend {
   Stream<bool> get bufferingStream => _bufferingStream.stream;
 
   @override
+  double get subtitleAutoOffsetSeconds => 0.0;
+
+  @override
+  Stream<double>? get subtitleAutoOffsetStream => null;
+
+  @override
   Stream<bool> get completedStream => _completedStream.stream;
 
   @override
@@ -453,6 +458,7 @@ class AppleTvBackend implements PlayerBackend {
       supportsAv1DolbyVision: PlatformDetection.supportsAv1DolbyVision,
       supportsAv1Hdr10: PlatformDetection.supportsAv1Hdr10,
       supportsAv1Hdr10Plus: PlatformDetection.supportsAv1Hdr10Plus,
+      rendersAv1DoviViaHdr10BaseLayer: true,
       supportsVc1: PlatformDetection.supportsVc1,
       maxResolutionAvcWidth: PlatformDetection.maxResolutionAvcWidth,
       maxResolutionAvcHeight: PlatformDetection.maxResolutionAvcHeight,
@@ -486,6 +492,10 @@ class AppleTvBackend implements PlayerBackend {
     required String topTitle,
     required String topSubtitle,
     required List<Map<String, dynamic>> chapters,
+    // Gates the marks alone. The chapter list still travels in full, since
+    // the chapters button and its menu read the same array. Off by default
+    // to match the preference.
+    bool showChapterMarkers = false,
     required bool hasPrevious,
     required bool hasNext,
     required int skipForwardMs,
@@ -514,6 +524,7 @@ class AppleTvBackend implements PlayerBackend {
       'topTitle': topTitle,
       'topSubtitle': topSubtitle,
       'chapters': chapters,
+      'showChapterMarkers': showChapterMarkers,
       'hasPrevious': hasPrevious,
       'hasNext': hasNext,
       'skipForwardMs': skipForwardMs,
@@ -608,6 +619,7 @@ class AppleTvBackend implements PlayerBackend {
     required bool isGlass,
     required int accentARGB,
     required int surfaceARGB,
+    required int surfaceVariantARGB,
     required int onSurfaceARGB,
     required int rangeProgressARGB,
     required int rangeTrackARGB,
@@ -616,6 +628,7 @@ class AppleTvBackend implements PlayerBackend {
       'isGlass': isGlass,
       'accent': accentARGB,
       'surface': surfaceARGB,
+      'surfaceVariant': surfaceVariantARGB,
       'onSurface': onSurfaceARGB,
       'rangeProgress': rangeProgressARGB,
       'rangeTrack': rangeTrackARGB,
@@ -624,6 +637,10 @@ class AppleTvBackend implements PlayerBackend {
 
   Future<void> setPromptStrings(Map<String, String> strings) async {
     await _invoke<void>('setPromptStrings', strings);
+  }
+
+  Future<void> setTimeSlots(Map<String, Object> slots) async {
+    await _invoke<void>('setTimeSlots', slots);
   }
 
   @override
@@ -646,6 +663,11 @@ class AppleTvBackend implements PlayerBackend {
     String? externalSubtitleUrl,
   }) async {
     _activeSubtitleTrackIndex = index;
+    _log(
+      'setSubtitleTrack index=$index external=$isExternalSubtitle '
+      'bitmap=$isBitmapSubtitle codec=${subtitleCodec ?? 'none'} '
+      'url=${externalSubtitleUrl == null ? 'none' : loggableUrl(externalSubtitleUrl)}',
+    );
     await _invoke<void>('setSubtitleTrack', {
       'index': index,
       'isBitmapSubtitle': isBitmapSubtitle,
@@ -658,6 +680,7 @@ class AppleTvBackend implements PlayerBackend {
   @override
   Future<void> disableSubtitleTrack() async {
     _activeSubtitleTrackIndex = -1;
+    _log('disableSubtitleTrack');
     await _invoke<void>('disableSubtitleTrack');
   }
 
@@ -682,14 +705,22 @@ class AppleTvBackend implements PlayerBackend {
 
   @override
   Future<void> waitForEmbeddedSubtitleCount(int count) async {
-    final deadline = DateTime.now().add(const Duration(seconds: 6));
+    final started = DateTime.now();
+    final deadline = started.add(const Duration(seconds: 6));
+    var satisfied = false;
     while (DateTime.now().isBefore(deadline)) {
       if (_textTrackCount >= count) {
-        return;
+        satisfied = true;
+        break;
       }
       await waitForTracksReady();
       await Future<void>.delayed(const Duration(milliseconds: 100));
     }
+    _log(
+      'waitForEmbeddedSubtitleCount want=$count have=$_textTrackCount '
+      'satisfied=$satisfied '
+      'waited=${DateTime.now().difference(started).inMilliseconds}ms',
+    );
   }
 
   @override
@@ -726,6 +757,10 @@ class AppleTvBackend implements PlayerBackend {
     String? language,
     String? codec,
   }) async {
+    _log(
+      'addExternalSubtitle ${loggableUrl(url)} title=${title ?? 'none'} '
+      'language=${language ?? 'none'} codec=${codec ?? 'none'}',
+    );
     await _invoke<void>('addExternalSubtitle', {
       'url': url,
       'title': title,
@@ -770,6 +805,12 @@ class AppleTvBackend implements PlayerBackend {
   bool get supportsRuntimeTrackSelection => true;
 
   @override
+  LetterboxCropper get letterboxCropper => const AppleTvLetterboxCropper();
+
+  @override
+  bool get supportsLetterboxCrop => letterboxCropper.isSupported;
+
+  @override
   bool get supportsDirectPlayAudioSwitch => false;
 
   @override
@@ -786,6 +827,25 @@ class AppleTvBackend implements PlayerBackend {
 
   @override
   bool get demuxesEmbeddedSubtitles => true;
+
+  // Every seek here goes through `.seeking`, which the wrapper reports as
+  // buffering with no in-buffer fast path, and one that restarts a transcode
+  // has to open the session again before a frame is rendered. Provisional
+  // until a device trace measures the real distribution; SyncPlay measures
+  // each seek anyway and only uses these to pace itself and to decide when a
+  // gap has stopped being seek cost.
+  @override
+  Duration get typicalSeekLatency => const Duration(seconds: 4);
+
+  @override
+  Duration get maxSeekLatency => const Duration(seconds: 20);
+
+  // A rate write goes straight to the engine's AVPlayer rate. Every one of
+  // them audibly reconfigures the audio, and passthrough audio cannot play at
+  // anything but 1x, so a SyncPlay nudge every two seconds is a stutter that
+  // never stops.
+  @override
+  bool get supportsSmoothRateChange => false;
 
   @override
   List<EmbeddedCaptionTrack> get embeddedCaptionTracks =>

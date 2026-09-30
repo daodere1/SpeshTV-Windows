@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:get_it/get_it.dart';
@@ -398,6 +399,25 @@ Future<List<int>?> loadGameStateWithMigration(
   return legacy;
 }
 
+/// Evidence-backed defaults applied below stored user settings.
+const Map<String, Map<String, String>> coreOptionDefaults = {
+  'mupen64plus_next': {
+    // 8000 caused unbounded GPU-memory growth on Shield and Fire TV Cube;
+    // 1500 reached a stable plateau in the measured N64 runs.
+    'mupen64plus-MaxTxCacheSize': '1500',
+  },
+};
+
+/// Apply app defaults without overriding stored user settings.
+Map<String, String>? withCoreOptionDefaults(
+  String coreId,
+  Map<String, String>? settings,
+) {
+  final defaults = coreOptionDefaults[coreId];
+  if (defaults == null || defaults.isEmpty) return settings;
+  return {...defaults, ...?settings};
+}
+
 /// The saved-settings key for [coreId], shared by every place that reads or
 /// writes a core's persisted emulator options.
 String coreSettingsKey(String coreId) => 'moonfin-native-$coreId';
@@ -408,6 +428,38 @@ String coreSettingsKey(String coreId) => 'moonfin-native-$coreId';
 /// sending a zero-byte PUT body, which some HTTP stacks and servers mishandle.
 Future<void> resetCoreSettings(GamesApi games, String coreId) =>
     games.putSave(coreSettingsKey(coreId), const [10], kind: 'settings');
+
+/// Reads [coreId]'s persisted options as id -> value. One `id=value` per line;
+/// a line with no `=`, or `=` at position zero, is skipped.
+Future<Map<String, String>> readCoreSettings(
+  GamesApi games,
+  String coreId,
+) async {
+  final blob = await games.getSave(coreSettingsKey(coreId), kind: 'settings');
+  if (blob == null || blob.isEmpty) return const {};
+  final map = <String, String>{};
+  for (final line in utf8.decode(blob).split('\n')) {
+    final eq = line.indexOf('=');
+    if (eq > 0) map[line.substring(0, eq)] = line.substring(eq + 1);
+  }
+  return map;
+}
+
+/// Writes [values] as [coreId]'s persisted options, in the format
+/// [readCoreSettings] and the in-game menu both use.
+Future<void> writeCoreSettings(
+  GamesApi games,
+  String coreId,
+  Map<String, String> values,
+) {
+  if (values.isEmpty) return resetCoreSettings(games, coreId);
+  final blob = values.entries.map((e) => '${e.key}=${e.value}').join('\n');
+  return games.putSave(
+    coreSettingsKey(coreId),
+    utf8.encode(blob),
+    kind: 'settings',
+  );
+}
 
 /// The libretro core id for an EmulatorJS core name, or null if there's no
 /// mapping for it.

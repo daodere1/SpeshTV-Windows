@@ -12,6 +12,7 @@ import 'package:moonfin_design/moonfin_design.dart';
 import 'package:server_core/server_core.dart';
 
 import '../../../l10n/app_localizations.dart';
+import '../../util/error_message.dart';
 import '../../../auth/models/login_state.dart';
 import '../../../auth/models/server.dart';
 import '../../../auth/repositories/auth_repository.dart';
@@ -357,7 +358,10 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       if (!mounted) return;
       final l10n = AppLocalizations.of(context);
-      setState(() => _errorMessage = l10n.quickConnectUnavailable('$e'));
+      setState(
+        () => _errorMessage =
+            l10n.quickConnectUnavailable(describeError(e, l10n)),
+      );
     }
   }
 

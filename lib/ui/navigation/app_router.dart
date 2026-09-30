@@ -176,7 +176,11 @@ CustomTransitionPage<T> _opaqueFullScreenPage<T>({
     // go_router only auto-names builder-based routes, not pageBuilder ones.
     name: state.name ?? state.uri.path,
     opaque: true,
-    barrierColor: Colors.black,
+    // No barrier on Windows. The route is opaque with a zero-length
+    // transition, so the barrier is never visible - but it paints an opaque
+    // black ModalBarrier under the page, which would paint out the video
+    // behind the transparent player screen native HDR output relies on.
+    barrierColor: PlatformDetection.isWindows ? null : Colors.black,
     transitionDuration: Duration.zero,
     reverseTransitionDuration: Duration.zero,
     transitionsBuilder: (context, animation, secondaryAnimation, child) =>
@@ -224,6 +228,15 @@ final appRouter = GoRouter(
       if (user == null || !user.isAdministrator) {
         return Destinations.home;
       }
+    }
+
+    // The hard gate for Kids Mode. Hiding a nav entry is presentation, but a
+    // deep link reaches these screens without one.
+    if (getIt<UserPreferences>().get(UserPreferences.kidsModeEnabled) &&
+        (path.startsWith('/admin') ||
+            path.startsWith('/seerr') ||
+            path.startsWith('/live-tv'))) {
+      return Destinations.home;
     }
 
     final connectivity = GetIt.instance<ConnectivityService>();
@@ -495,6 +508,7 @@ final appRouter = GoRouter(
         final startFresh = state.uri.queryParameters['fresh'] == '1';
         final forceEmulatorJs =
             state.uri.queryParameters['backend'] == 'emulatorjs';
+        final hardwareRenderingEnabled = state.uri.queryParameters['hw'] != '0';
         return _opaqueFullScreenPage<void>(
           state: state,
           // Native libretro or the EmulatorJS WebView: forced where only one
@@ -508,6 +522,7 @@ final appRouter = GoRouter(
                   core: core,
                   gameName: state.uri.queryParameters['name'],
                   startFresh: startFresh,
+                  hardwareRenderingEnabled: hardwareRenderingEnabled,
                 )
               : GameEmulatorScreen(
                   libraryId: libraryId,
@@ -824,11 +839,11 @@ final appRouter = GoRouter(
     GoRoute(
       path: Destinations.seerrMediaDetail,
       builder: (context, state) {
-        final tmdbId = state.pathParameters['itemId']!;
+        final rawId = state.pathParameters['itemId']!;
         final kind = state.uri.queryParameters['mediaType'] == 'tv'
             ? TmdbItemKind.tv
             : TmdbItemKind.movie;
-        final ref = TmdbItemRef(kind, tmdbId);
+        final ref = TmdbItemRef.tryParse(rawId) ?? TmdbItemRef(kind, rawId);
         return ItemDetailScreen(
           key: ValueKey(ref.itemId),
           itemId: ref.itemId,
@@ -848,7 +863,7 @@ final appRouter = GoRouter(
       builder: (context, state) {
         final personId = state.pathParameters['personId']!;
         final prefs = GetIt.instance<UserPreferences>();
-        if (prefs.get(UserPreferences.detailScreenStyle) == DetailScreenStyle.modern) {
+        if (prefs.get(UserPreferences.detailScreenStyle) != DetailScreenStyle.classic) {
           return ItemDetailScreen(
             key: ValueKey('tmdb:$personId'),
             itemId: 'tmdb:$personId',
@@ -867,12 +882,7 @@ class PlayerRouteObserver extends NavigatorObserver {
 
   bool _isPlayer(Route<dynamic> route) {
     final name = route.settings.name;
-    return name != null &&
-        (name.startsWith('/player/') ||
-         name.startsWith('/game-player/') ||
-         name == '/live-tv/player' ||
-         name == Destinations.audioPlayer ||
-         name == Destinations.videoPlayer);
+    return name != null && Destinations.isPlayerRoute(name);
   }
 
   @override

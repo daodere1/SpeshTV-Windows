@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:server_core/server_core.dart';
 
+import '../../util/accent_folding.dart';
 import '../services/storage_path_service.dart';
 import 'offline_catalog.dart';
 import 'offline_errors.dart';
@@ -101,8 +102,10 @@ class OfflineItemsApi implements ItemsApi {
   }
 
   bool _matchesSearch(OfflineEntry e, String term) {
-    final t = term.toLowerCase();
-    bool has(String? s) => s != null && s.toLowerCase().contains(t);
+    // Standing in for the search the server would have answered, which folds
+    // accents, so a term turns up the same rows offline as it did online.
+    final t = foldForSearch(term);
+    bool has(String? s) => s != null && foldForSearch(s).contains(t);
     if (has(e.metadata['Name'] as String?) || has(e.row.name)) return true;
     if (has(e.metadata['OriginalTitle'] as String?)) return true;
     if (has(e.row.seriesName) || has(e.metadata['SeriesName'] as String?)) {
@@ -111,7 +114,7 @@ class OfflineItemsApi implements ItemsApi {
     if (has(e.metadata['Album'] as String?)) return true;
     if (has(e.metadata['AlbumArtist'] as String?)) return true;
     final artists = (e.metadata['Artists'] as List?) ?? const [];
-    return artists.whereType<String>().any((a) => a.toLowerCase().contains(t));
+    return artists.whereType<String>().any((a) => foldForSearch(a).contains(t));
   }
 
   bool _matchesGenres(OfflineEntry e, List<String> genreIds) {
@@ -481,6 +484,7 @@ class OfflineItemsApi implements ItemsApi {
   Future<Map<String, dynamic>> getSimilarItems(
     String itemId, {
     int? limit,
+    String? bypass,
   }) async {
     final entry = _catalog.byId(itemId);
     if (entry == null) return _envelope(const []);
@@ -562,15 +566,21 @@ class OfflineItemsApi implements ItemsApi {
   Future<Map<String, dynamic>> getResumeItems({
     String? parentId,
     List<String>? includeItemTypes,
+    String? mediaTypes,
     int? startIndex,
     int? limit,
     String? fields,
     String? enableImageTypes,
     int? imageTypeLimit,
   }) async {
-    final types = (includeItemTypes != null && includeItemTypes.isNotEmpty)
-        ? includeItemTypes
-        : const ['Movie', 'Episode', 'Video', 'MusicVideo', 'AudioBook'];
+    final List<String> types;
+    if (includeItemTypes != null && includeItemTypes.isNotEmpty) {
+      types = includeItemTypes;
+    } else if (mediaTypes == 'Audio') {
+      types = const ['Audio', 'AudioBook'];
+    } else {
+      types = const ['Movie', 'Episode', 'Video', 'MusicVideo'];
+    }
     final resumable =
         _catalog.entries
             .where((e) => types.contains(e.type) && _isResumable(e))
@@ -662,7 +672,10 @@ class OfflineItemsApi implements ItemsApi {
   }
 
   @override
-  Future<Map<String, dynamic>> getSeasons(String seriesId) async {
+  Future<Map<String, dynamic>> getSeasons(
+    String seriesId, {
+    String? fields,
+  }) async {
     final seasons = _catalog.entries
         .where((e) => e.type == 'Season' && e.row.seriesId == seriesId)
         .toList();
@@ -681,7 +694,12 @@ class OfflineItemsApi implements ItemsApi {
     for (final e in _catalog.entries) {
       if (e.type != 'Episode' || e.row.seriesId != seriesId) continue;
       final seasonId = e.row.seasonId;
-      if (seasonId == null || synthesized.containsKey(seasonId)) continue;
+      if (seasonId == null) continue;
+      final seen = synthesized[seasonId];
+      if (seen != null) {
+        seen['ChildCount'] = (seen['ChildCount'] as int) + 1;
+        continue;
+      }
       synthesized[seasonId] = {
         'Id': seasonId,
         'Name':
@@ -692,6 +710,7 @@ class OfflineItemsApi implements ItemsApi {
         'SeriesId': seriesId,
         'SeriesName': e.row.seriesName,
         'ServerId': e.row.serverId,
+        'ChildCount': 1,
         'ImageTags': const <String, dynamic>{},
         'UserData': const <String, dynamic>{},
       };
@@ -877,6 +896,14 @@ class OfflineItemsApi implements ItemsApi {
 
   @override
   Future<void> addToCollection(
+    String collectionId,
+    List<String> itemIds,
+  ) async {
+    throw offlineUnavailable('/Collections/$collectionId/Items');
+  }
+
+  @override
+  Future<void> removeFromCollection(
     String collectionId,
     List<String> itemIds,
   ) async {

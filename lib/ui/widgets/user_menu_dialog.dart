@@ -19,12 +19,12 @@ import '../../util/platform_detection.dart';
 import '../../util/pin_code_util.dart';
 import '../navigation/destinations.dart';
 import 'adaptive/adaptive_dialog.dart';
-import '../screens/downloads/downloads_panel.dart';
 import '../screens/settings/settings_side_panel.dart';
 import 'overlay_sheet.dart';
 import 'pin_entry_dialog.dart';
 import 'remote_control_dialog.dart';
 import 'settings/settings_panel.dart';
+import 'image_source.dart';
 
 enum _AccountDialogAction { quickConnect }
 
@@ -410,25 +410,6 @@ class _AccountDialogState extends State<_AccountDialog> {
                     ),
                   ),
                 ),
-                if (!PlatformDetection.isWeb && !PlatformDetection.isTV) ...[
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: _ActionButton(
-                        label: l10n.savedMedia,
-                        onPressed: _busy
-                            ? null
-                            : () {
-                                Navigator.of(context).pop();
-                                showDownloadsDialog(context);
-                              },
-                        focusColor: focusColor,
-                      ),
-                    ),
-                  ),
-                ],
               ],
             ],
           ),
@@ -842,6 +823,10 @@ class _AccountCardState extends State<_AccountCard> {
                             widget.avatarUrl!,
                             headers: serverImageHeaders,
                             fit: BoxFit.cover,
+                            cacheWidth: ArtworkDecode.widthFor(
+                              68,
+                              MediaQuery.devicePixelRatioOf(context),
+                            ),
                             errorBuilder: (_, _, _) {
                               if (!_avatarFailed) {
                                 WidgetsBinding.instance

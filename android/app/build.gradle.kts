@@ -76,6 +76,7 @@ android {
     productFlavors {
         val baseAppId = "dev.speshmedia.moonfin"
         val baseAppName = "SpeshMedia"
+        val testIdSuffix = System.getenv("MOONFIN_TEST_ID_SUFFIX").orEmpty()
         val mobileAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         val tvAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         create("mobile") {
@@ -96,11 +97,12 @@ android {
         }
         create("androidTv") {
             dimension = "device"
-            applicationId = baseAppId
+            applicationId = baseAppId + testIdSuffix
             versionCode = androidTvVersionCode
             versionName = androidTvVersionName
             ndk { abiFilters += tvAbis }
-            manifestPlaceholders["appName"] = baseAppName
+            manifestPlaceholders["appName"] =
+                if (testIdSuffix.isEmpty()) baseAppName else "$baseAppName Test"
             // Impeller off on TV: the GLES fallback stutters on TV-box GPUs.
             manifestPlaceholders["enableImpeller"] = "false"
         }

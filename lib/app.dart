@@ -35,6 +35,7 @@ import 'preference/user_preferences.dart';
 import 'syncplay/syncplay_manager.dart';
 import 'ui/navigation/app_router.dart';
 import 'ui/navigation/deep_link_navigator.dart';
+import 'ui/navigation/destinations.dart';
 import 'ui/navigation/home_refresh_bus.dart';
 import 'ui/theme/app_theme.dart';
 import 'ui/theme/app_theme_controller.dart';
@@ -43,6 +44,7 @@ import 'ui/widgets/cast_mini_player.dart';
 import 'ui/widgets/offline_banner.dart';
 import 'ui/widgets/server_messages_dialog.dart';
 import 'ui/widgets/exit_confirmation_dialog.dart';
+import 'ui/widgets/keyboard_shortcuts/keyboard_shortcut_reference.dart';
 import 'ui/screensaver/screensaver_controller.dart';
 import 'ui/screensaver/screensaver_host.dart';
 import 'util/app_exit.dart';
@@ -54,6 +56,7 @@ import 'util/focus/input_mode_tracker.dart';
 import 'util/idiom/app_ui_idiom.dart';
 import 'util/idiom/glass_capability.dart';
 import 'util/platform_detection.dart';
+import 'util/tv_ui_scale.dart';
 import 'ui/widgets/overlay_sheet.dart';
 import 'package:moonfin_design/moonfin_design.dart';
 import 'util/focus/key_event_utils.dart';
@@ -110,6 +113,8 @@ class _MoonfinAppState extends State<MoonfinApp> {
         keyRepeatInitialDelay: Duration(milliseconds: 450),
         keyRepeatInterval: Duration(milliseconds: 180),
       );
+      _syncSiriRemoteFromPrefs();
+      _prefs.addListener(_syncSiriRemoteFromPrefs);
       SiriRemoteGlide.instance.attach();
     }
     if (PlatformDetection.isAndroid && PlatformDetection.isTV) {
@@ -130,6 +135,12 @@ class _MoonfinAppState extends State<MoonfinApp> {
     if (AppUiIdiomResolver.current != before && mounted) {
       setState(() {});
     }
+  }
+
+  void _syncSiriRemoteFromPrefs() {
+    SiriRemoteGlide.instance.sensitivity = _prefs.get(
+      UserPreferences.siriRemoteSwipeSensitivity,
+    );
   }
 
   void _syncGlassFromPrefs() {
@@ -201,6 +212,7 @@ class _MoonfinAppState extends State<MoonfinApp> {
     _prefs.removeListener(_syncLocaleFromPrefs);
     _prefs.removeListener(_syncIdiomFromPrefs);
     _prefs.removeListener(_syncGlassFromPrefs);
+    _prefs.removeListener(_syncSiriRemoteFromPrefs);
     _deepLinks.dispose();
     _themeController.dispose();
     super.dispose();
@@ -343,13 +355,14 @@ class _MoonfinAppState extends State<MoonfinApp> {
                   ],
                 );
 
-                final mainChild = PlatformDetection.isAppleTV
-                    ? _TvUiScale(child: overlay)
-                    : overlay;
-
                 return ListenableBuilder(
                   listenable: _prefs,
                   builder: (context, _) {
+                    // Read here rather than hoisted above the builder, so a
+                    // change to the interface layout override is picked up.
+                    final mainChild = PlatformDetection.isTV
+                        ? TvUiScale(child: overlay)
+                        : overlay;
                     final scale = _prefs
                         .get(UserPreferences.desktopUiScale)
                         .scaleFactor;
@@ -624,16 +637,48 @@ class _GlobalShortcutScopeState extends State<_GlobalShortcutScope>
     return false;
   }
 
-  bool _isPlayerRoute() {
-    final path = appRouter.routerDelegate.currentConfiguration.uri.path;
-    return path.startsWith('/player/') ||
-        path == '/live-tv/player' ||
-        path.startsWith('/game-player/');
+  /// A player is pushed over whichever tab launched it, so the router's uri
+  /// stays on that tab. Only the match list names what is actually on screen.
+  String _currentRoutePath() {
+    final matches = appRouter.routerDelegate.currentConfiguration.matches;
+    if (matches.isEmpty) return '';
+    return matches.last.matchedLocation;
   }
 
-  bool _isHomeRoute() {
-    final path = appRouter.routerDelegate.currentConfiguration.uri.path;
-    return path == '/home';
+  bool _isPlayerRoute() => Destinations.isPlayerRoute(_currentRoutePath());
+
+  bool _routeReadsBackKey() =>
+      Destinations.routeReadsBackKey(_currentRoutePath());
+
+  bool _isHomeRoute() => _currentRoutePath() == Destinations.home;
+
+  bool _shortcutsDialogOpen = false;
+
+  /// The shortcut list for wherever the user is. Pressing the key again
+  /// closes it rather than stacking another. The book reader sits under the
+  /// player path, so it is checked first.
+  void _showKeyboardShortcuts() {
+    final navContext = appRouter.routerDelegate.navigatorKey.currentContext;
+    if (navContext == null || !navContext.mounted) return;
+    if (_shortcutsDialogOpen) {
+      Navigator.of(navContext, rootNavigator: true).pop();
+      return;
+    }
+    final KeyboardShortcutContext shownIn;
+    if (_currentRoutePath().startsWith('/player/book/')) {
+      shownIn = KeyboardShortcutContext.reader;
+    } else if (_isPlayerRoute()) {
+      shownIn = KeyboardShortcutContext.player;
+    } else {
+      shownIn = KeyboardShortcutContext.browse;
+    }
+    _shortcutsDialogOpen = true;
+    unawaited(
+      showKeyboardShortcutsDialog(
+        navContext,
+        shownIn: shownIn,
+      ).whenComplete(() => _shortcutsDialogOpen = false),
+    );
   }
 
   bool _isEditingText() {
@@ -707,7 +752,7 @@ class _GlobalShortcutScopeState extends State<_GlobalShortcutScope>
         }
         return true;
       }
-      if (_isPlayerRoute()) {
+      if (_routeReadsBackKey()) {
         return false;
       }
       if (appRouter.canPop()) {
@@ -728,6 +773,16 @@ class _GlobalShortcutScopeState extends State<_GlobalShortcutScope>
         _exitDialogShowing = true;
         unawaited(_showExitConfirmation());
       }
+      return true;
+    }
+
+    // ? and F1 list the keyboard shortcuts on every screen, trimmed to the
+    // ones that work where the user is. ? is a character, so a text field
+    // keeps it. F1 isn't, so it still opens the list there.
+    if (!PlatformDetection.isTV &&
+        isShowShortcutsKey(key) &&
+        (key == LogicalKeyboardKey.f1 || !_isEditingText())) {
+      _showKeyboardShortcuts();
       return true;
     }
 
@@ -1141,49 +1196,5 @@ class _ConnectivityListenerState extends ConsumerState<_ConnectivityListener>
     _wasOnline = isOnline;
 
     return widget.child;
-  }
-}
-
-class _TvUiScale extends StatelessWidget {
-  const _TvUiScale({required this.child});
-
-  final Widget child;
-
-  static const double _targetScale = 1.45;
-  static const double _designWidth = 1920 / _targetScale;
-
-  @override
-  Widget build(BuildContext context) {
-    final mq = MediaQuery.of(context);
-    final realSize = mq.size;
-    if (realSize.width <= 0) {
-      return child;
-    }
-    final scale = realSize.width / _designWidth;
-    final logicalSize = Size(realSize.width / scale, realSize.height / scale);
-    EdgeInsets scaleInsets(EdgeInsets insets, {bool zeroTop = false}) =>
-        EdgeInsets.fromLTRB(
-          insets.left / scale,
-          zeroTop ? 0 : insets.top / scale,
-          insets.right / scale,
-          insets.bottom / scale,
-        );
-    return FittedBox(
-      fit: BoxFit.fill,
-      child: SizedBox(
-        width: logicalSize.width,
-        height: logicalSize.height,
-        child: MediaQuery(
-          data: mq.copyWith(
-            size: logicalSize,
-            devicePixelRatio: mq.devicePixelRatio * scale,
-            padding: scaleInsets(mq.padding, zeroTop: true),
-            viewPadding: scaleInsets(mq.viewPadding, zeroTop: true),
-            viewInsets: scaleInsets(mq.viewInsets),
-          ),
-          child: child,
-        ),
-      ),
-    );
   }
 }

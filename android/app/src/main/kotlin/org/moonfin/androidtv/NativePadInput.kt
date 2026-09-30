@@ -4,6 +4,7 @@ import android.content.Context
 import android.hardware.input.InputManager
 import android.os.Handler
 import android.os.SystemClock
+import android.util.Log
 import android.util.SparseArray
 import android.view.InputDevice
 import android.view.KeyEvent
@@ -59,13 +60,11 @@ internal class NativePadInput(
     // transitions are rare and always sent immediately.
     private var lastDiagnosticsAxisEmitUptimeMs = 0L
 
-    // Counts publishPadState calls across every port; every ANALOG_POLL_INTERVAL
-    // of them, one JNI call re-reads which ports the core has queried
-    // RETRO_DEVICE_ANALOG on. Tied to actual analog activity rather than a
-    // wall-clock tick: a Handler timer would keep firing (and need explicit
-    // start/stop bookkeeping around setActive/dispose) even while no stick is
-    // moving, whereas this piggybacks on a call site that already only runs
-    // while a pad is live.
+    // Counts joystick motion events across every port; every
+    // ANALOG_POLL_INTERVAL of them, one JNI call re-reads which ports take an
+    // analog stick. Tied to real stick activity rather than a wall-clock tick:
+    // a Handler timer would keep firing, and need start/stop bookkeeping around
+    // setActive/dispose, even while nothing is moving.
     private var analogPollCounter = 0
 
     // Seeds coreReadsAnalog for pads added between polls.
@@ -143,43 +142,46 @@ internal class NativePadInput(
     }
 
     /**
-     * Polls [LibretroBridge.analogDescriptorPorts] once and applies its
-     * bitmask to every live [PadState] via [setCoreReadsAnalog]. Called from
-     * [setActive] shortly after activation and periodically from
-     * [publishPadState] (see [analogPollCounter]) rather than per event,
-     * since this crosses JNI and the digital/analog rule only needs to react
-     * within a handful of frames, not on every single one.
+     * Polls [LibretroBridge.analogStickPorts] once and applies its bitmask
+     * to every live [PadState] via [setCoreReadsAnalog]. Called from
+     * [setActive] shortly after activation, from [onControllerTypeChanged],
+     * and otherwise every ANALOG_POLL_INTERVAL joystick motion events (see
+     * [analogPollCounter]), since this crosses JNI and the rule only needs to
+     * react within a handful of frames.
      *
-     * The signal is the core's published RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS
-     * for the current game, not "did the core query RETRO_DEVICE_ANALOG" --
-     * that older signal was accurate about what it measured but answered the
-     * wrong question, and using it as an analog/digital gate made real games
-     * worse:
-     *
-     *  - FBNeo queries analog for every game, including 4-way ones. BurgerTime
-     *    became unplayable: our old digital path ignored sideways drift below
-     *    0.40, but FBNeo's own analog->digital conversion uses a far lower
-     *    threshold, so a slight lean while climbing produced a diagonal a 4-way
-     *    game cannot act on, and the character stopped.
-     *  - Stella queries analog for Breakout, where the control is an absolute
-     *    paddle; feeding it stick position made it wild.
-     *
-     * Input descriptors are per-game and authoritative instead: BurgerTime
-     * publishes 64 descriptors, all device=JOYPAD, zero analog; Capcom
-     * Bowling publishes 48 device=JOYPAD entries plus 8 device=ANALOG entries
-     * ('Trackball X'/'Trackball Y'). A port only leaves the d-pad-conversion
-     * path when the current game itself describes analog controls for it.
+     * The host decides which ports are analog and why (see
+     * lh_analog_stick_ports); this only applies the answer.
      *
      * Descriptors can arrive a few ms after [LibretroBridge] finishes loading
      * (FBNeo sends them late), which is why [setActive] schedules a delayed
      * refresh instead of relying solely on the periodic one.
      */
     private fun refreshAnalogPorts() {
-        val mask = bridge.analogDescriptorPorts()
+        val mask = bridge.analogStickPorts()
         analogPortMask = mask
         for (port in 0 until NativeControllerPortRegistry.MAX_PORTS) {
             setCoreReadsAnalog(port, (mask shr port) and 1 != 0)
         }
+    }
+
+    private fun refreshAnalogPortsLater() {
+        handler.postDelayed({ if (active) refreshAnalogPorts() }, ANALOG_POLL_ACTIVATE_DELAY_MS)
+    }
+
+    /**
+     * A controller type change makes the host forget which ports it has seen
+     * a stick read on, so [LibretroBridge.analogStickPorts] answers from the
+     * new layout's descriptors alone until the core has run a couple of
+     * frames under it. Apply that provisional answer now, then re-read once
+     * the core has settled, the same shape as [setActive]. Waiting on the
+     * periodic poll instead would take ANALOG_POLL_INTERVAL motion events,
+     * which is a second of stick movement, or forever if nobody is moving one.
+     */
+    fun onControllerTypeChanged() {
+        if (!active) return
+        analogPollCounter = 0
+        refreshAnalogPorts()
+        refreshAnalogPortsLater()
     }
 
     /**
@@ -217,13 +219,14 @@ internal class NativePadInput(
         analogPortMask = 0
         if (value) {
             val connections = registry.activate(discoverCandidates(logDiagnostics = true))
+            for (connection in connections) logPort("session start", connection)
             for (connection in connections) addPadState(connection)
             // Input descriptors can arrive a few ms after load returns (FBNeo
             // sends them late), so a single refresh shortly after activation
             // catches them instead of waiting for ANALOG_POLL_INTERVAL
-            // publishes, which may not happen for a while if nobody is
+            // motion events, which may not happen for a while if nobody is
             // touching a stick yet.
-            handler.postDelayed({ if (active) refreshAnalogPorts() }, ANALOG_POLL_ACTIVATE_DELAY_MS)
+            refreshAnalogPortsLater()
         } else {
             registry.deactivate(discoverCandidates())
         }
@@ -297,9 +300,22 @@ internal class NativePadInput(
         // on purpose -- never bindable either. Reordering this below capture
         // would let a rebind strand a user with no way out.
         if (keyCode == KeyEvent.KEYCODE_BACK || isVolumeKey(keyCode)) return false
-        if (event.repeatCount != 0) return true
+        if (NativeKeyEventPolicy.shouldIgnoreRepeat(event.action, event.repeatCount)) return true
 
         val connection = registry.connection(event.deviceId)
+        // Android TV implementations can cancel the currently-held remote DPAD
+        // KeyEvent when another button is dispatched, even though the DPAD switch
+        // remains physically down. A genuine ACTION_UP follows when the user
+        // eventually releases the direction. Actual focus/lifecycle loss clears
+        // every held mask in MainActivity, so ignoring this canceled edge cannot
+        // strand movement if Android never delivers that final physical release.
+        if (NativeKeyEventPolicy.shouldIgnoreCanceledRemoteDpadRelease(
+                action = event.action,
+                canceled = event.isCanceled,
+                keyCode = keyCode,
+                isRemote = connection?.deviceClass == NativeInputDeviceClass.REMOTE,
+            )
+        ) return true
         // Observation only: computed before any consuming branch below and
         // never gates a return, so it can never bind or swallow anything.
         emitDiagnosticsButtonIfMatching(connection, event)
@@ -360,12 +376,10 @@ internal class NativePadInput(
             SWALLOW -> return true
             else -> {
                 val bit = 1 shl index
-                if (event.action == KeyEvent.ACTION_DOWN) {
-                    releaseLostHolds(state, index, bit)
-                    state.keyMask = state.keyMask or bit
-                } else {
-                    state.keyMask = state.keyMask and bit.inv()
-                }
+                val pressed = event.action == KeyEvent.ACTION_DOWN
+                if (pressed) releaseLostHolds(state, index, bit)
+                state.keyMask =
+                    NativeDigitalKeyState.transition(state.keyMask, bit, pressed)
                 publishMask(state)
             }
         }
@@ -383,6 +397,20 @@ internal class NativePadInput(
         // through to Flutter's normal focus handling.
         if (!connection.supported) return connection.isGamepad
         val state = padStates.get(event.deviceId) ?: return true
+
+        // Refreshed here, before ANY of this event reads coreReadsAnalog. The
+        // mode picks both the digital direction bits below and the analog axes
+        // in publishPadState, so flipping it midway would publish one half
+        // under the old mode and the other under the new -- the stick sample
+        // that caused the switch discarded, or the old direction re-sent with
+        // the axes zeroed. Counted per event rather than per publish, so a port
+        // held in digital mode (which suppresses its own publishes) still polls
+        // its way back out.
+        analogPollCounter++
+        if (analogPollCounter >= ANALOG_POLL_INTERVAL) {
+            analogPollCounter = 0
+            refreshAnalogPorts()
+        }
 
         // Every axis is read exactly once: getAxisValue is a native call, and
         // this runs on the UI thread for every motion event of every pad.
@@ -620,16 +648,35 @@ internal class NativePadInput(
         }
     }
 
+    /**
+     * One line whenever a device gains or is refused a player slot. The
+     * refusal is the case that matters: an unsupported gamepad has its keys
+     * consumed by onKeyDown and goes nowhere, which from the outside is
+     * indistinguishable from a dead controller. bug-176 could not be answered
+     * from a log because nothing recorded this.
+     */
+    private fun logPort(reason: String, connection: NativeControllerConnection) {
+        val slot = connection.port?.let { "player ${it + 1}" }
+            ?: if (connection.isGamepad) "NO PORT - input is dropped" else "navigation only"
+        Log.i(
+            TAG,
+            "controller $reason: ${connection.name} class=${connection.deviceClass} " +
+                "$slot pinned=${connection.pinned} deviceId=${connection.deviceId}",
+        )
+    }
+
     private fun onDeviceAdded(deviceId: Int) {
         releaseVanishedPadStates()
         val candidate = candidateFor(deviceId) ?: return
         val connection = registry.addOrUpdate(candidate)
+        logPort("added", connection)
         if (active && connection.supported && padStates.get(deviceId) == null) addPadState(connection)
         if (active) bridge.setControllerCount(playableCount(), navigationOnly = navigationOnly(), force = true)
     }
 
     private fun onDeviceRemoved(deviceId: Int) {
         removeDevice(deviceId)
+        Log.i(TAG, "controller removed deviceId=$deviceId")
         if (active) bridge.setControllerCount(playableCount(), navigationOnly = navigationOnly(), force = true)
     }
 
@@ -695,8 +742,12 @@ internal class NativePadInput(
             }
         }
 
+    // Logs, unlike the bulk enumeration path it used to mirror. A device that
+    // arrives mid-session is exactly the one whose classification nobody can
+    // reconstruct afterwards -- a pad connected 90s into a session left no
+    // trace at all, which is what made bug-176 unanswerable from a log.
     private fun candidateFor(deviceId: Int): NativeControllerCandidate? =
-        candidateFor(deviceId, logDiagnostics = false)
+        candidateFor(deviceId, logDiagnostics = true)
 
     /**
      * Every routable device becomes a candidate, not only gamepads, so a
@@ -800,7 +851,7 @@ internal class NativePadInput(
      * Analog counterpart of [publishMask]: sends through
      * [LibretroBridge.onPadState] instead of the mask-only path, but only
      * when the mask changed or an analog value moved by more than
-     * [ANALOG_SEND_EPSILON], so a resting stick does not cross JNI on every
+     * [ANALOG_MIN_SEND_DELTA], so a resting stick does not cross JNI on every
      * motion event.
      */
     private fun publishPadState(
@@ -823,13 +874,17 @@ internal class NativePadInput(
         val analogChanged = analogMoved(lx, state.analogLx) || analogMoved(ly, state.analogLy) ||
             analogMoved(rx, state.analogRx) || analogMoved(ry, state.analogRy) ||
             analogMoved(trigL, state.trigL) || analogMoved(trigR, state.trigR)
+        if (!maskChanged && !analogChanged) return
+        // These fields are the last state sent to the core, not the most
+        // recent Android sample. Keeping a suppressed sample here would make
+        // several small movements compare only with their immediate
+        // predecessor, so they could never accumulate past the minimum send delta.
         state.analogLx = lx
         state.analogLy = ly
         state.analogRx = rx
         state.analogRy = ry
         state.trigL = trigL
         state.trigR = trigR
-        if (!maskChanged && !analogChanged) return
         val combined = if (maskChanged) {
             state.sentMask = desiredMask
             updateComposedMask(state)
@@ -837,15 +892,10 @@ internal class NativePadInput(
             maskComposer.combined(state.port)
         }
         bridge.onPadState(state.port, combined, lx, ly, rx, ry, trigL, trigR)
-
-        analogPollCounter++
-        if (analogPollCounter >= ANALOG_POLL_INTERVAL) {
-            analogPollCounter = 0
-            refreshAnalogPorts()
-        }
     }
 
-    private fun analogMoved(new: Int, old: Int): Boolean = abs(new - old) > ANALOG_SEND_EPSILON
+    private fun analogMoved(new: Int, old: Int): Boolean =
+        analogMovedPastSendBaseline(new, old)
 
     private fun updateComposedMask(state: PadState): Int =
         if (state === keyboardState) maskComposer.setKeyboard(state.sentMask)
@@ -967,24 +1017,22 @@ internal class NativePadInput(
         // low hundreds), so a stored binding can never collide with one.
         const val SYNTHETIC_KEYCODE_L2 = NativeMappingTables.SYNTHETIC_KEYCODE_L2
         const val SYNTHETIC_KEYCODE_R2 = NativeMappingTables.SYNTHETIC_KEYCODE_R2
-        // ~1/255 in int16 terms (32767/255 ≈ 128): the finest step the pads
-        // actually report, per the design doc's measured 8-bit resolution.
-        // A resting stick's rounding noise stays under this, a real move does
-        // not, so this is what gates crossing JNI on every motion event.
-        const val ANALOG_SEND_EPSILON = 128
-        // Every 64th publishPadState call re-reads analogDescriptorPorts. Chosen
+        // Every 64th joystick motion event re-reads analogStickPorts. Chosen
         // to be cheap even at Gauntlet's measured ~56 ANALOG queries/frame
         // (an unrelated, much hotter path) while still reacting within a
         // fraction of a second of real stick movement.
         const val ANALOG_POLL_INTERVAL = 64
-        // Delay before the one-shot refresh in setActive(true); the design
-        // doc measured descriptors landing within a comfortable margin of
-        // content load, so this just needs to be comfortably after that, not
-        // tuned tightly.
+        // Delay before the one-shot refresh in setActive(true) and after a
+        // controller type change. Descriptors land within a comfortable
+        // margin of content load, so this only needs to be comfortably after
+        // that, not tuned tightly.
         const val ANALOG_POLL_ACTIVATE_DELAY_MS = 500L
         // ~30Hz, per the design's "Cost" section; button transitions bypass
         // this and are always sent immediately since they are rare.
         const val DIAGNOSTICS_AXIS_THROTTLE_MS = 33L
+        // Shared with NativeInputDeviceClassifier so one grep shows a device's
+        // classification and the slot it was then given or refused.
+        const val TAG = "moonfin_input"
         const val START_HOLD_MS = 1500L
         const val START_PULSE_MS = 34L
         const val KEYBOARD_DEVICE_ID = -1
@@ -1019,6 +1067,40 @@ internal class NativePadInput(
 internal object NativePadStateGuard {
     fun isCurrent(state: Any, keyboardState: Any, registeredState: Any?): Boolean =
         state === keyboardState || registeredState === state
+}
+
+// Minimum accumulated change from the last value sent to the core. About 0.4%
+// of the int16 analog range: enough to filter sensor noise without losing
+// gradual movement. Top level so the test can name it.
+internal const val ANALOG_MIN_SEND_DELTA = 128
+
+/** True once movement has accumulated far enough from the last value sent. */
+internal fun analogMovedPastSendBaseline(new: Int, lastSent: Int): Boolean =
+    abs(new - lastSent) > ANALOG_MIN_SEND_DELTA
+
+internal object NativeKeyEventPolicy {
+    fun shouldIgnoreRepeat(action: Int, repeatCount: Int): Boolean =
+        action == KeyEvent.ACTION_DOWN && repeatCount != 0
+
+    fun shouldIgnoreCanceledRemoteDpadRelease(
+        action: Int,
+        canceled: Boolean,
+        keyCode: Int,
+        isRemote: Boolean,
+    ): Boolean =
+        isRemote && canceled && action == KeyEvent.ACTION_UP && keyCode in DPAD_DIRECTIONS
+
+    private val DPAD_DIRECTIONS = setOf(
+        KeyEvent.KEYCODE_DPAD_UP,
+        KeyEvent.KEYCODE_DPAD_DOWN,
+        KeyEvent.KEYCODE_DPAD_LEFT,
+        KeyEvent.KEYCODE_DPAD_RIGHT,
+    )
+}
+
+internal object NativeDigitalKeyState {
+    fun transition(mask: Int, bit: Int, pressed: Boolean): Int =
+        if (pressed) mask or bit else mask and bit.inv()
 }
 
 /**

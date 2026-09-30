@@ -128,7 +128,7 @@ final class AetherVideoChannel: NSObject, FlutterStreamHandler {
                 fontWeight: (args["fontWeight"] as? NSNumber)?.intValue,
                 verticalOffset: (args["verticalOffset"] as? NSNumber)?.doubleValue)
         case "setAllowUntrustedTls":
-            EngineTLS.allowUntrustedCertificates = (args["enabled"] as? Bool) == true
+            EngineTLS.serverTrustEvaluator = EngineTrustPolicy.evaluator(from: args)
         case "setSubtitleRendererMode":
             // The host overlay is the only subtitle renderer on this path.
             break
@@ -183,7 +183,10 @@ final class AetherVideoChannel: NSObject, FlutterStreamHandler {
                 autoPlay: (args["autoPlay"] as? Bool) ?? true,
                 audioStreamIndex: (args["audioStreamIndex"] as? NSNumber).flatMap {
                     $0.intValue >= 0 ? Int32($0.intValue) : nil
-                }))
+                },
+                dolbyVisionBaseLayerOnly: (args["dolbyVisionBaseLayerOnly"] as? Bool) ?? false,
+                externalSubtitles: AetherPlayerWrapper.externalSubtitleTracks(
+                    from: args["externalSubtitles"])))
         player.setForceSubtitlesDisabledOnStart(
             (args["forceSubtitlesDisabledOnStart"] as? Bool) ?? false)
         player.setReplayGainDb((args["normalizationGainDb"] as? NSNumber)?.doubleValue)

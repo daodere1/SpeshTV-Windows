@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/widgets.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:get_it/get_it.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:server_core/server_core.dart';
@@ -14,10 +14,18 @@ import '../models/media_bar_slide_item.dart';
 import '../models/media_bar_state.dart';
 import '../services/spotlight_cache_store.dart';
 import '../utils/bounded_concurrency.dart';
+import '../services/library_scope_service.dart';
+import '../utils/blocked_ratings.dart';
 
 class MediaBarRepository {
-  static const _precacheBackdropCount = 1;
-  static const _precacheLogoCount = 1;
+
+  void precacheImages(BuildContext context, List<MediaBarSlideItem> items) {
+    for (final item in items.take(2)) {
+      for (final url in [item.backdropUrl, item.logoUrl]) {
+        if (url != null) unawaited(precacheImage(CachedNetworkImageProvider(url), context));
+      }
+    }
+  }
 
   final MediaServerClient _client;
   final UserPreferences _prefs;
@@ -112,14 +120,19 @@ class MediaBarRepository {
       final validLibraryIds = <String>{};
       for (final view in views) {
         final viewId = view['Id']?.toString();
+        if (viewId == null ||
+            !supportsMediaBarLibrary(view, preferredCollectionTypes)) {
+          continue;
+        }
+
+        validLibraryIds.add(viewId);
+
+        // A mixed library is left off this map so it keeps the full type list
         final type = _normalizeCollectionType(view['CollectionType']);
-        if (viewId != null && preferredCollectionTypes.contains(type)) {
-          validLibraryIds.add(viewId);
-          if (type == 'movies') {
-            allParentItemTypes[viewId] = const ['Movie'];
-          } else if (type == 'tvshows') {
-            allParentItemTypes[viewId] = const ['Series'];
-          }
+        if (type == 'movies') {
+          allParentItemTypes[viewId] = const ['Movie'];
+        } else if (type == 'tvshows') {
+          allParentItemTypes[viewId] = const ['Series'];
         }
       }
 
@@ -135,8 +148,12 @@ class MediaBarRepository {
         allParentIds.addAll(validLibraryIds);
       }
     } catch (_) {
-      // Fallback: If UserViews lookup fails, trust user's selection directly
-      allParentIds.addAll(libraryIds);
+      // The views lookup failed, so fall back to what the user picked. Those
+      // saved ids can name a library access has since been revoked for, so
+      // drop what the policy no longer allows before trusting them.
+      allParentIds.addAll(
+        await GetIt.instance<LibraryScopeService>().retainPermitted(libraryIds),
+      );
       allParentIds.addAll(collectionIds);
     }
 
@@ -246,7 +263,7 @@ class MediaBarRepository {
         }
         return MediaBarReady(items);
       }
-      return MediaBarError('Failed to load: $e');
+      return MediaBarError(e);
     }
   }
 
@@ -255,13 +272,15 @@ class MediaBarRepository {
     int maxItems,
     Set<String> excludedGenres,
   ) {
+    final filter = activeParentalFilter;
     final withBackdrops =
         source
             .where(
               (item) =>
                   _hasBackdrop(item) &&
                   !_isBoxSet(item) &&
-                  !_hasExcludedGenre(item, excludedGenres),
+                  !_hasExcludedGenre(item, excludedGenres) &&
+                  !filter.isBlockedRaw(item),
             )
             .toList()
           ..shuffle();
@@ -315,10 +334,7 @@ class MediaBarRepository {
 
       if (libraryId == null) {
         for (final view in views) {
-          final collectionType = _normalizeCollectionType(
-            view['CollectionType'],
-          );
-          if (collectionType != 'tvshows' && collectionType != 'movies') {
+          if (!supportsMediaBarLibrary(view, const ['movies', 'tvshows'])) {
             continue;
           }
           final id = view['Id']?.toString();
@@ -341,19 +357,6 @@ class MediaBarRepository {
 
   String _normalizeCollectionType(Object? value) {
     return value?.toString().trim().toLowerCase() ?? '';
-  }
-
-  void precacheImages(BuildContext context, List<MediaBarSlideItem> items) {
-    for (final item in items.take(_precacheBackdropCount)) {
-      if (item.backdropUrl != null) {
-        precacheImage(CachedNetworkImageProvider(item.backdropUrl!), context);
-      }
-    }
-    for (final item in items.take(_precacheLogoCount)) {
-      if (item.logoUrl != null) {
-        precacheImage(CachedNetworkImageProvider(item.logoUrl!), context);
-      }
-    }
   }
 
   /// How many titles each source hands the selector. The random source reads
@@ -637,4 +640,20 @@ class MediaBarRepository {
           const [],
     );
   }
+}
+
+// A mixed library names no collection type, so the bar takes it for either
+// kind. Folders and recordings name none either, but a query on one of those
+// reaches every library, so they go out by name.
+bool supportsMediaBarLibrary(
+  Map<String, dynamic> view,
+  List<String> preferredTypes,
+) {
+  final name = (view['Name']?.toString() ?? '').trim().toLowerCase();
+  if (name == 'folders' || name == 'recordings') return false;
+
+  final type = (view['CollectionType']?.toString() ?? '').trim().toLowerCase();
+  if (type.isEmpty || type == 'mixed' || type == 'unknown') return true;
+
+  return preferredTypes.contains(type);
 }

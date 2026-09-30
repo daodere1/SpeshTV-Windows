@@ -21,6 +21,7 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
     private var lastSubtitleStyle: [String: Any]?
     private var lastThemeConfig: [String: Any]?
     private var lastPromptStrings: [String: Any]?
+    private var lastTimeSlots: [String: Any]?
     static var lastCommand = "-"
 
     init(messenger: FlutterBinaryMessenger, rootViewController: UIViewController) {
@@ -78,7 +79,7 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
         case "setEngineLogForwarding":
             setEngineLogForwarding((args["enabled"] as? Bool) == true)
         case "setAllowUntrustedTls":
-            EngineTLS.allowUntrustedCertificates = (args["enabled"] as? Bool) == true
+            EngineTLS.serverTrustEvaluator = EngineTrustPolicy.evaluator(from: args)
         case "setUiMetadata":
             lastMetadata = args
             playerVC?.applyUiMetadata(args)
@@ -117,6 +118,9 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
         case "setPromptStrings":
             lastPromptStrings = args
             playerVC?.applyPromptStrings(args)
+        case "setTimeSlots":
+            lastTimeSlots = args
+            playerVC?.applyTimeSlots(args)
         case "play":
             player?.resume()
         case "pause":
@@ -131,6 +135,13 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
             } else {
                 player?.seek(to: ms(args["positionMs"]))
             }
+            // State is otherwise only pushed by the 0.25s timer, so until the
+            // next tick Dart still reads the pre-seek position with the player
+            // reported as playing. Anything measuring how far behind we are
+            // takes that sample as real and corrects against a position the
+            // seek has already left. Android emits on the same discontinuity
+            // for the same reason (Media3VideoView.onPositionDiscontinuity).
+            markSeekInFlight()
         case "setSpeed":
             player?.setRate((args["speed"] as? NSNumber)?.floatValue ?? 1.0)
         case "setAudioTrack":
@@ -274,8 +285,8 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
         vc.onSkipSegmentSelect = { [weak self] in
             self?.send(["event": "skipSegment"])
         }
-        vc.onUserSeek = { [weak self] in
-            self?.send(["event": "userSeeked"])
+        vc.onUserSeek = { [weak self] positionMs in
+            self?.send(["event": "userSeeked", "positionMs": positionMs])
         }
         vc.onSearchSubtitles = { [weak self] in
             self?.send(["event": "searchSubtitles"])
@@ -303,6 +314,9 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
         }
         if let strings = lastPromptStrings {
             vc.applyPromptStrings(strings)
+        }
+        if let slots = lastTimeSlots {
+            vc.applyTimeSlots(slots)
         }
         playerVC = vc
         rootViewController?.present(vc, animated: false) { [weak self] in
@@ -373,7 +387,10 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
                 autoPlay: autoPlay,
                 audioStreamIndex: (args["audioStreamIndex"] as? NSNumber).flatMap {
                     $0.intValue >= 0 ? Int32($0.intValue) : nil
-                }))
+                },
+                dolbyVisionBaseLayerOnly: (args["dolbyVisionBaseLayerOnly"] as? Bool) ?? false,
+                externalSubtitles: AetherPlayerWrapper.externalSubtitleTracks(
+                    from: args["externalSubtitles"])))
         player.setForceSubtitlesDisabledOnStart(
             (args["forceSubtitlesDisabledOnStart"] as? Bool) ?? false)
         player.setReplayGainDb((args["normalizationGainDb"] as? NSNumber)?.doubleValue)
@@ -411,6 +428,26 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
         stateTimer = nil
     }
 
+    /// Reports the seek immediately rather than waiting for the next timer
+    /// tick. The engine has not moved its clock yet, so the position is still
+    /// the old one; what matters is that it goes out flagged as buffering, so
+    /// nothing downstream mistakes it for a settled measurement.
+    private func markSeekInFlight() {
+        guard let p = player else { return }
+        send(statePayload(p, isPlaying: false, isBuffering: true))
+    }
+
+    private func statePayload(_ p: AetherPlayerWrapper, isPlaying: Bool, isBuffering: Bool) -> [String: Any] {
+        [
+            "event": "state",
+            "positionMs": Int((p.currentTime * 1000).rounded()),
+            "durationMs": Int((p.duration * 1000).rounded()),
+            "bufferedMs": Int((p.duration * Double(p.bufferProgress) * 1000).rounded()),
+            "isPlaying": isPlaying,
+            "isBuffering": isBuffering,
+        ]
+    }
+
     private func pushState() {
         guard let p = player else { return }
         if p.state != lastLoggedState {
@@ -430,14 +467,7 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
             break
         }
 
-        send([
-            "event": "state",
-            "positionMs": Int((p.currentTime * 1000).rounded()),
-            "durationMs": Int((p.duration * 1000).rounded()),
-            "bufferedMs": Int((p.duration * Double(p.bufferProgress) * 1000).rounded()),
-            "isPlaying": isPlaying,
-            "isBuffering": isBuffering,
-        ])
+        send(statePayload(p, isPlaying: isPlaying, isBuffering: isBuffering))
 
         // Captions can turn up part way through a live stream, so a change in
         // either list re-emits tracksChanged.

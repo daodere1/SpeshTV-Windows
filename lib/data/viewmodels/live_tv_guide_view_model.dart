@@ -84,6 +84,18 @@ class GuideProgram {
   });
 
   Duration get duration => endDate.difference(startDate);
+  String? get officialRating => rawData['OfficialRating'] as String?;
+  String? get seasonEpisodeLabel {
+    final season = rawData['ParentIndexNumber'];
+    final episode = rawData['IndexNumber'];
+    if (season == null && episode == null) return null;
+    return [if (season != null) 'S$season', if (episode != null) 'E$episode'].join(':');
+  }
+  List<GuideFilter> get categoryTags => [
+    if (isMovie) GuideFilter.movies, if (isSeries) GuideFilter.series,
+    if (isSports) GuideFilter.sports, if (isNews) GuideFilter.news,
+    if (isKids) GuideFilter.kids, if (isPremiere) GuideFilter.premiere,
+  ];
 
   bool get isLive {
     final now = DateTime.now();
@@ -96,6 +108,8 @@ class GuideProgram {
     return now.difference(startDate).inSeconds / duration.inSeconds;
   }
 }
+
+enum GuideChannelLoadState { loaded, loading, failed }
 
 enum GuideFilter {
   all,
@@ -441,7 +455,53 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     await _reloadPrograms();
   }
 
-  Future<void> load({int? windowHours}) async {
+  Timer? _boundaryTimer;
+  bool _disposed = false;
+  Future<void>? _carouselRefresh;
+
+  List<GuideProgram> unfilteredProgramsForChannel(String id) =>
+      _programsByChannel[id] ?? const [];
+  GuideChannelLoadState loadStateFor(String id) => hasProgramsFor(id)
+      ? GuideChannelLoadState.loaded : GuideChannelLoadState.loading;
+  Future<void> refreshAtQuarterHour() => refreshCarouselPrograms();
+  Future<void> refreshCarouselPrograms() {
+    if (_disposed) return Future.value();
+    return _carouselRefresh ??= _reloadPrograms().whenComplete(() {
+      _carouselRefresh = null;
+    });
+  }
+
+  void cancelBoundaryRefresh() {
+    _boundaryTimer?.cancel();
+    _boundaryTimer = null;
+  }
+
+  void scheduleBoundaryRefresh() {
+    cancelBoundaryRefresh();
+    if (_disposed || _state != GuideState.ready) return;
+    final now = DateTime.now();
+    final boundaries = _programsByChannel.values.expand((p) => p)
+        .map((p) => p.endDate).where((date) => date.isAfter(now)).toList()..sort();
+    if (boundaries.isEmpty) return;
+    _boundaryTimer = Timer(boundaries.first.difference(now), () async {
+      try {
+        await _reloadPrograms();
+      } catch (_) {
+        // Preserve the last guide on a transient failure; the next open retries.
+      }
+      if (!_disposed) scheduleBoundaryRefresh();
+    });
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    cancelBoundaryRefresh();
+    super.dispose();
+  }
+
+  Future<void> load({int? windowHours, List<String>? initialChannelIds,
+      DateTime? windowStart, bool livePosition = false}) async {
     if (windowHours != null) _guideWindowHours = windowHours;
     _state = GuideState.loading;
     notifyListeners();
@@ -455,9 +515,15 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _guideDate.day,
         DateTime.now().hour,
       );
+      if (windowStart != null) _windowStart = windowStart;
       _windowEnd = _windowStart.add(Duration(hours: _guideWindowHours));
 
-      await loadInitialPrograms();
+      if (initialChannelIds == null) {
+        await loadInitialPrograms();
+      } else {
+        _programsByChannel.clear();
+        await ensureProgramsForChannels(initialChannelIds);
+      }
       if (const bool.fromEnvironment('SPESHTV_WEB') &&
           (_country.isNotEmpty || _package.isNotEmpty || _tag.isNotEmpty || _filter == GuideFilter.favorites || _filter == GuideFilter.recentlyWatched)) {
         await ensureProgramsForChannels(filteredChannels.take(24).map((channel) => channel.id).toList());

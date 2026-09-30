@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'chapter_steps.dart';
 import 'media_stream_resolver.dart';
 import 'playback_arbiter.dart';
 import 'player_backend.dart';
@@ -88,6 +89,14 @@ class PlaybackManager implements AudioOwnable {
   PlayerService? _service;
   Future<void> Function(dynamic item)? _resolverConfigurator;
   bool Function(List<dynamic> items)? _externalPlaybackDecider;
+
+  /// Host veto on what may play. [_queueContentFilter] is cheap and free of
+  /// side effects, so a whole queue can be strained through it as it's set.
+  /// [_playContentRefusal] may go to the network, so it's asked only about the
+  /// one item about to open. A host that registers neither keeps the old
+  /// behaviour.
+  bool Function(dynamic item)? _queueContentFilter;
+  Future<bool> Function(dynamic item)? _playContentRefusal;
   Future<List<dynamic>> Function(
     dynamic completedItem,
     List<dynamic> queueItems,
@@ -99,14 +108,32 @@ class PlaybackManager implements AudioOwnable {
     PlayerBackend currentBackend,
   )?
   _backendSelector;
-  bool Function(StreamResolutionResult resolution)? _transcodeSelector;
+  /// Returns the reason this client refused direct play, or null to let
+  /// the resolution stand. A reason is needed because a client-side
+  /// refusal leaves the server's transcodingReasons empty, so a report
+  /// otherwise shows a transcode nobody admits to asking for.
+  String? Function(StreamResolutionResult resolution)? _transcodeSelector;
+  String? _clientTranscodeReason;
   Duration Function(dynamic item, Duration startPosition)?
   _startPositionAdjuster;
+
+  /// Chapter starts, and the item they were set for, so previous and next
+  /// step through chapters before they step through the queue.
+  ///
+  /// Keyed to the item rather than cleared when a stream starts, because the
+  /// same item restarts for a track switch, a transcode retry or a resume,
+  /// and clearing would drop its chapters for the rest of its playback.
+  /// Compared by identity, since the queue holds bare paths offline and
+  /// asking those for an id throws.
+  List<Duration> _chapterStarts = const [];
+  Object? _chapterStartsItem;
+
   Future<PlaybackStartupRecoveryDecision> Function(
     PlaybackStartupFailureContext context,
   )?
   _startupRecoveryDecider;
   void Function(PlaybackDecisionContext context)? _playbackDecisionLogger;
+  void Function(String message)? _diagnosticLogger;
   int? Function(List<Map<String, dynamic>> audioStreams, int? explicitIndex)? audioTrackSelector;
   int? Function(List<Map<String, dynamic>> subtitleStreams, List<Map<String, dynamic>> audioStreams, int? explicitIndex)? subtitleTrackSelector;
   final QueueService queueService = QueueService();
@@ -128,6 +155,8 @@ class PlaybackManager implements AudioOwnable {
   String? _mediaSourceId;
   String? _pendingItemOverrideId;
   int? _pendingItemAudioStreamIndex;
+  double _volume = 100;
+  bool _isMuted = false;
   int? _pendingItemSubtitleStreamIndex;
   String? _pendingItemMediaSourceId;
   String? _lastItemId;
@@ -181,6 +210,15 @@ class PlaybackManager implements AudioOwnable {
   PlaybackBringupState _bringupState = const PlaybackBringupState.idle();
 
   PlayerBackend? get backend => _backend;
+
+  double get volume => _volume;
+  bool get isMuted => _isMuted;
+
+  void reportVolumeState({required double volume, required bool isMuted}) {
+    _volume = volume.clamp(0, 100);
+    _isMuted = isMuted;
+  }
+
   Duration get currentPlaybackPosition {
     final backendPos = _backend?.position ?? Duration.zero;
     return Duration(
@@ -211,6 +249,15 @@ class PlaybackManager implements AudioOwnable {
       _bringupStateController.stream;
   Stream<void> get sessionEndedStream => _sessionEndedController.stream;
   StreamResolutionResult? get currentResolution => _currentResolution;
+
+  /// Item that gained a stream on the server after this session resolved. The
+  /// resolution still lists what the item had at play time, so a selector
+  /// reading it would leave the new track out.
+  String? _streamsOutdatedItemId;
+
+  bool streamsOutdatedFor(String itemId) => _streamsOutdatedItemId == itemId;
+
+  void markStreamsOutdated(String itemId) => _streamsOutdatedItemId = itemId;
   int? get audioStreamIndex => _audioStreamIndex;
   int? get subtitleStreamIndex {
     if (_subtitleStreamIndex != null) {
@@ -377,6 +424,7 @@ class PlaybackManager implements AudioOwnable {
     String? hybridAudioUrl,
     bool isLive = false,
     bool autoPlay = true,
+    List<ExternalSubtitle> externalSubtitles = const [],
   }) {
     final resolvedMediaType = mediaType?.trim().toLowerCase();
 
@@ -437,6 +485,22 @@ class PlaybackManager implements AudioOwnable {
             embeddedStripped: false,
           );
 
+    // The player opens the chosen track at load from the container's own
+    // numbering. A stripped stream carries the one audio track the server
+    // already picked, so there is nothing to point at.
+    final audioContainerIndex =
+        _embeddedTracksStripped || audioStreamIndex == null
+        ? null
+        : TrackOrdinalMapper.containerStreamIndex(
+            streamIndex: audioStreamIndex,
+            mediaStreams: mediaStreams,
+          );
+
+    final declaredSubtitles = _declarableSubtitles(
+      mediaStreams,
+      externalSubtitles,
+    );
+
     return <String, dynamic>{
       'url': url,
       'autoPlay': autoPlay,
@@ -447,14 +511,19 @@ class PlaybackManager implements AudioOwnable {
         'audioCodec': (audioStream['Codec'] ?? '').toString(),
         'audioProfile': (audioStream['Profile'] ?? '').toString(),
         if (audioStream['Channels'] is int) 'audioChannels': audioStream['Channels'],
-        if (audioStream['Index'] is int) 'audioStreamIndex': audioStream['Index'],
       },
+      if (audioContainerIndex != null) 'audioStreamIndex': audioContainerIndex,
       if (audioTrackOrdinal != null) 'audioTrackOrdinal': audioTrackOrdinal,
       if (audioStreamLang != null) 'preferredAudioLanguage': audioStreamLang,
       if (subtitleStreamLang != null)
         'preferredTextLanguage': subtitleStreamLang,
       if (videoStream != null && videoStream['DvProfile'] is int)
         'videoDvProfile': videoStream['DvProfile'],
+      if (videoStream != null && videoStream['DvBlSignalCompatibilityId'] is int)
+        'videoDvBlCompatId': videoStream['DvBlSignalCompatibilityId'],
+      if (videoStream != null &&
+          (videoStream['Codec']?.toString().isNotEmpty ?? false))
+        'videoCodec': videoStream['Codec'].toString().toLowerCase(),
       if (videoFrameRate != null) 'videoFrameRate': videoFrameRate,
       if (videoStream != null && videoStream['Width'] is int)
         'videoWidth': videoStream['Width'],
@@ -471,8 +540,48 @@ class PlaybackManager implements AudioOwnable {
       'normalizationGainDb':
           normalizationGainDb ??
           MediaStreamResolver.extractNormalizationGainDb(mediaStreams),
+      if (declaredSubtitles.isNotEmpty) 'externalSubtitles': declaredSubtitles,
     };
   }
+
+  /// Sidecars a backend can register while it opens the source, in the order
+  /// [TrackOrdinalMapper] counts them, so an ordinal derived from that list
+  /// still lands on the same track.
+  ///
+  /// Only text formats go out. A bitmap sidecar has no text equivalent, so a
+  /// player asked to read one as text fails the decode instead of falling back.
+  List<Map<String, dynamic>> _declarableSubtitles(
+    List<Map<String, dynamic>> mediaStreams,
+    List<ExternalSubtitle> externalSubtitles,
+  ) {
+    if (externalSubtitles.isEmpty) return const [];
+    final effective = TrackOrdinalMapper.effectiveExternalSubtitles(
+      mediaStreams: mediaStreams,
+      externalSubtitles: externalSubtitles,
+      embeddedStripped: _embeddedSubtitlesUnavailable,
+    );
+    return [
+      for (final sub in effective)
+        if (_isDeclarableSubtitleCodec(sub.codec))
+          {
+            'url': _ensureSubtitleApiKey(sub.deliveryUrl),
+            if (sub.title != null) 'title': sub.title,
+            if (sub.language != null) 'language': sub.language,
+            'codec': sub.codec,
+            'isDefault': sub.isDefault,
+            'isForced': sub.isForced,
+          },
+    ];
+  }
+
+  static bool _isDeclarableSubtitleCodec(String codec) => const {
+    'srt',
+    'subrip',
+    'ass',
+    'ssa',
+    'vtt',
+    'webvtt',
+  }.contains(codec.trim().toLowerCase());
 
   String _traceItemId(dynamic item) {
     try {
@@ -560,6 +669,14 @@ class PlaybackManager implements AudioOwnable {
     _externalPlaybackDecider = decider;
   }
 
+  void setContentRefusal({
+    bool Function(dynamic item)? queueFilter,
+    Future<bool> Function(dynamic item)? playRefusal,
+  }) {
+    _queueContentFilter = queueFilter;
+    _playContentRefusal = playRefusal;
+  }
+
   void setNextSeasonItemsProvider(
     Future<List<dynamic>> Function(
       dynamic completedItem,
@@ -622,7 +739,7 @@ class PlaybackManager implements AudioOwnable {
   }
 
   void setTranscodeSelector(
-    bool Function(StreamResolutionResult resolution)? selector,
+    String? Function(StreamResolutionResult resolution)? selector,
   ) {
     _transcodeSelector = selector;
   }
@@ -632,6 +749,21 @@ class PlaybackManager implements AudioOwnable {
   ) {
     _startPositionAdjuster = adjuster;
   }
+
+  /// Set per item by whoever loaded its chapters, after playback of that
+  /// item has started.
+  void setChapterStarts(List<Duration> starts) {
+    _chapterStarts = starts;
+    _chapterStartsItem = queueService.currentItem;
+  }
+
+  /// Empty unless the starts belong to the item playing now. This manager is
+  /// one instance shared with the audio screens, which never set chapters, so
+  /// a song must not inherit a film's.
+  List<Duration> get _currentChapterStarts =>
+      identical(queueService.currentItem, _chapterStartsItem)
+      ? _chapterStarts
+      : const [];
 
   void setStartupRecoveryDecider(
     Future<PlaybackStartupRecoveryDecision> Function(
@@ -648,9 +780,16 @@ class PlaybackManager implements AudioOwnable {
     _playbackDecisionLogger = logger;
   }
 
+  /// Receives one-line notes about decisions that leave no other trace, such
+  /// as an event that was deliberately dropped.
+  void setDiagnosticLogger(void Function(String message)? logger) {
+    _diagnosticLogger = logger;
+  }
+
   void _resetBackendSelectionLock() {
     _backendSelectionLockedForSession = false;
     _sessionLockedBackend = null;
+    _clientTranscodeReason = null;
   }
 
   Future<bool> Function(TransportAction action, {Duration? position})?
@@ -662,6 +801,13 @@ class PlaybackManager implements AudioOwnable {
   ) {
     _transportInterceptor = interceptor;
   }
+
+  /// Whether transport actions are being routed to a coordinator (SyncPlay)
+  /// instead of reaching the player directly. Housekeeping that would seek
+  /// or pause on its own initiative must stand down while this is set: the
+  /// coordinator owns the position, and such a seek or pause would be sent
+  /// to every member of the group as if the user had asked for it.
+  bool get hasTransportInterceptor => _transportInterceptor != null;
 
   Future<bool> _maybeIntercept(
     TransportAction action, {
@@ -893,6 +1039,23 @@ class PlaybackManager implements AudioOwnable {
       return;
     }
 
+    // A player can keep talking after a stop, and by then the resolutions
+    // are gone, so a failed bring-up would put a warning in the log and a
+    // snackbar on a screen that is already leaving. Nothing legitimate is
+    // lost: the backend is only asked to play once _currentResolution is
+    // set, and a resolve failure is reported by _playCurrentItem itself.
+    if (!_isOfflinePlayback &&
+        _currentResolution == null &&
+        _lastPlaybackResolution == null) {
+      final message = event['message']?.toString();
+      _diagnosticLogger?.call(
+        'Dropped a late ${event['event']} from '
+        '${_traceBackendName(_backend)} with no active session'
+        '${message == null || message.isEmpty ? '' : ': $message'}',
+      );
+      return;
+    }
+
     final eventType = event['event']?.toString();
     final kind = event['kind']?.toString();
     final recoverable = event['recoverable'] == true;
@@ -984,15 +1147,24 @@ class PlaybackManager implements AudioOwnable {
       return;
     }
 
+    // Deliberately not gated on _waitingForMedia. A container the player can't
+    // parse fails before it ever reaches a ready state, so that gate left the
+    // sources this recovery exists for sitting on a spinner. The re-resolve
+    // takes the next session token, and the startup still running behind it
+    // compares tokens and hands off to _cleanupPreemptedSession.
     bool canReResolve() =>
         resolution != null &&
         resolution.playMethod != StreamPlayMethod.transcode &&
         !_isOfflinePlayback &&
-        !_waitingForMedia &&
         !_unsupportedAudioRecoveryInFlight;
 
     Future<void> recoverViaTranscode() async {
       _unsupportedAudioRecoveryInFlight = true;
+      // The stop below lets a startup still inside play() return, and the
+      // next token is only taken after that stop. Retire the startup here or
+      // it finishes as a normal start and reports a start for a session whose
+      // stop already went out.
+      ++_playbackSessionToken;
       try {
         await _reResolveAtCurrentPosition(
           forceTranscode: true,
@@ -1172,6 +1344,10 @@ class PlaybackManager implements AudioOwnable {
     bool enableDirectPlay = true,
     bool enableDirectStream = true,
     bool enableTranscoding = true,
+    // False loads the item and leaves it paused at [startPosition]: a
+    // SyncPlay handshake wants the player at the group's position without a
+    // frame of playback until the group's own Unpause.
+    bool autoPlay = true,
   }) async {
     _clearPendingItemOverrides();
     _vetoedAudioCodecs.clear();
@@ -1188,6 +1364,22 @@ class PlaybackManager implements AudioOwnable {
     if (items.isNotEmpty) {
       pendingItem = items[startIndex.clamp(0, items.length - 1)];
     }
+
+    final queueFilter = _queueContentFilter;
+    if (queueFilter != null && pendingItem != null) {
+      if (queueFilter(pendingItem)) {
+        // Return before the bringup phase moves off `preparing`. A launcher
+        // holding a player route reads that as "nothing started" and closes
+        // it, which is exactly the refusal we want and costs no new UI.
+        return;
+      }
+      final allowed = items.where((i) => !queueFilter(i)).toList();
+      if (allowed.length != items.length) {
+        startIndex = allowed.indexOf(pendingItem);
+        items = allowed;
+      }
+    }
+
     _setBringupState(
       PlaybackBringupState(
         phase: PlaybackBringupPhase.stoppingPrevious,
@@ -1229,6 +1421,7 @@ class PlaybackManager implements AudioOwnable {
       enableDirectPlay: enableDirectPlay,
       enableDirectStream: enableDirectStream,
       enableTranscoding: enableTranscoding,
+      autoPlay: autoPlay,
     );
   }
 
@@ -1289,6 +1482,19 @@ class PlaybackManager implements AudioOwnable {
     final item = queueService.currentItem;
     if (item == null || _backend == null) {
       _setBringupState(const PlaybackBringupState.idle());
+      return;
+    }
+
+    // The backstop for everything the queue filter couldn't answer without a
+    // lookup. Prerolls carry no rating of their own and are skipped.
+    final refusal = _playContentRefusal;
+    if (refusal != null && !_isPreroll(item) && await refusal(item)) {
+      suppressAutoNext = true;
+      queueService.clear();
+      state.reset();
+      // Closes a player that's already open, rather than leaving it frozen on
+      // the last frame.
+      _notifySessionEnded();
       return;
     }
 
@@ -1414,16 +1620,22 @@ class PlaybackManager implements AudioOwnable {
         enableDirectPlay &&
         enableDirectStream &&
         enableTranscoding &&
-        resolution.playMethod != StreamPlayMethod.transcode &&
-        transcodeSelector(resolution)) {
-      await _playCurrentItem(
-        startPosition: startPosition,
-        enableDirectPlay: false,
-        enableDirectStream: false,
-        enableTranscoding: true,
-        allowStartupRecovery: allowStartupRecovery,
-      );
-      return;
+        resolution.playMethod != StreamPlayMethod.transcode) {
+      // Every fresh evaluation overwrites the stash, so a reason recorded
+      // before a mid-session capability change can't outlive it. The forced
+      // second pass skips this whole block, which is what carries the reason
+      // through to the decision logger.
+      _clientTranscodeReason = transcodeSelector(resolution);
+      if (_clientTranscodeReason != null) {
+        await _playCurrentItem(
+          startPosition: startPosition,
+          enableDirectPlay: false,
+          enableDirectStream: false,
+          enableTranscoding: true,
+          allowStartupRecovery: allowStartupRecovery,
+        );
+        return;
+      }
     }
 
     bool needsReResolve = false;
@@ -1513,6 +1725,7 @@ class PlaybackManager implements AudioOwnable {
     }
 
     _currentResolution = resolution;
+    _streamsOutdatedItemId = null;
     _lastPlaybackItem = item;
     _lastPlaybackResolution = resolution;
     _mediaSourceId = resolution.mediaSourceId;
@@ -1594,6 +1807,9 @@ class PlaybackManager implements AudioOwnable {
             maxStreamingBitrate: maxBitrate,
             audioStreamIndex: _audioStreamIndex,
             subtitleStreamIndex: _subtitleStreamIndex,
+            clientTranscodeReason:
+                _clientTranscodeReason ??
+                (_forceTranscodeForQueue ? 'callerDisabledDirectPlay' : null),
           ),
         );
       } catch (_) {}
@@ -1625,6 +1841,7 @@ class PlaybackManager implements AudioOwnable {
         hybridAudioUrl: resolution.hybridAudioUrl,
         isLive: resolution.liveStreamId != null,
         autoPlay: autoPlay,
+        externalSubtitles: resolution.externalSubtitles,
       );
       await _arbiter?.acquire(AudioProducer.mainPlayback);
       if (sessionToken != _playbackSessionToken) {
@@ -1670,7 +1887,9 @@ class PlaybackManager implements AudioOwnable {
       startupError = e;
       startupStackTrace = st;
     } finally {
-      _waitingForMedia = false;
+      if (sessionToken == _playbackSessionToken) {
+        _waitingForMedia = false;
+      }
     }
 
     if (sessionToken != _playbackSessionToken) {
@@ -1901,6 +2120,8 @@ class PlaybackManager implements AudioOwnable {
           isPaused: !state.isPlaying,
           audioStreamIndex: _audioStreamIndex,
           subtitleStreamIndex: _subtitleStreamIndex,
+          volumeLevel: _volume.round(),
+          isMuted: _isMuted,
         );
       } catch (_) {
         return;
@@ -2044,6 +2265,15 @@ class PlaybackManager implements AudioOwnable {
     await _backend?.seekTo(position);
   }
 
+  /// A seek the player performed on its own, from a control the manager does
+  /// not own (the native tvOS transport). The player has already moved, so
+  /// only the interceptor sees it: whoever is coordinating playback, if
+  /// anyone, gets the same notice a [seekTo] would have given.
+  Future<void> notifyExternalSeek(Duration position) async {
+    _lastKnownPosition = position;
+    await _maybeIntercept(TransportAction.seek, position: position);
+  }
+
   Future<void> setPlaybackSpeed(double speed) async {
     await _backend?.setPlaybackSpeed(speed);
     state.setPlaybackSpeed(speed);
@@ -2051,6 +2281,30 @@ class PlaybackManager implements AudioOwnable {
 
   Future<void> next() async {
     if (await _maybeIntercept(TransportAction.next)) return;
+    final chapter = nextChapterStart(_currentChapterStarts, state.position);
+    if (chapter != null) {
+      await seekTo(chapter);
+      return;
+    }
+    await _advanceQueue();
+  }
+
+  /// Straight to the next item, without stepping chapters first. What Play
+  /// Next and the media session's next action want, since both mean the next
+  /// item however far into this one the position is.
+  Future<void> nextInQueue() async {
+    if (await _maybeIntercept(TransportAction.next)) return;
+    await _advanceQueue();
+  }
+
+  Future<void> _advanceQueue() async {
+    // Nothing queued after this, so run it to the end and let the ordinary
+    // finish handle watched state and whatever follows, rather than stopping
+    // on a dead player.
+    if (!queueService.hasNext && state.duration > Duration.zero) {
+      await seekTo(state.duration);
+      return;
+    }
     if (_isManualNexting || _isAutoNexting) return;
     _isManualNexting = true;
     _mediaSourceId = null;
@@ -2068,6 +2322,12 @@ class PlaybackManager implements AudioOwnable {
 
   Future<void> previous() async {
     if (await _maybeIntercept(TransportAction.previous)) return;
+    final chapter =
+        previousChapterStart(_currentChapterStarts, state.position);
+    if (chapter != null) {
+      await seekTo(chapter);
+      return;
+    }
     // A press this far in restarts the item, and so does one with nothing to
     // step back to.
     if (state.position.inSeconds > 3 || !queueService.hasPrevious) {
@@ -2358,16 +2618,25 @@ class PlaybackManager implements AudioOwnable {
 
   /// Pass `userInitiated: false` when reapplying the track already playing, so
   /// it isn't mistaken for the viewer choosing it.
+  ///
+  /// [refreshStreams] is for a subtitle added to the item after this session
+  /// resolved, which the stream list this session carries has never seen.
   Future<void> changeSubtitleTrack(
     int streamIndex, {
     bool userInitiated = true,
+    bool refreshStreams = false,
   }) => _withProgressPaused(
-    () => _changeSubtitleTrackInner(streamIndex, userInitiated: userInitiated),
+    () => _changeSubtitleTrackInner(
+      streamIndex,
+      userInitiated: userInitiated,
+      refreshStreams: refreshStreams,
+    ),
   );
 
   Future<void> _changeSubtitleTrackInner(
     int streamIndex, {
     bool userInitiated = true,
+    bool refreshStreams = false,
   }) async {
     final previousSubtitleStreamIndex = _subtitleStreamIndex;
     final isBitmap = _isSubtitleBitmap(streamIndex);
@@ -2398,6 +2667,15 @@ class PlaybackManager implements AudioOwnable {
     }
 
     await _applySubtitleRendererModeForStream(streamIndex);
+
+    // Every branch below resolves the track through the stream list this
+    // session was built from, so an index the server added since then finds
+    // nothing and the selection quietly does nothing. Re-resolving rebuilds
+    // the list first and carries the index into it.
+    if (refreshStreams && !_isOfflinePlayback) {
+      await _reResolveAtCurrentPosition();
+      return;
+    }
 
     if (!_isOfflinePlayback &&
         !(_backend?.supportsRuntimeTrackSelection ?? true)) {
@@ -3097,6 +3375,10 @@ class PlaybackDecisionContext {
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
 
+  /// Which client-side gate refused direct play, when one did. Server-side
+  /// refusals arrive in [StreamResolutionResult.transcodingReasons] instead.
+  final String? clientTranscodeReason;
+
   const PlaybackDecisionContext({
     required this.mediaItem,
     required this.resolution,
@@ -3105,6 +3387,7 @@ class PlaybackDecisionContext {
     required this.maxStreamingBitrate,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
+    this.clientTranscodeReason,
   });
 }
 
