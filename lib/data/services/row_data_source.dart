@@ -152,7 +152,16 @@ class RowDataSource {
   }
 
   Future<HomeRow> loadResume(String serverId, {int? startIndex}) async {
-    final response = await _getResumeItemsWithFallback(
+    final response = const bool.fromEnvironment('SPESHTV_WEB')
+        ? await _client.itemsApi.getResumeItems(
+            includeItemTypes: const ['Movie', 'Episode'],
+            startIndex: startIndex,
+            limit: _defaultLimit,
+            fields: _fields,
+            enableImageTypes: _imageTypes,
+            imageTypeLimit: _imageTypeLimit,
+          )
+        : await _getResumeItemsWithFallback(
       includeItemTypes: ['Movie', 'Episode'],
       startIndex: startIndex,
       limit: _defaultLimit,
@@ -181,7 +190,17 @@ class RowDataSource {
   }
 
   Future<HomeRow> loadNextUp(String serverId, {int? startIndex}) async {
-    final response = await _getNextUpWithFallback(
+    final response = const bool.fromEnvironment('SPESHTV_WEB')
+        ? await _client.itemsApi.getNextUp(
+            startIndex: startIndex,
+            limit: _defaultLimit,
+            fields: _fields,
+            enableImageTypes: _imageTypes,
+            imageTypeLimit: _imageTypeLimit,
+            enableResumable: false,
+            nextUpDateCutoff: nextUpDateCutoff,
+          )
+        : await _getNextUpWithFallback(
       startIndex: startIndex,
       limit: _defaultLimit,
       enableResumable: false,
@@ -193,6 +212,9 @@ class RowDataSource {
       serverId: serverId,
       rowType: HomeRowType.nextUp,
     );
+    // Keep the server's Next Up order. Scanning recent history just to sort
+    // these cards adds another expensive catalog query before they can render.
+    if (const bool.fromEnvironment('SPESHTV_WEB')) return row;
     final enrichedItems = await _enrichNextUpItemsWithSeriesLastPlayed(
       row.items,
     );

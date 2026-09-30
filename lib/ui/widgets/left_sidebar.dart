@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'spesh_brand.dart';
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
@@ -876,8 +877,8 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
               final items = <Widget>[
                 _SidebarItem(
                   key: const ValueKey('sidebar-home'),
-                  icon: Icons.home_rounded,
-                  label: l10n.home,
+                  icon: speshWeb ? Icons.live_tv_outlined : Icons.home_rounded,
+                  label: speshWeb ? 'SpeshTV' : l10n.home,
                   baseColor: nextMainSidebarColor(),
                   focusNode: _homeFocusNode,
                   showLabel: _showLabels,

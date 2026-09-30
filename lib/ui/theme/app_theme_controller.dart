@@ -5,6 +5,7 @@ import '../../preference/preference_constants.dart';
 import '../../preference/user_preferences.dart';
 import 'oled_mode_tuning.dart';
 import 'vibrance.dart';
+import '../widgets/spesh_brand.dart';
 
 class AppThemeController extends ChangeNotifier {
   ThemeSpec _activeSpec;
@@ -64,7 +65,7 @@ class AppThemeController extends ChangeNotifier {
   /// of the theme preferences change.
   void refreshFromPreferences(UserPreferences prefs) {
     final builtIn = prefs.get(UserPreferences.visualTheme);
-    final customId = prefs.get(UserPreferences.customThemeId);
+    final customId = _customIdFor(prefs);
     _apply(builtIn, customId, prefs.get(UserPreferences.oledMode));
   }
 
@@ -154,7 +155,7 @@ class AppThemeController extends ChangeNotifier {
 
   static AppThemeController fromPreferences(UserPreferences prefs) {
     final prefTheme = prefs.get(UserPreferences.visualTheme);
-    final customId = prefs.get(UserPreferences.customThemeId);
+    final customId = _customIdFor(prefs);
     final hasCustom =
       customId.isNotEmpty &&
       !ThemeRegistry.builtInIds.contains(customId) &&
@@ -168,6 +169,15 @@ class AppThemeController extends ChangeNotifier {
       hasCustom ? customId : '',
       prefs.get(UserPreferences.oledMode),
     );
+  }
+
+  static String _customIdFor(UserPreferences prefs) {
+    // A web-build fallback, never a persisted override of user/server choices.
+    if (speshWeb && !prefs.containsPreference(UserPreferences.customThemeId) &&
+        !prefs.containsPreference(UserPreferences.visualTheme)) {
+      return 'spesha-style';
+    }
+    return prefs.get(UserPreferences.customThemeId);
   }
 }
 

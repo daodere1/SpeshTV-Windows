@@ -34,6 +34,7 @@ import '../../widgets/quick_return_wrapper.dart';
 import '../../widgets/rating_display.dart';
 import '../detail/item_detail_screen.dart';
 import '../../widgets/local_search_field.dart';
+import '../../widgets/spesh_empty_results.dart';
 import '../../../l10n/app_localizations.dart';
 
 Color get _navyBackground => AppColorScheme.background;
@@ -874,6 +875,19 @@ class _LibraryBrowseScreenState extends State<LibraryBrowseScreen>
                 onLetterChanged: (l) => _jumpToLetter(l),
                 onPlayedFilterChanged: (status) => _vm.setPlayedFilter(status),
               ),
+              if (const bool.fromEnvironment('SPESHTV_WEB') && _vm.hasActiveFilters)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Row(children: [
+                    Expanded(child: Text('${_vm.activeFilterCount} active filters',
+                        maxLines: 1, overflow: TextOverflow.ellipsis)),
+                    IconButton(
+                      tooltip: AppLocalizations.of(context).clearFilters,
+                      onPressed: () => _vm.clearFilters(),
+                      icon: const Icon(Icons.filter_alt_off),
+                    ),
+                  ]),
+                ),
               Expanded(child: _buildBody()),
             ],
           ),
@@ -1044,12 +1058,7 @@ class _LibraryBrowseScreenState extends State<LibraryBrowseScreen>
 
   Widget _buildSongsList() {
     if (_vm.items.isEmpty) {
-      return Center(
-        child: Text(
-          AppLocalizations.of(context).noItemsFound,
-          style: const TextStyle(color: Colors.white70),
-        ),
-      );
+      return _emptyLibraryResults();
     }
     final isMobile = _isCompact(context);
     final hPad = isMobile ? 16.0 : _horizontalPadding;
@@ -1096,18 +1105,27 @@ class _LibraryBrowseScreenState extends State<LibraryBrowseScreen>
 
   Widget _buildGrid() {
     if (_vm.items.isEmpty) {
-      return Center(
-        child: Text(
-          AppLocalizations.of(context).noItemsFound,
-          style: const TextStyle(color: Colors.white70),
-        ),
-      );
+      return _emptyLibraryResults();
     }
 
     if (_vm.scrollDirection == LibraryScrollDirection.horizontal) {
       return _buildHorizontalGrid();
     }
     return _buildVerticalGrid();
+  }
+
+  Widget _emptyLibraryResults() {
+    final l10n = AppLocalizations.of(context);
+    if (!const bool.fromEnvironment('SPESHTV_WEB')) {
+      return Center(child: Text(l10n.noItemsFound, style: const TextStyle(color: Colors.white70)));
+    }
+    return SpeshEmptyResults(title: l10n.noItemsFound, clearFiltersLabel: l10n.clearFilters,
+      onClearFilters: _vm.hasActiveFilters ? () => _vm.clearFilters() : null,
+      onClearSearch: _vm.searchQuery.trim().isNotEmpty ? () {
+        _searchController.clear();
+        _vm.setSearchQuery('');
+      } : null,
+    );
   }
 
   Widget _buildVerticalGrid() {

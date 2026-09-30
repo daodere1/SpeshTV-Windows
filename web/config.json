@@ -3,7 +3,7 @@
   "defaultServerUrl": null,
   "discoveryProxyUrl": null,
   "enableWebRtcScan": true,
-  "brandingName": "Moonfin",
-  "pluginMode": false,
+  "brandingName": "SpeshTV",
+  "pluginMode": true,
   "forcedServerUrl": null
 }

@@ -31,6 +31,8 @@ import '../../widgets/rating_display.dart';
 import '../../../data/services/theme_music_service.dart';
 import '../../../data/services/media_server_client_factory.dart';
 import '../../../data/services/plugin_sync_service.dart';
+import '../../../data/services/progress_refresh_coordinator.dart';
+import '../../../data/services/socket_handler.dart';
 import '../../../data/utils/media_type_badges.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../playback/appletv_preview_player.dart';
@@ -121,6 +123,13 @@ class _HomeShellState extends State<_HomeShell>
   final _themeMusicService = GetIt.instance<ThemeMusicService>();
   final _pluginSyncService = GetIt.instance<PluginSyncService>();
   late final HomeViewModel _viewModel;
+  ProgressRefreshCoordinator? _progressUpdates;
+  bool _progressForeground = true;
+  bool _progressCovered = false;
+
+  void _syncProgressVisibility() => _progressUpdates?.setActive(
+    _progressForeground && !_progressCovered && _isHomeRouteActive(),
+  );
 
   final ValueNotifier<AggregatedItem?> _selectedItemNotifier = ValueNotifier(null);
   final GlobalKey<_ContentRowsState> _contentRowsKey =
@@ -160,6 +169,24 @@ class _HomeShellState extends State<_HomeShell>
   void initState() {
     super.initState();
     _viewModel = GetIt.instance<HomeViewModel>();
+    if ((const bool.fromEnvironment('SPESHTV_WEB') ||
+        const bool.fromEnvironment('SPESHMEDIA_CLIENT')) &&
+        GetIt.instance.isRegistered<SocketHandler>()) {
+      final socket = GetIt.instance<SocketHandler>();
+      _progressUpdates = ProgressRefreshCoordinator(
+        userId: GetIt.instance<MediaServerClient>().userId ?? '',
+        events: socket.events,
+        connections: socket.connections,
+        enabled: () => _viewModel.liveProgressEnabled,
+        invalidate: (libraryChanged) => _viewModel.invalidateProgressCache(
+          refreshIdentities: libraryChanged,
+        ),
+        refresh: _viewModel.refreshResumeAndNextUp,
+      );
+      final lifecycle = WidgetsBinding.instance.lifecycleState;
+      _progressForeground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
+      _syncProgressVisibility();
+    }
     WidgetsBinding.instance.addObserver(this);
     appRouter.routerDelegate.addListener(_onRouteChanged);
     _lastObservedPath = appRouter.routerDelegate.currentConfiguration.uri.path;
@@ -215,6 +242,7 @@ class _HomeShellState extends State<_HomeShell>
 
   @override
   void dispose() {
+    _progressUpdates?.dispose();
     if (_observedRoute != null) {
       routeLifecycleObserver.unsubscribe(this);
       _observedRoute = null;
@@ -250,7 +278,10 @@ class _HomeShellState extends State<_HomeShell>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _progressForeground = state == AppLifecycleState.resumed;
+    _syncProgressVisibility();
     if (state == AppLifecycleState.resumed) {
+      _viewModel.invalidateProgressCache();
       _viewModel.refresh(preserveExisting: true);
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
@@ -263,6 +294,7 @@ class _HomeShellState extends State<_HomeShell>
 
   void _onHomeRefreshRequested() {
     if (!mounted) return;
+    _viewModel.invalidateProgressCache();
     _viewModel.refresh(preserveExisting: true);
   }
 
@@ -396,6 +428,7 @@ class _HomeShellState extends State<_HomeShell>
 
   void _onRouteChanged() {
     if (!mounted) return;
+    _syncProgressVisibility();
     final path = appRouter.routerDelegate.currentConfiguration.uri.path;
     if (path == _lastObservedPath) return;
     _lastObservedPath = path;
@@ -418,6 +451,8 @@ class _HomeShellState extends State<_HomeShell>
 
   @override
   void didPushNext() {
+    _progressCovered = true;
+    _syncProgressVisibility();
     _contentRowsKey.currentState?.noteLeavingHome();
     if (_themeMusicRegistered) {
       _themeMusicService.unregisterDetailScreen(this);
@@ -429,6 +464,8 @@ class _HomeShellState extends State<_HomeShell>
 
   @override
   void didPopNext() {
+    _progressCovered = false;
+    _syncProgressVisibility();
     if (!_isHomeRouteActive()) {
       _themeMusicService.fadeOutAndStop();
       return;
@@ -440,6 +477,7 @@ class _HomeShellState extends State<_HomeShell>
     // empty, so once it lands, re-assert focus in case it held the focused row.
     Future.delayed(const Duration(milliseconds: 300), () async {
       if (!mounted) return;
+      _viewModel.invalidateProgressCache();
       await _viewModel.refreshResumeAndNextUp();
       if (!mounted) return;
       _contentRowsKey.currentState?.ensureFocusAfterReturnRefresh();

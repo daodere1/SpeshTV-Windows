@@ -5,6 +5,8 @@ import 'package:server_core/server_core.dart';
 
 import '../../l10n/current_app_localizations.dart';
 import '../models/aggregated_item.dart';
+import '../models/search_source.dart';
+export '../models/search_source.dart' show SearchSource;
 import '../repositories/search_repository.dart';
 import '../repositories/seerr_repository.dart';
 import '../services/seerr/seerr_api_models.dart';
@@ -82,10 +84,25 @@ class SearchViewModel extends ChangeNotifier {
   String get errorMessage => _errorMessage;
 
   Timer? _debounceTimer;
+  int _generation = 0;
+  bool _disposed = false;
+  bool _searching = false;
+  bool get searching => _searching;
+  SearchSource _source = SearchSource.all;
+  SearchSource get source => _source;
 
-  static const _debounceMs = 600;
+  void setSource(SearchSource source) {
+    if (_source == source) return;
+    _source = source;
+    if (_query.isNotEmpty) {
+      searchImmediate(_query);
+    } else {
+      notifyListeners();
+    }
+  }
+
+  static const _debounceMs = 280;
   static const _resultLimit = 24;
-  static const _globalFetchLimit = 240;
 
   static List<SearchResultGroup> _bookSearchGroups() {
     final l10n = currentAppLocalizations();
@@ -133,6 +150,12 @@ class SearchViewModel extends ChangeNotifier {
     final trimmed = query.trim();
     if (trimmed == _query) return;
     _query = trimmed;
+    _generation++;
+    _errorMessage = '';
+    _results = const [];
+    _seerrResults = const [];
+    _gameResults = const [];
+    _searching = trimmed.isNotEmpty;
 
     _debounceTimer?.cancel();
 
@@ -158,6 +181,12 @@ class SearchViewModel extends ChangeNotifier {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return;
     _query = trimmed;
+    _generation++;
+    _errorMessage = '';
+    _results = const [];
+    _seerrResults = const [];
+    _gameResults = const [];
+    _searching = true;
     _debounceTimer?.cancel();
     _state = SearchState.loading;
     notifyListeners();
@@ -165,79 +194,82 @@ class SearchViewModel extends ChangeNotifier {
   }
 
   Future<void> _executeSearch(String query) async {
-    if (query != _query) return;
-
-    try {
-        final activeGroups = _scopedParentId != null
-          ? _bookSearchGroups()
-          : _searchGroups();
-      final seerrFuture = _fetchSeerrResults(query);
-      final gamesFuture = _scopedParentId != null
-          ? Future.value(const <GameSearchResult>[])
-          : _fetchGameResults(query);
-
-      final groups = _scopedParentId != null
-          ? await Future.wait(activeGroups.map((group) async {
-              final items = await _searchRepository.search(
-                query,
-                includeItemTypes: group.itemTypes,
-                parentId: _scopedParentId,
-                limit: _resultLimit,
-              );
-              return group.copyWith(items: items);
-            }))
-          : await _buildGroupedGlobalResults(query, activeGroups);
-      final seerr = await seerrFuture;
-      final games = await gamesFuture;
-
-      if (query != _query) return;
-
-      _results = groups.where((g) => g.items.isNotEmpty).toList();
-      _seerrResults = seerr;
-      _gameResults = games;
+    if (_disposed || query != _query) return;
+    final generation = _generation;
+    final source = _source;
+    bool current() => !_disposed && generation == _generation;
+    final activeGroups = _scopedParentId != null ? _bookSearchGroups() : _searchGroups();
+    var libraryItems = <AggregatedItem>[];
+    var people = <AggregatedItem>[];
+    var channels = <AggregatedItem>[];
+    void publish() {
+      if (!current()) return;
+      _results = activeGroups.map((group) {
+        final items = group.itemTypes.contains('Person') ? people
+            : group.itemTypes.contains('LiveTvChannel') ? channels
+            : libraryItems.where((i) => group.itemTypes.contains(i.type)).toList();
+        return group.copyWith(items: items.take(_resultLimit).toList());
+      }).where((g) => g.items.isNotEmpty).toList();
       _state = SearchState.ready;
-    } catch (e) {
-      if (query != _query) return;
-      _errorMessage = e.toString();
-      _state = SearchState.error;
+      notifyListeners();
     }
-    notifyListeners();
-  }
-
-  Future<List<SearchResultGroup>> _buildGroupedGlobalResults(
-    String query,
-    List<SearchResultGroup> activeGroups,
-  ) async {
-    final peopleFuture = _searchRepository
-        .searchPeople(query, limit: _resultLimit)
-        .catchError((_) => <AggregatedItem>[]);
-    final channelsFuture = _channelMatches(query);
-    final allItems = await _searchRepository.search(
-      query,
-      parentId: _scopedParentId,
-      limit: _globalFetchLimit,
-    );
-    final people = await peopleFuture;
-    final channels = await channelsFuture;
-
-    final grouped = <SearchResultGroup>[];
-    for (final group in activeGroups) {
-      if (group.itemTypes.contains('Person')) {
-        grouped.add(group.copyWith(items: people.take(_resultLimit).toList()));
-        continue;
+    Future<void> guarded(Future<void> Function() task) async {
+      try {
+        await task();
+      } catch (_) {
+        if (current()) {
+          _errorMessage = 'Some sources could not be searched. Please retry.';
+        }
       }
-      if (group.itemTypes.contains('LiveTvChannel')) {
-        grouped.add(group.copyWith(items: channels));
-        continue;
-      }
-      final matched = allItems
-          .where((item) => group.itemTypes.contains(item.type))
-          .take(_resultLimit)
-          .toList();
-      grouped.add(group.copyWith(items: matched));
     }
-
-    return grouped;
+    final tasks = <Future<void>>[];
+    Future<void>? libraryTask;
+    if (_scopedParentId != null) {
+      tasks.add(guarded(() async {
+        for (final group in activeGroups) {
+          if (!current()) return;
+          libraryItems.addAll(await _searchRepository.search(query,
+            includeItemTypes: group.itemTypes, parentId: _scopedParentId, limit: _resultLimit));
+          publish();
+        }
+      }));
+    } else {
+      if (source != SearchSource.live) {
+        libraryTask = guarded(() async {
+          await _searchRepository.searchLibraries(query, source: source,
+            isCurrent: current, onResults: (items) { libraryItems = items; publish(); });
+        });
+        tasks.add(libraryTask);
+      }
+      if (source == SearchSource.all || source == SearchSource.live) {
+        tasks.add(guarded(() async { channels = await _channelMatches(query); publish(); }));
+      }
+      if (source == SearchSource.all) {
+        tasks.add(guarded(() async {
+          await libraryTask;
+          if (!current()) return;
+          people = await _searchRepository.searchPeople(query,
+            limit: _resultLimit, isCurrent: current);
+          publish();
+        }));
+        tasks.add(guarded(() async {
+          final items = await _fetchSeerrResults(query);
+          if (!current()) return;
+          _seerrResults = items;
+          publish();
+        }));
+        tasks.add(guarded(() async {
+          final items = await _fetchGameResults(query);
+          if (!current()) return;
+          _gameResults = items;
+          publish();
+        }));
+      }
+    }
+    await Future.wait(tasks);
+    if (!current()) return;
+    _searching = false;
+    publish();
   }
 
   // The lineup is fetched once per search session and reused across queries,
@@ -250,15 +282,12 @@ class SearchViewModel extends ChangeNotifier {
     _channelsFuture ??= _searchRepository.fetchLiveTvChannels();
     try {
       final all = await _channelsFuture!;
-      return all
-          .where((c) => c.name.toLowerCase().contains(q))
-          .take(_resultLimit)
-          .toList();
+      return matchSearchChannels(all, q, limit: _resultLimit);
     } catch (_) {
       // A server without Live TV shouldn't break search. Retry next query in
       // case the failure was transient.
       _channelsFuture = null;
-      return const [];
+      rethrow;
     }
   }
 
@@ -314,6 +343,8 @@ class SearchViewModel extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _generation++;
     _debounceTimer?.cancel();
     super.dispose();
   }

@@ -2,6 +2,7 @@ import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:server_core/server_core.dart';
 
 import '../../auth/repositories/session_repository.dart';
+import '../services/member_list_changes.dart';
 import '../services/seerr/seerr_api_models.dart';
 import '../services/seerr/seerr_http_client.dart';
 import '../services/seerr/seerr_models.dart';
@@ -426,11 +427,17 @@ class SeerrRepository {
     (c) async => SeerrDiscoverPage.fromJson(await c.getWatchlist(page: page)),
   );
 
-  Future<void> addToWatchlist({required int tmdbId, required String mediaType}) =>
-      _withClient((c) => c.addToWatchlist(tmdbId: tmdbId, mediaType: mediaType));
+  Future<void> addToWatchlist({required int tmdbId, required String mediaType}) async {
+    final owner = _client.userId;
+    await _withClient((c) => c.addToWatchlist(tmdbId: tmdbId, mediaType: mediaType));
+    if (owner == _client.userId) MemberListChanges.saved(_client, '$mediaType:$tmdbId', MemberListKind.watchlist, true);
+  }
 
-  Future<void> removeFromWatchlist({required int tmdbId, required String mediaType}) =>
-      _withClient((c) => c.removeFromWatchlist(tmdbId: tmdbId, mediaType: mediaType));
+  Future<void> removeFromWatchlist({required int tmdbId, required String mediaType}) async {
+    final owner = _client.userId;
+    await _withClient((c) => c.removeFromWatchlist(tmdbId: tmdbId, mediaType: mediaType));
+    if (owner == _client.userId) MemberListChanges.saved(_client, '$mediaType:$tmdbId', MemberListKind.watchlist, false);
+  }
 
   Future<SeerrDiscoverPage> discoverMovies({
     int page = 1,

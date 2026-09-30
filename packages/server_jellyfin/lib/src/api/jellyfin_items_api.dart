@@ -8,6 +8,61 @@ class JellyfinItemsApi implements ItemsApi {
 
   JellyfinItemsApi(this._dio, this._getUserId);
 
+  Future<Response<dynamic>> _getProgress(
+    String path,
+    Map<String, dynamic> queryParameters,
+  ) async {
+    if (!const bool.fromEnvironment('SPESHTV_WEB')) {
+      return _dio.get(path, queryParameters: queryParameters);
+    }
+    // Match the lightweight SpeshTV feed, not the full catalog-detail DTO.
+    // Counting every resumable item is particularly costly on large libraries.
+    final lean = <String, dynamic>{
+      ...queryParameters,
+      'UserId': _getUserId(),
+      'Fields': 'ProviderIds,ProductionYear,PrimaryImageAspectRatio',
+      'EnableUserData': true,
+      'EnableTotalRecordCount': false,
+      if (path == '/UserItems/Resume') 'MediaTypes': 'Video',
+      if (path == '/Shows/NextUp') 'EnableRewatching': false,
+    }..remove('EnableImageTypes');
+    final route = path == '/UserItems/Resume'
+        ? '/Users/${Uri.encodeComponent(_getUserId())}/Items/Resume'
+        : path;
+    final options = Options(method: 'GET').compose(
+      _dio.options,
+      route,
+      queryParameters: lean,
+    ).copyWith(
+      connectTimeout: const Duration(seconds: 30),
+      receiveTimeout: const Duration(seconds: 30),
+    );
+    final response = await _dio.fetch<dynamic>(options);
+    // No-count responses can report only this page's length, not the total.
+    // Let the progress feed detect the end from a short page instead.
+    if (response.data is Map<String, dynamic>) {
+      response.data = <String, dynamic>{
+        ...response.data as Map<String, dynamic>,
+        'TotalRecordCount': 0,
+      };
+    }
+    return response;
+  }
+
+  Future<Response<dynamic>> _getSearch(
+    String path,
+    Map<String, dynamic> queryParameters,
+  ) {
+    // Browser connection timeout includes waiting for response headers and
+    // a connection slot. Large catalog searches need more than eight seconds.
+    final options = Options(method: 'GET').compose(
+      _dio.options,
+      path,
+      queryParameters: queryParameters,
+    ).copyWith(connectTimeout: const Duration(seconds: 30));
+    return _dio.fetch<dynamic>(options);
+  }
+
   bool _shouldRetryCollectionFallback(int statusCode) {
     return statusCode == 400 ||
         statusCode == 404 ||
@@ -124,10 +179,9 @@ class JellyfinItemsApi implements ItemsApi {
       final userId = _getUserId();
       path = '/Users/$userId/Items';
     }
-    final response = await _dio.get(
-      path,
-      queryParameters: queryParams,
-    );
+    final response = searchTerm?.trim().isNotEmpty == true
+        ? await _getSearch(path, queryParams)
+        : await _dio.get(path, queryParameters: queryParams);
     return response.data as Map<String, dynamic>;
   }
 
@@ -149,16 +203,14 @@ class JellyfinItemsApi implements ItemsApi {
     String? fields,
     String? enableImageTypes,
   }) async {
-    final response = await _dio.get(
-      '/Persons',
-      queryParameters: {
+    final response = await _getSearch('/Persons', {
         'UserId': _getUserId(),
         'SearchTerm': searchTerm,
         'Limit': ?limit,
         'Fields': ?fields,
         'EnableImageTypes': ?enableImageTypes,
-      },
-    );
+        'EnableTotalRecordCount': false,
+      });
     return response.data as Map<String, dynamic>;
   }
 
@@ -213,9 +265,9 @@ class JellyfinItemsApi implements ItemsApi {
     int? imageTypeLimit,
   }) async {
     final userId = _getUserId();
-    final response = await _dio.get(
+    final response = await _getProgress(
       '/Shows/NextUp',
-      queryParameters: {
+      {
         'UserId': userId,
         'SeriesId': ?seriesId,
         'ParentId': ?parentId,
@@ -241,9 +293,9 @@ class JellyfinItemsApi implements ItemsApi {
     String? enableImageTypes,
     int? imageTypeLimit,
   }) async {
-    final response = await _dio.get(
+    final response = await _getProgress(
       '/UserItems/Resume',
-      queryParameters: {
+      {
         'ParentId': ?parentId,
         if (includeItemTypes != null)
           'IncludeItemTypes': includeItemTypes.join(','),

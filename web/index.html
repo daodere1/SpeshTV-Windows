@@ -6,28 +6,38 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="description" content="Moonfin web client for self-hosted media servers">
-  <meta name="theme-color" content="#101010">
+  <meta name="description" content="SpeshTV, powered by Moonfin">
+  <meta name="theme-color" content="#121416">
 
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="Moonfin">
+  <meta name="apple-mobile-web-app-title" content="SpeshTV">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
   <link rel="icon" type="image/png" href="favicon.png">
 
-  <title>Moonfin</title>
+  <title>SpeshTV</title>
   <link rel="manifest" href="manifest.json">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 
   <style>
+    #spesh-startup-recovery { position: fixed; inset: 0; z-index: 2147483647; background: #121416; color: #f3f5f6; overflow: auto; display: flex; align-items: center; justify-content: center; }
+    .spesh-recovery-inner { width: 100%; max-width: 560px; box-sizing: border-box; padding: 32px 24px; }
+    .spesh-recovery-inner h1 { font-size: 26px; line-height: 1.25; overflow-wrap: anywhere; }
+    .spesh-recovery-inner p { font-size: 16px; line-height: 1.5; }
+    .spesh-recovery-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+    .spesh-recovery-actions button { font: inherit; min-height: 48px; max-width: 100%; white-space: normal; border: 1px solid #647071; border-radius: 4px; padding: 12px 16px; background: #22292a; color: #f3f5f6; cursor: pointer; }
+    .spesh-recovery-actions button:first-child { background: #56d9cc; color: #101414; border-color: #56d9cc; }
+    .spesh-recovery-actions button:focus-visible { outline: 3px solid #56d9cc; outline-offset: 3px; }
     html,
     body {
       margin: 0;
       padding: 0;
       width: 100%;
       height: 100%;
-      background: #101010;
+      overflow: hidden;
+      overscroll-behavior: none;
+      background: #121416;
       color: #ffffff;
       font-family: "Segoe UI", "Helvetica Neue", sans-serif;
     }
@@ -72,13 +82,10 @@
       margin-top: 40px;
       font-size: 18px;
       font-weight: 700;
-      letter-spacing: 6px;
+      letter-spacing: 0;
       text-transform: uppercase;
       text-align: center;
-      background: linear-gradient(90deg, #aa5cc3, #00a4dc);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
+      color: #56d9cc;
       animation: moonfin-label-pulse 2s ease-in-out infinite alternate;
     }
 
@@ -106,6 +113,35 @@
       }
     }
   </style>
+
+  <script id="speshtv-surface-scroll">
+    // Flutter owns scrolling on every app screen, not the containing WKWebView.
+    document.addEventListener('touchmove', function (event) {
+      if (!event.cancelable || event.touches.length !== 1) return;
+      var path = event.composedPath();
+      var nativeControl = path.some(function (node) {
+        return /^(INPUT|TEXTAREA|SELECT|VIDEO|AUDIO|IFRAME)$/.test(node.tagName || '') || node.isContentEditable;
+      });
+      if (nativeControl) return;
+      var flutterSurface = path.some(function (node) {
+        return /^(FLUTTER-VIEW|FLT-GLASS-PANE|CANVAS)$/.test(node.tagName || '');
+      });
+      if (flutterSurface) event.preventDefault();
+    }, {passive: false, capture: true});
+  </script>
+
+  <script id="speshtv-renderer-policy">
+    (function () {
+      var ua = navigator.userAgent || '';
+      var androidWebView = /Android/i.test(ua) && (/;\s*wv\)/i.test(ua) || /Version\/4\.0/i.test(ua));
+      var mode = new URLSearchParams(location.search).get('speshRenderer');
+      var software = mode === 'software';
+      var samsungWebView = androidWebView && /\bSM-S9[34]\d/i.test(ua);
+      window.speshRendererConfig = androidWebView || software || mode === 'canvaskit'
+        ? { renderer: 'canvaskit', canvasKitVariant: 'full', canvasKitForceCpuOnly: software || samsungWebView }
+        : {};
+    })();
+  </script>
 
   <script defer src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
   <script>
@@ -181,17 +217,11 @@
 <body>
   <div id="moonfin-loader" aria-hidden="true">
     <div class="moonfin-loader__content">
-      <div class="moonfin-loader__logo-wrap">
-        <img
-          class="moonfin-loader__logo"
-          src="assets/assets/icons/moonfin_logo.svg"
-          alt="Moonfin"
-          onerror="this.onerror=null;this.src='assets/icons/moonfin_logo.svg';"
-        >
-      </div>
-      <div class="moonfin-loader__label">Loading Moonfin</div>
+      <div style="font-size:32px;font-weight:700;color:#f3f5f6">Spesh<span style="color:#56d9cc">TV</span></div>
+      <div class="moonfin-loader__label">Loading</div>
     </div>
   </div>
+  <script src="startup-recovery.js"></script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:playback_core/playback_core.dart';
+import '../widgets/spesh_brand.dart';
+import 'spesh_web_entry.dart';
 
 import '../../auth/repositories/session_repository.dart';
 import '../../auth/repositories/user_repository.dart';
@@ -183,8 +185,16 @@ CustomTransitionPage<T> _opaqueFullScreenPage<T>({
   );
 }
 
+final _speshWebEntry = SpeshWebEntry(speshWeb ? Uri.base.fragment : null);
+
+String _initialLocation() {
+  // Initialize before authentication replaces the browser's original fragment.
+  if (speshWeb) _speshWebEntry.capture(Uri.base.fragment);
+  return Destinations.startup;
+}
+
 final appRouter = GoRouter(
-  initialLocation: Destinations.startup,
+  initialLocation: _initialLocation(),
   observers: [
     FocusRouteObserver(),
     RetroArtworkRouteObserver.instance,
@@ -197,6 +207,7 @@ final appRouter = GoRouter(
 
     final session = GetIt.instance<SessionRepository>();
     if (session.activeUserId == null) {
+      if (speshWeb) _speshWebEntry.capture(path);
       return Destinations.startup;
     }
 
@@ -218,6 +229,11 @@ final appRouter = GoRouter(
     final connectivity = GetIt.instance<ConnectivityService>();
     if (!connectivity.canReachServer && _isOfflineBlocked(path)) {
       return Destinations.home;
+    }
+
+    if (speshWeb && path == Destinations.home) {
+      final entry = _speshWebEntry.take();
+      if (entry != null && connectivity.canReachServer) return entry;
     }
 
     if (_shouldRedirectVideoToExternalPlayer(path)) {
@@ -554,6 +570,7 @@ final appRouter = GoRouter(
                   : LiveTvPlayerScreen(
                       channels: channels,
                       startIndex: startIndex,
+                      startInGuide: speshWeb && extra['startInGuide'] == true,
                     );
             } else {
               // Entered by channel id (favorites, search, deep links). The

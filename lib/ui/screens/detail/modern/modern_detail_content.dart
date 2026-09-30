@@ -27,6 +27,9 @@ import '../../../../util/focus/focus_scroll.dart';
 import '../../../navigation/destinations.dart';
 import '../../../navigation/playback_launcher.dart';
 import '../../../widgets/logo_view.dart';
+import '../../../widgets/spesh_brand.dart';
+import '../../../widgets/spesh_season_selector.dart';
+import '../../../widgets/spesh_episode_filters.dart';
 import '../../../widgets/marquee_text.dart';
 import '../../../widgets/media_card.dart';
 import '../../../widgets/rating_display.dart';
@@ -1395,6 +1398,9 @@ class _ModernDetailContentState extends State<ModernDetailContent> {
   }
 
   final Set<int> _expandedSeasons = {};
+  int? _selectedSpeshSeason;
+  SpeshEpisodeFilter _speshEpisodeFilter = SpeshEpisodeFilter.all;
+  final GlobalKey _speshNextEpisodeKey = GlobalKey();
   bool _initializedExpandedSeasons = false;
 
   /// All episodes of a Series grouped into collapsible season containers.
@@ -1431,10 +1437,67 @@ class _ModernDetailContentState extends State<ModernDetailContent> {
       }
     }
 
+    if (speshWeb && !seasonGroups.containsKey(_selectedSpeshSeason)) {
+      final nextSeason = _vm.nextUp?.parentIndexNumber;
+      _selectedSpeshSeason = seasonGroups.containsKey(nextSeason)
+          ? nextSeason : seasonGroups.keys.first;
+      _expandedSeasons.add(_selectedSpeshSeason!);
+    }
+
     final children = <Widget>[];
+    final nextEpisode = sorted.firstWhereOrNull((e) => e.id == _vm.nextUp?.id)
+        ?? sorted.firstWhereOrNull((e) => !e.isPlayed);
+    if (speshWeb) {
+      children.add(Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: SpeshSeasonSelector(
+          selected: _selectedSpeshSeason!, label: l10n.seasons,
+          options: {for (final entry in seasonGroups.entries)
+            entry.key: '${l10n.seasonNumber(entry.key)} - '
+              '${entry.value.where((e) => e.isPlayed).length}/${entry.value.length} watched'},
+          onChanged: (season) {
+            setState(() {
+              _selectedSpeshSeason = season;
+              _expandedSeasons..clear()..add(season);
+            });
+          },
+        ),
+      ));
+      children.add(Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: SpeshEpisodeFilters(selected: _speshEpisodeFilter,
+          onChanged: (filter) => setState(() {
+            _speshEpisodeFilter = filter;
+            if (_selectedSpeshSeason != null) _expandedSeasons.add(_selectedSpeshSeason!);
+          }),
+          onJump: nextEpisode == null ? null : () {
+            final season = nextEpisode.parentIndexNumber ?? 0;
+            setState(() {
+              _selectedSpeshSeason = season;
+              _speshEpisodeFilter = SpeshEpisodeFilter.all;
+              _expandedSeasons..clear()..add(season);
+            });
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) {
+                return;
+              }
+              final target = _speshNextEpisodeKey.currentContext;
+              if (target != null) {
+                Scrollable.ensureVisible(target,
+                  duration: const Duration(milliseconds: 250), alignment: 0.15);
+              }
+            });
+          },
+        ),
+      ));
+    }
     for (final entry in seasonGroups.entries) {
       final season = entry.key;
+      if (speshWeb && season != _selectedSpeshSeason) continue;
       final eps = entry.value;
+      final visibleEpisodes = speshWeb ? eps.where((episode) => matchesEpisodeFilter(
+        _speshEpisodeFilter, played: episode.isPlayed,
+        position: episode.playbackPosition ?? Duration.zero)).toList() : eps;
       final isExpanded = _expandedSeasons.contains(season);
       final isFirst = children.isEmpty;
 
@@ -1474,7 +1537,9 @@ class _ModernDetailContentState extends State<ModernDetailContent> {
                   ),
                   const SizedBox(width: 10),
                   Text(
-                    '(${eps.length})',
+                    speshWeb
+                        ? '${eps.where((e) => e.isPlayed).length}/${eps.length} watched'
+                        : '(${eps.length})',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: Colors.white38,
                         ),
@@ -1492,17 +1557,24 @@ class _ModernDetailContentState extends State<ModernDetailContent> {
             padding: const EdgeInsets.only(left: 12, bottom: 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: eps.map((episode) {
+              children: [
+                if (speshWeb && visibleEpisodes.isEmpty) const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Text('No episodes match this filter.'),
+                ),
+                ...visibleEpisodes.map((episode) {
                 return Padding(
+                  key: speshWeb && identical(episode, nextEpisode) ? _speshNextEpisodeKey : null,
                   padding: const EdgeInsets.only(bottom: 8),
                   child: DetailEpisodeCard(
                     episode: episode,
                     imageApi: _vm.imageApi,
                     onChanged: () => _vm.load(),
-                    isActive: episode.id == _vm.nextUp?.id,
+                    isActive: episode.id == (speshWeb ? nextEpisode?.id : _vm.nextUp?.id),
                   ),
                 );
-              }).toList(),
+              }),
+              ],
             ),
           ),
         );
@@ -4397,7 +4469,7 @@ class _ModernDetailContentState extends State<ModernDetailContent> {
     final title = code != null ? '$code - ${episode.name}' : episode.name;
     final combinedLabel = customLabel != null
         ? '$customLabel - ${episode.name}'
-        : '${l10n.nextUp} - $title';
+        : '${speshWeb && !episode.isPlayed && (episode.playbackPosition ?? Duration.zero) > Duration.zero ? l10n.resume : l10n.nextUp} - $title';
     final progress = (episode.playedPercentage ?? 0) / 100.0;
     final hideOverview = hidesMediaDescription(
       itemType: episode.type,

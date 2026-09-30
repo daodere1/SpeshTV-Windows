@@ -5,6 +5,19 @@ import 'package:flutter/foundation.dart';
 import 'package:server_core/server_core.dart';
 
 import '../../preference/preference_constants.dart';
+import '../models/channel_facets.dart';
+import '../services/member_list_changes.dart';
+
+bool hasGuideTitle(String? title) => title != null &&
+    title.trim().isNotEmpty &&
+    !const {
+      'no title', 'no title available', 'no information',
+      'no information available', 'no program information',
+      'no programme information', 'tba', 'n/a',
+    }.contains(title.trim().toLowerCase());
+
+String guideDisplayTitle(String? programTitle, String channelName) =>
+    hasGuideTitle(programTitle) ? programTitle!.trim() : channelName;
 
 class GuideChannel {
   final String id;
@@ -93,6 +106,7 @@ enum GuideFilter {
   kids,
   premiere,
   favorites,
+  recentlyWatched,
 }
 
 enum GuideState { loading, ready, error }
@@ -209,6 +223,62 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   String get errorMessage => _errorMessage;
 
   List<GuideChannel> _channels = const [];
+  List<GuideChannel> get channels => List.unmodifiable(_channels);
+  String _channelQuery = '';
+  String _country = '', _package = '', _tag = '';
+  String get country => _country;
+  String get package => _package;
+  String get tag => _tag;
+  List<String> _recentChannelIds = const [];
+  void setRecentChannels(List<String> ids) {
+    if (listEquals(ids, _recentChannelIds)) {
+      return;
+    }
+    _recentChannelIds = List.unmodifiable(ids);
+    notifyListeners();
+  }
+  int get activeChannelFilterCount =>
+      [_country, _package, _tag].where((value) => value.isNotEmpty).length +
+      (_filter == GuideFilter.all ? 0 : 1);
+
+  void clearBrowseFilters() {
+    _filter = GuideFilter.all;
+    clearChannelFilters();
+  }
+  final Map<String, ChannelFacets> _channelFacets = {};
+  List<ChannelFilterOption> countryOptions = const [];
+  List<ChannelFilterOption> packageOptions = const [];
+  List<ChannelFilterOption> tagOptions = const [];
+
+  void setChannelFilters({String? country, String? package, String? tag}) {
+    _country = country ?? _country;
+    _package = package ?? _package;
+    _tag = tag ?? _tag;
+    notifyListeners();
+    unawaited(ensureProgramsForChannels(filteredChannels.take(24).map((c) => c.id).toList())
+        .catchError((Object _) {}));
+  }
+
+  void clearChannelFilters() => setChannelFilters(country: '', package: '', tag: '');
+
+  void setChannelQuery(String query) {
+    final normalized = query.trim().toLowerCase();
+    if (_channelQuery == normalized) return;
+    _channelQuery = normalized;
+    notifyListeners();
+    unawaited(ensureProgramsForChannels(
+      filteredChannels.take(24).map((channel) => channel.id).toList())
+      .catchError((Object _) {}));
+  }
+
+  GuideChannel? channelForNumber(String number) {
+    final target = number.trim();
+    if (target.isEmpty) return null;
+    for (final channel in _channels) {
+      if (channel.number == target) return channel;
+    }
+    return null;
+  }
 
   final Map<String, List<GuideProgram>> _programsByChannel = {};
 
@@ -225,11 +295,24 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   DateTime get windowEnd => _windowEnd;
 
   List<GuideChannel> get filteredChannels {
-    if (_filter == GuideFilter.all) return _channels;
+    final matching = _channels.where((ch) {
+      final facets = _channelFacets[ch.id];
+      bool includes(Set<String>? values, String selected) => selected.isEmpty ||
+          (values?.any((v) => v.toLowerCase() == selected.toLowerCase()) ?? false);
+      return includes(facets?.countries, _country) && includes(facets?.packages, _package) && includes(facets?.tags, _tag)
+          && (_channelQuery.isEmpty || ch.name.toLowerCase().contains(_channelQuery)
+              || (ch.number?.toLowerCase().contains(_channelQuery) ?? false)
+              || (facets?.tags.any((t) => t.toLowerCase().contains(_channelQuery)) ?? false));
+    }).toList();
+    if (_filter == GuideFilter.all) return matching;
     if (_filter == GuideFilter.favorites) {
-      return _channels.where((ch) => ch.isFavorite).toList();
+      return matching.where((ch) => ch.isFavorite).toList();
     }
-    return _channels.where((ch) {
+    if (_filter == GuideFilter.recentlyWatched) {
+      final byId = {for (final channel in matching) channel.id: channel};
+      return [for (final id in _recentChannelIds) if (byId.containsKey(id)) byId[id]!];
+    }
+    return matching.where((ch) {
       final programs = _programsByChannel[ch.id] ?? [];
       return programs.any((p) => _matchesFilter(p));
     }).toList();
@@ -237,7 +320,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   List<GuideProgram> programsForChannel(String channelId) {
     final all = _programsByChannel[channelId] ?? [];
-    if (_filter == GuideFilter.all || _filter == GuideFilter.favorites) {
+    if (_filter == GuideFilter.all || _filter == GuideFilter.favorites || _filter == GuideFilter.recentlyWatched) {
       return all;
     }
     return all.where(_matchesFilter).toList();
@@ -252,8 +335,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   /// The currently-airing program and the next upcoming one for a channel,
   /// for the mobile Now/Next cards. Derived from the sorted program list.
-  ({GuideProgram? now, GuideProgram? next}) nowNextForChannel(String channelId) {
-    final programs = programsForChannel(channelId);
+  ({GuideProgram? now, GuideProgram? next}) nowNextForChannel(String channelId, {bool ignoreGenreFilter = false}) {
+    final programs = ignoreGenreFilter ? (_programsByChannel[channelId] ?? <GuideProgram>[]) : programsForChannel(channelId);
     final t = DateTime.now();
     GuideProgram? now;
     GuideProgram? next;
@@ -276,9 +359,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     GuideFilter.kids => p.isKids,
     GuideFilter.premiere => p.isPremiere,
     GuideFilter.favorites => true,
+    GuideFilter.recentlyWatched => true,
   };
 
   Future<void> toggleChannelFavorite(String channelId) async {
+    if (!_favoriteSaves.add(channelId)) return;
+    try {
     final index = _channels.indexWhere((c) => c.id == channelId);
     if (index < 0) return;
 
@@ -312,14 +398,18 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       } else {
         await _client.userLibraryApi.unmarkFavorite(channelId);
       }
+      MemberListChanges.saved(_client, channelId, MemberListKind.favorite, next);
     } catch (_) {
       final reverted = List<GuideChannel>.from(_channels);
-      reverted[index] = current;
+      final currentIndex = reverted.indexWhere((c) => c.id == channelId);
+      if (currentIndex >= 0) reverted[currentIndex] = current;
       _channels = reverted;
       notifyListeners();
       rethrow;
     }
+    } finally { _favoriteSaves.remove(channelId); }
   }
+  final _favoriteSaves = <String>{};
 
   Future<void> toggleProgramRecording(GuideProgram program) async {
     if (program.hasTimer) {
@@ -368,6 +458,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _windowEnd = _windowStart.add(Duration(hours: _guideWindowHours));
 
       await loadInitialPrograms();
+      if (const bool.fromEnvironment('SPESHTV_WEB') &&
+          (_country.isNotEmpty || _package.isNotEmpty || _tag.isNotEmpty || _filter == GuideFilter.favorites || _filter == GuideFilter.recentlyWatched)) {
+        await ensureProgramsForChannels(filteredChannels.take(24).map((channel) => channel.id).toList());
+      }
       _state = GuideState.ready;
     } catch (e) {
       _errorMessage = e.toString();
@@ -382,9 +476,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     notifyListeners();
     // Favorites can sit anywhere in the lineup, past the lazily-loaded prefix,
     // so make sure their programs are fetched when that filter is selected.
-    if (value == GuideFilter.favorites) {
+    if (value == GuideFilter.favorites || value == GuideFilter.recentlyWatched) {
       final favIds =
-          _channels.where((c) => c.isFavorite).map((c) => c.id).toList();
+          filteredChannels.map((c) => c.id).toList();
       unawaited(ensureProgramsForChannels(favIds));
     }
   }
@@ -439,7 +533,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final response = await _client.liveTvApi.getChannels(
       sortBy: 'SortName',
       sortOrder: 'Ascending',
-      fields: 'ImageTags,UserData',
+      fields: 'ImageTags,UserData,Tags,Genres',
       enableTotalRecordCount: false,
       userId: _client.userId,
     );
@@ -449,6 +543,15 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         .map(GuideChannel.fromRawItem)
         .toList()
       ..sort(comparatorFor(_sortBy));
+    _channelFacets
+      ..clear()
+      ..addEntries(_channels.map((c) => MapEntry(c.id, ChannelFacets.fromChannel(c.name, c.rawData))));
+    countryOptions = channelFilterOptions(_channelFacets.values.map((f) => f.countries));
+    packageOptions = channelFilterOptions(_channelFacets.values.map((f) => f.packages));
+    tagOptions = channelFilterOptions(_channelFacets.values.map((f) => f.tags));
+    if (!countryOptions.any((o) => o.value == _country)) _country = '';
+    if (!packageOptions.any((o) => o.value == _package)) _package = '';
+    if (!tagOptions.any((o) => o.value == _tag)) _tag = '';
   }
 
   void _resetPrograms() {
@@ -531,6 +634,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     for (final raw in items.cast<Map<String, dynamic>>()) {
       final channelId = raw['ChannelId']?.toString();
       if (channelId == null) continue;
+      if (!hasGuideTitle(raw['Name'] as String?)) continue;
 
       final startStr = raw['StartDate'] as String?;
       final endStr = raw['EndDate'] as String?;

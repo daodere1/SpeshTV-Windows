@@ -46,6 +46,7 @@ import '../../../data/services/cast/native_cast_channel.dart';
 import '../../../data/services/cast/native_dlna_channel.dart';
 import '../../../data/services/media_segment_service.dart';
 import '../../../data/services/media_server_client_factory.dart';
+import '../../../data/services/spesh_playback_health.dart';
 import '../../../data/services/theme_music_service.dart';
 import '../../../platform/pip_service.dart';
 import '../../../preference/preference_constants.dart';
@@ -179,6 +180,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   String? _lastCastErrorMessage;
   DateTime? _lastPlaybackErrorAt;
   String? _lastPlaybackErrorMessage;
+  bool _speshHealthPending = false;
   bool _isInPiP = false;
   final GlobalKey _videoSurfaceKey = GlobalKey();
   bool _forcedLandscape = false;
@@ -1063,7 +1065,24 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     if (error == null || error.isEmpty) {
       return;
     }
-    _showThrottledPlaybackError(error);
+    final item = _queue.currentItem;
+    if (item is AggregatedItem) {
+      if (_speshHealthPending) return;
+      _speshHealthPending = true;
+      unawaited(() async {
+        try {
+          final explanation = await speshPlaybackFailure(_clientForItem(item), item.id);
+          if (mounted && _queue.currentItem == item) {
+            _showThrottledPlaybackError(explanation ??
+                (const bool.fromEnvironment('SPESHTV_WEB') ? 'Playback could not start. Try again or contact your administrator.' : error));
+          }
+        } finally {
+          _speshHealthPending = false;
+        }
+      }());
+    } else {
+      _showThrottledPlaybackError(error);
+    }
   }
 
   Future<void> _refreshRemoteVolume() async {

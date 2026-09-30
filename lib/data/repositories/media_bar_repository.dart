@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -11,6 +12,8 @@ import 'package:server_core/server_core.dart';
 import '../../preference/user_preferences.dart';
 import '../models/media_bar_slide_item.dart';
 import '../models/media_bar_state.dart';
+import '../services/spotlight_cache_store.dart';
+import '../utils/bounded_concurrency.dart';
 
 class MediaBarRepository {
   static const _precacheBackdropCount = 1;
@@ -19,6 +22,7 @@ class MediaBarRepository {
   final MediaServerClient _client;
   final UserPreferences _prefs;
   final _random = math.Random();
+  final _spotlightCache = SpotlightCacheStore();
 
   static const _fields =
       'Type,Genres,OfficialRating,CommunityRating,CriticRating,'
@@ -27,7 +31,9 @@ class MediaBarRepository {
 
   MediaBarRepository(this._client, this._prefs);
 
-  Future<MediaBarState> loadItems() async {
+  Future<MediaBarState> loadItems({
+    void Function(MediaBarReady)? onCached,
+  }) async {
     if (!GetIt.instance.isRegistered<MediaBarRepository>() ||
         GetIt.instance<MediaBarRepository>() != this) {
       return const MediaBarDisabled();
@@ -51,6 +57,33 @@ class MediaBarRepository {
     final excludedGenres = _splitCsv(
       UserPreferences.mediaBarExcludedGenres,
     ).toSet();
+
+    final cacheKey =
+        const bool.fromEnvironment('SPESHTV_WEB') &&
+            (_client.userId?.isNotEmpty ?? false)
+        ? jsonEncode([
+            _client.baseUrl,
+            _client.userId,
+            mediaBarMode,
+            contentType,
+            maxItems,
+            _prefs.get(UserPreferences.mediaBarSourceType),
+            [...libraryIds]..sort(),
+            [...collectionIds]..sort(),
+            [...excludedGenres]..sort(),
+          ])
+        : null;
+    if (cacheKey != null && onCached != null) {
+      final cached = await _spotlightCache.read(cacheKey);
+      if (cached != null) {
+        try {
+          onCached(MediaBarReady(cached.map(_toSlideItem).toList()));
+        } catch (_) {
+          // Invalid or outdated cached metadata must not block fresh results.
+        }
+      }
+    }
+    var earlySpotlightPublished = false;
 
     final fetchLimit = maxItems + 2;
 
@@ -113,22 +146,37 @@ class MediaBarRepository {
       if (allParentIds.isEmpty) {
         return const MediaBarDisabled();
       } else {
-        for (final parentId in allParentIds) {
-          if (!GetIt.instance.isRegistered<MediaBarRepository>() ||
-              GetIt.instance<MediaBarRepository>() != this) {
-            return const MediaBarDisabled();
-          }
-          try {
-            final targetTypes = allParentItemTypes[parentId] ?? includeTypes;
-            final batch = await _fetchItems(
-              targetTypes,
-              fetchLimit,
-              parentId: parentId,
-            );
-            allItems.addAll(batch);
-          } catch (_) {
-            // Keep fetching remaining libraries if one fails
-          }
+        final batches = await mapBounded<String, List<Map<String, dynamic>>>(
+          allParentIds.toList(),
+          const bool.fromEnvironment('SPESHTV_WEB') ? 3 : 1,
+          (parentId) async {
+            if (!GetIt.instance.isRegistered<MediaBarRepository>() ||
+                GetIt.instance<MediaBarRepository>() != this) {
+              return const <Map<String, dynamic>>[];
+            }
+            try {
+              final targetTypes = allParentItemTypes[parentId] ?? includeTypes;
+              final batch = await _fetchItems(
+                targetTypes,
+                fetchLimit,
+                parentId: parentId,
+              ).timeout(const Duration(seconds: 8));
+              if (cacheKey != null && !earlySpotlightPublished && onCached != null) {
+                final preview = _selectItemsWithBackdrops(batch, maxItems, excludedGenres);
+                if (preview.isNotEmpty) {
+                  earlySpotlightPublished = true;
+                  onCached(MediaBarReady(preview.map(_toSlideItem).toList()));
+                }
+              }
+              return batch;
+            } catch (_) {
+              // Keep fetching remaining libraries if one fails
+              return const <Map<String, dynamic>>[];
+            }
+          },
+        );
+        for (final batch in batches) {
+          if (batch != null) allItems.addAll(batch);
         }
       }
 
@@ -140,7 +188,8 @@ class MediaBarRepository {
 
       if (selected.isEmpty && allParentIds.isNotEmpty) {
         final fallbackItems = <Map<String, dynamic>>[];
-        final targetTypes = allParentItemTypes[allParentIds.first] ?? includeTypes;
+        final targetTypes =
+            allParentItemTypes[allParentIds.first] ?? includeTypes;
         fallbackItems.addAll(
           await _fetchItems(
             targetTypes,
@@ -175,6 +224,9 @@ class MediaBarRepository {
       }
 
       final items = selected.map(_toSlideItem).toList();
+      if (cacheKey != null) {
+        unawaited(_spotlightCache.write(cacheKey, selected));
+      }
       return MediaBarReady(items);
     } catch (e) {
       final firstLibraryItems = await _fetchItemsFromFirstSeriesOrMoviesLibrary(
@@ -189,6 +241,9 @@ class MediaBarRepository {
       );
       if (selected.isNotEmpty) {
         final items = selected.map(_toSlideItem).toList();
+        if (cacheKey != null) {
+          unawaited(_spotlightCache.write(cacheKey, selected));
+        }
         return MediaBarReady(items);
       }
       return MediaBarError('Failed to load: $e');
@@ -437,7 +492,11 @@ class MediaBarRepository {
       if (statusCode == 401 || statusCode == 403) {
         return const <Map<String, dynamic>>[];
       }
-      return _fetchItemsFromFallbackSource(itemTypes, limit, parentId: parentId);
+      return _fetchItemsFromFallbackSource(
+        itemTypes,
+        limit,
+        parentId: parentId,
+      );
     }
   }
 

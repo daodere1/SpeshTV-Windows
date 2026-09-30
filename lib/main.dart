@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/material.dart';
@@ -7,7 +8,8 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:get_it/get_it.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:moonfin_design/moonfin_design.dart' show LiquidGlassWidgets;
+import 'package:moonfin_design/moonfin_design.dart' show LiquidGlassWidgets, ThemeRegistry, ThemeSpec;
+import 'ui/widgets/spesh_brand.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:playback_core/playback_core.dart';
 import 'package:screen_retriever/screen_retriever.dart';
@@ -722,6 +724,10 @@ void main() async {
 
   if (PlatformDetection.isWeb) {
     await loadWebRuntimeConfig();
+  }
+  if (speshWeb) {
+    final json = jsonDecode(await rootBundle.loadString('assets/themes/spesha-style.json'));
+    ThemeRegistry.registerStoreTheme(ThemeSpec.fromJson(Map<String, dynamic>.from(json as Map)));
   }
 
   if (PlatformDetection.isDesktop) {

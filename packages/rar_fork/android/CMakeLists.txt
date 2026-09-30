@@ -4,6 +4,8 @@ project(rar_native)
 
 # Fetch libarchive
 include(FetchContent)
+get_filename_component(FORK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
+set(FETCHCONTENT_BASE_DIR "${FORK_ROOT}/.native/rar/${ANDROID_ABI}")
 
 FetchContent_Declare(
   libarchive
@@ -27,7 +29,7 @@ if(NOT libarchive_POPULATED)
   set(ENABLE_EXPAT OFF CACHE BOOL "" FORCE)
   set(ENABLE_LIBXML2 OFF CACHE BOOL "" FORCE)
 
-  add_subdirectory(${libarchive_SOURCE_DIR} ${libarchive_BINARY_DIR} EXCLUDE_FROM_ALL)
+  add_subdirectory("${libarchive_SOURCE_DIR}" "${libarchive_BINARY_DIR}" EXCLUDE_FROM_ALL)
 endif()
 
 # Define our native library
@@ -46,8 +48,8 @@ endif()
 # Include directories
 target_include_directories(rar_native PRIVATE
     ../src
-    ${libarchive_SOURCE_DIR}/libarchive
-    ${libarchive_BINARY_DIR} # For config.h
+    "${libarchive_SOURCE_DIR}/libarchive"
+    "${libarchive_BINARY_DIR}" # For config.h
 )
 
 # Link against libarchive

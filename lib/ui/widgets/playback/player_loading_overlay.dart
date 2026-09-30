@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import '../spesh_brand.dart';
 
 class PlayerLoadingOverlay extends StatefulWidget {
   const PlayerLoadingOverlay({
@@ -64,6 +65,16 @@ class _PlayerLoadingOverlayState extends State<PlayerLoadingOverlay>
     final label = widget.label?.trim();
     final hasLabel = label != null && label.isNotEmpty;
     final uppercaseLabel = hasLabel ? label.toUpperCase() : null;
+
+    if (speshWeb) {
+      return Column(mainAxisSize: MainAxisSize.min, children: [
+        const SpeshBrand(height: 48),
+        const SizedBox(height: 24),
+        const CircularProgressIndicator(color: Color(0xFF56D9CC)),
+        if (hasLabel) Padding(padding: const EdgeInsets.only(top: 24),
+          child: Text(label, textAlign: TextAlign.center)),
+      ]);
+    }
 
     return Column(
       mainAxisSize: MainAxisSize.min,

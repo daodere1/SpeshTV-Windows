@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
+import 'package:go_router/go_router.dart';
 import 'package:moonfin_design/moonfin_design.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:moonfin_native_video/moonfin_native_video.dart';
@@ -12,7 +13,13 @@ import 'package:screen_brightness_platform_interface/screen_brightness_platform_
 import 'package:volume_controller/volume_controller.dart';
 
 import '../../../playback/subtitle_style.dart';
+import '../../../playback/live_stall_watchdog.dart';
+import '../../../playback/spesh_now_next.dart';
+import '../../widgets/spesh_picker_now_next.dart';
+import '../../../preference/spesh_recent_channels.dart';
+import '../../widgets/spesh_previous_channel_button.dart';
 import '../../../data/models/aggregated_item.dart';
+import '../../../data/services/spesh_playback_health.dart';
 import '../../../data/viewmodels/live_tv_guide_view_model.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../playback/html_video_backend.dart';
@@ -35,17 +42,21 @@ import '../../widgets/subtitle_preview.dart';
 import '../../widgets/track_selector_dialog.dart';
 import 'live_tv_guide_screen.dart';
 import '../../screensaver/screensaver_controller.dart';
+import '../../widgets/spesh_brand.dart';
+import '../../navigation/destinations.dart';
 
 const _kGuideResizeDuration = Duration(milliseconds: 250);
 
 class LiveTvPlayerScreen extends StatefulWidget {
   final List<GuideChannel> channels;
   final int startIndex;
+  final bool startInGuide;
 
   const LiveTvPlayerScreen({
     super.key,
     required this.channels,
     required this.startIndex,
+    this.startInGuide = false,
   });
 
   @override
@@ -86,11 +97,27 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   bool _isStopping = false;
   bool _didRestoreSystemUiOnExit = false;
   bool _isSwitching = false;
+  final _stallWatchdog = LiveStallWatchdog();
+  final _confirmedChannel = ConfirmedChannelPlayback();
+  late final String _historyOwner;
+  late final String _historyServer;
+  String _recentHistory = '';
+  final _stallClock = Stopwatch();
+  Timer? _stallTimer;
+  int _channelGeneration = 0;
+  bool _openingChannel = false;
+  bool _recoveringChannel = false;
+  bool _stallMonitoring = false;
+  bool _userPaused = false;
+  String? _recoveryMessage;
+  Future<void> _channelOperation = Future<void>.value();
   bool _isGuidePickerOpen = false;
   DateTime? _suppressBackUntil;
   bool _forcedLandscape = true;
 
   GuideProgram? _currentProgram;
+  Map<String, dynamic>? _nextProgramme;
+  bool _guideLoading = true;
   Timer? _programRefreshTimer;
   StreamSubscription<PlayerBackend>? _backendSub;
   StreamSubscription<bool>? _screensaverPlayingSub;
@@ -146,11 +173,18 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   @override
   void initState() {
     super.initState();
+    _historyOwner = _client.userId ?? '';
+    _historyServer = _client.baseUrl;
+    if (speshWeb) {
+      _recentHistory = _prefs.get(speshRecentChannelsPreference(_historyServer, _historyOwner));
+      _prefs.addListener(_readRecentHistory);
+    }
     _screensaverController.setPlaybackActive(true);
     _screensaverPlayingSub = _state.playingStream.listen(
       _screensaverController.setPlaybackActive,
     );
     _currentIndex = widget.startIndex;
+    _isGuidePickerOpen = widget.startInGuide;
     _applyPlayerDisplayMode();
     _applySubtitleStyle();
     _backendSub = _manager.backendChangedStream.listen((backend) {
@@ -166,6 +200,10 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     _tvBitrateFocus.addListener(_onControlFocusChanged);
     _tvPlaybackInfoFocus.addListener(_onControlFocusChanged);
     _playCurrentChannel();
+    if (speshWeb) {
+      _stallClock.start();
+      _stallTimer = Timer.periodic(const Duration(seconds: 2), (_) => _checkLiveStall());
+    }
     _scheduleHide();
     _startProgramRefresh();
 
@@ -187,6 +225,10 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
 
   @override
   void dispose() {
+    _prefs.removeListener(_readRecentHistory);
+    _channelGeneration++;
+    _stallTimer?.cancel();
+    _stallClock.stop();
     _screensaverPlayingSub?.cancel();
     _screensaverController.setPlaybackActive(false);
     _hideTimer?.cancel();
@@ -240,6 +282,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState lifecycleState) {
+    _stallWatchdog.reconnected(_stallClock.elapsed);
     // Android keeps the video rendering when backgrounded so the OS can capture
     // a live frame for auto-PiP. On resume, re-read the system brightness in
     // case it changed while away.
@@ -261,13 +304,17 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     switch (action) {
       case 'playPause':
         if (_state.isPlaying) {
+          _userPaused = true;
           _manager.pause();
         } else {
+          _userPaused = false;
           _manager.resume();
         }
       case 'play':
+        _userPaused = false;
         _manager.resume();
       case 'pause':
+        _userPaused = true;
         _manager.pause();
       case 'dismissed':
         final lifecycle = WidgetsBinding.instance.lifecycleState;
@@ -283,10 +330,12 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     if (locked) {
       _wasPlayingBeforeScreenLock = _state.isPlaying;
       if (_wasPlayingBeforeScreenLock) {
+        _userPaused = true;
         _manager.pause();
       }
     } else if (_wasPlayingBeforeScreenLock) {
       _wasPlayingBeforeScreenLock = false;
+      _userPaused = false;
       _manager.resume();
     }
   }
@@ -611,11 +660,67 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
 
   GuideChannel get _currentChannel => widget.channels[_currentIndex];
 
-  Future<void> _playCurrentChannel() async {
+  void _readRecentHistory() {
+    if (!mounted || _client.userId != _historyOwner || _client.baseUrl != _historyServer) return;
+    final saved = _prefs.get(speshRecentChannelsPreference(_historyServer, _historyOwner));
+    if (saved != _recentHistory) setState(() => _recentHistory = saved);
+  }
+
+  int? get _previousChannelIndex {
+    if (_client.userId != _historyOwner || _client.baseUrl != _historyServer) return null;
+    final id = previousRecentChannel(decodeRecentChannels(_recentHistory), _currentChannel.id,
+        widget.channels.map((channel) => channel.id).toSet());
+    if (id == null) return null;
+    final index = widget.channels.indexWhere((channel) => channel.id == id);
+    return index < 0 ? null : index;
+  }
+
+  void _watchPreviousChannel() {
+    if (_isStopping || _openingChannel || _recoveringChannel || _isSwitching) return;
+    final index = _previousChannelIndex;
+    if (index != null) unawaited(_switchChannel(index));
+  }
+
+  void _stepChannel(int direction) {
+    if (_isStopping || _openingChannel || _recoveringChannel || _isSwitching) return;
+    final index = _currentIndex + direction;
+    if (index < 0 || index >= widget.channels.length) return;
+    _showInfo();
+    unawaited(_switchChannel(index));
+  }
+
+  Future<void> _playCurrentChannel({bool recovery = false}) async {
+    final generation = recovery ? _channelGeneration : ++_channelGeneration;
+    if (!recovery) _confirmedChannel.reset();
+    if (!recovery) {
+      _stallWatchdog.reset(_stallClock.elapsed);
+      _userPaused = false;
+      if (mounted) setState(() => _recoveryMessage = null);
+    }
+    final channel = _currentChannel;
+    final previous = _channelOperation;
+    final operation = () async {
+      await previous;
+      if (!mounted || _isStopping || generation != _channelGeneration) return;
+      _openingChannel = true;
+      try {
+        await _openChannel(channel, generation);
+      } finally {
+        if (generation == _channelGeneration) {
+          _openingChannel = false;
+          if (mounted && speshWeb) setState(() {});
+        }
+      }
+    }();
+    // Serialize channel opens so an old reconnect cannot finish after a new one.
+    _channelOperation = operation.catchError((Object _) {});
+    await operation;
+  }
+
+  Future<void> _openChannel(GuideChannel channel, int generation) async {
     // A channel change starts a new stream, so whatever caption choice is
     // remembered has to be put back once this one reports its own captions.
     _captionTrackApplied = false;
-    final channel = _currentChannel;
     final item = AggregatedItem(
       id: channel.id,
       serverId: _client.baseUrl,
@@ -632,18 +737,70 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
         enableTranscoding: true,
       );
     } catch (e) {
-      if (mounted) {
+      if (!mounted || generation != _channelGeneration) return;
+      _stallMonitoring = false;
+      if (speshWeb) {
+        _stallWatchdog.exhausted = true;
+        setState(() => _recoveryMessage = _recoveringChannel
+            ? 'The stream could not reconnect. Retry or choose another channel.'
+            : 'Playback could not start. Retry or choose another channel.');
+      }
+      final explanation = await speshPlaybackFailure(_client, channel.id);
+      if (mounted && generation == _channelGeneration) {
+        if (speshWeb && explanation != null) setState(() => _recoveryMessage = explanation);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              AppLocalizations.of(context).failedToPlayChannel(channel.name),
+              explanation ?? AppLocalizations.of(context).failedToPlayChannel(channel.name),
             ),
           ),
         );
       }
       return;
     }
+    if (!mounted || generation != _channelGeneration) return;
+    _stallMonitoring = true;
+    if (_userPaused) {
+      try { await _manager.pause(); } catch (_) {}
+      if (!mounted || generation != _channelGeneration) return;
+    }
+    _stallWatchdog.reconnected(_stallClock.elapsed);
     _fetchCurrentProgram();
+  }
+
+  void _checkLiveStall() {
+    if (!mounted || !_stallMonitoring || _openingChannel || _recoveringChannel || _isStopping || _isSwitching) return;
+    final foreground = WidgetsBinding.instance.lifecycleState;
+    final active = !_userPaused && (foreground == null || foreground == AppLifecycleState.resumed) &&
+        (_state.isPlaying || _state.isBuffering);
+    if (_confirmedChannel.sample(_state.position,
+        playing: active && _state.isPlaying && !_state.isBuffering) &&
+        _historyOwner.isNotEmpty && _client.userId == _historyOwner && _client.baseUrl == _historyServer) {
+      final preference = speshRecentChannelsPreference(_historyServer, _historyOwner);
+      unawaited(_prefs.set(preference, rememberRecentChannel(_prefs.get(preference), _currentChannel.id))
+          .catchError((Object _) {}));
+    }
+    final action = _stallWatchdog.sample(_stallClock.elapsed, _state.position, active: active);
+    if (action == LiveStallAction.reconnect) {
+      unawaited(_recoverLiveChannel());
+    } else if (action == LiveStallAction.exhausted) {
+      setState(() => _recoveryMessage = 'The stream is still stalled. Retry or choose another channel.');
+    } else if (_recoveryMessage != null && !_stallWatchdog.exhausted &&
+        !_recoveringChannel && !_state.isBuffering) {
+      setState(() => _recoveryMessage = null);
+    }
+  }
+
+  Future<void> _recoverLiveChannel() async {
+    final generation = _channelGeneration;
+    _recoveringChannel = true;
+    setState(() => _recoveryMessage = 'Reconnecting (${_stallWatchdog.attempts}/2)...');
+    try {
+      await _playCurrentChannel(recovery: true);
+    } finally {
+      _recoveringChannel = false;
+      if (mounted && generation == _channelGeneration) setState(() {});
+    }
   }
 
   Future<void> _switchChannel(int newIndex) async {
@@ -653,17 +810,21 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
       setState(() {
         _currentIndex = newIndex;
         _currentProgram = null;
+        _nextProgramme = null;
+        _guideLoading = true;
         _infoVisible = true;
       });
       await _playCurrentChannel();
       _scheduleHide();
     } finally {
       _isSwitching = false;
+      if (mounted && speshWeb) setState(() {});
     }
   }
 
   Future<void> _fetchCurrentProgram() async {
     final channelId = _currentChannel.id;
+    final generation = _channelGeneration;
     try {
       final now = DateTime.now();
       final response = await _client.liveTvApi.getGuide(
@@ -674,8 +835,20 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
         enableTotalRecordCount: false,
         userId: _client.userId,
       );
-      final items = (response['Items'] as List?) ?? [];
-      if (items.isEmpty || !mounted) return;
+      var items = (response['Items'] as List?) ?? [];
+      if (!mounted || channelId != _currentChannel.id || generation != _channelGeneration) return;
+
+      if (speshWeb) {
+        final programmes = speshNowNext(items, DateTime.now());
+        setState(() {
+          _guideLoading = false;
+          _nextProgramme = programmes.next;
+          _currentProgram = null;
+        });
+        if (programmes.now == null) return;
+        items = [programmes.now];
+      }
+      if (items.isEmpty) return;
 
       Map<String, dynamic>? selected;
       DateTime? selectedStart;
@@ -727,7 +900,11 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
           rawData: selectedMap,
         );
       });
-    } catch (_) {}
+    } catch (_) {
+      if (speshWeb && mounted && channelId == _currentChannel.id && generation == _channelGeneration) {
+        setState(() => _guideLoading = false);
+      }
+    }
   }
 
   void _startProgramRefresh() {
@@ -830,6 +1007,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   }
 
   void _togglePlayback() {
+    _userPaused = _state.isPlaying;
     _state.isPlaying ? _manager.pause() : _manager.resume();
     _scheduleHide();
   }
@@ -1288,7 +1466,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   }
 
   Future<void> _onGuideChannelSelected(String channelId) async {
-    _closeGuideOverlay();
+    if (!widget.startInGuide) _closeGuideOverlay();
     if (channelId == _currentChannel.id) return;
     final selectedIndex = widget.channels.indexWhere(
       (channel) => channel.id == channelId,
@@ -1304,6 +1482,14 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     await _manager.stop(userInitiated: false);
     await _restoreSystemUiForExit();
     if (mounted) Navigator.of(context).pop();
+  }
+
+  Future<void> _returnToSpeshTv() async {
+    if (_isStopping) return;
+    _isStopping = true;
+    await _manager.stop(userInitiated: false);
+    await _restoreSystemUiForExit();
+    if (mounted) context.go(Destinations.home);
   }
 
   Future<void> _restoreSystemUiForExit() async {
@@ -1394,6 +1580,20 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
       return KeyEventResult.ignored;
     }
 
+    if (speshWeb) {
+      if (event.logicalKey == LogicalKeyboardKey.pageUp ||
+          event.logicalKey == LogicalKeyboardKey.pageDown) {
+        if (event is KeyDownEvent) {
+          _stepChannel(event.logicalKey == LogicalKeyboardKey.pageUp ? -1 : 1);
+        }
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.escape && _infoVisible) {
+        _hideInfo();
+        return KeyEventResult.handled;
+      }
+    }
+
     switch (event.logicalKey) {
       case LogicalKeyboardKey.arrowUp:
       case LogicalKeyboardKey.arrowDown:
@@ -1464,6 +1664,10 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         if (_isGuidePickerOpen) {
+          if (speshWeb && widget.startInGuide) {
+            _returnToSpeshTv();
+            return;
+          }
           _closeGuideOverlay();
           return;
         }
@@ -1530,11 +1734,11 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   // matching intact.
   Rect _videoRect(Size size) {
     if (_isGuidePickerOpen) {
-      return const Rect.fromLTWH(
+      return Rect.fromLTWH(
         LiveTvGuideScreen.miniPlayerVideoLeft,
         LiveTvGuideScreen.miniPlayerVideoTop,
-        LiveTvGuideScreen.miniPlayerVideoWidth,
-        LiveTvGuideScreen.miniPlayerVideoHeight,
+        speshWeb ? LiveTvGuideScreen.previewWidth(size.width) : LiveTvGuideScreen.miniPlayerVideoWidth,
+        speshWeb ? LiveTvGuideScreen.previewWidth(size.width) * .56 : LiveTvGuideScreen.miniPlayerVideoHeight,
       );
     }
     return Rect.fromLTWH(0, 0, size.width, size.height);
@@ -1629,6 +1833,8 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
         currentChannel: _currentChannel,
         onChannelSelected: _onGuideChannelSelected,
         onClose: _closeGuideOverlay,
+        onReturnHome: speshWeb ? _returnToSpeshTv : null,
+        onStopPreview: speshWeb ? _exitPlayback : null,
       ),
     );
   }
@@ -1642,6 +1848,17 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
         stream: _state.bufferingStream,
         initialData: _state.isBuffering,
         builder: (context, snap) {
+          if (_recoveryMessage != null) {
+            return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Padding(padding: const EdgeInsets.all(16), child: Text(_recoveryMessage!, textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white, fontSize: 16))),
+              if (_stallWatchdog.exhausted)
+                IconButton(tooltip: 'Retry channel', icon: const Icon(Icons.refresh, color: Colors.white),
+                  onPressed: () => unawaited(_playCurrentChannel()))
+              else
+                CircularProgressIndicator(color: AppColorScheme.accent),
+            ]));
+          }
           if (snap.data != true) return const SizedBox.shrink();
           return Center(
             child: CircularProgressIndicator(color: AppColorScheme.accent),
@@ -1654,6 +1871,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   Widget _buildTopOverlay() {
     final padding = MediaQuery.of(context).padding;
     final channel = _currentChannel;
+    final previousIndex = speshWeb ? _previousChannelIndex : null;
 
     return Positioned(
       top: 0,
@@ -1673,7 +1891,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
             colors: [Colors.black87, Colors.transparent],
           ),
         ),
-        child: Row(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [Row(
           children: [
             if (!PlatformDetection.useLeanbackUi)
               IconButton(
@@ -1721,7 +1939,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  if (_currentProgram != null)
+                  if (_currentProgram != null && !speshWeb)
                     Text(
                       _currentProgram!.name,
                       style: const TextStyle(
@@ -1734,6 +1952,25 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
                 ],
               ),
             ),
+            if (speshWeb) ...[
+              IconButton(
+                tooltip: 'Previous channel',
+                onPressed: _currentIndex == 0 || _isStopping || _openingChannel || _recoveringChannel || _isSwitching
+                    ? null : () => _stepChannel(-1),
+                icon: const Icon(Icons.keyboard_arrow_up),
+              ),
+              IconButton(
+                tooltip: 'Next channel',
+                onPressed: _currentIndex >= widget.channels.length - 1 || _isStopping || _openingChannel || _recoveringChannel || _isSwitching
+                    ? null : () => _stepChannel(1),
+                icon: const Icon(Icons.keyboard_arrow_down),
+              ),
+            ],
+            if (speshWeb) SpeshPreviousChannelButton(
+              channelName: previousIndex == null ? null : widget.channels[previousIndex].name,
+              onPressed: previousIndex == null || _isStopping || _openingChannel || _recoveringChannel || _isSwitching
+                  ? null : _watchPreviousChannel,
+            ),
             if (_currentProgram?.hasTimer == true)
               const Padding(
                 padding: EdgeInsets.only(left: AppSpacing.spaceSm),
@@ -1745,8 +1982,24 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
               ),
           ],
         ),
+          if (speshWeb) SpeshPickerNowNext(
+            channel: channel.name, showChannel: false, loading: _guideLoading,
+            nowTitle: _currentProgram?.name.isNotEmpty == true ? _currentProgram!.name : null,
+            nowTime: _currentProgram == null ? null
+                : '${_formatTime(_currentProgram!.startDate)} - ${_formatTime(_currentProgram!.endDate)}',
+            nextTitle: _nextProgramme?['Name']?.toString(),
+            nextTime: _programmeTime(_nextProgramme),
+          ),
+        ]),
       ),
     );
+  }
+
+  String? _programmeTime(Map<String, dynamic>? programme) {
+    final start = DateTime.tryParse(programme?['StartDate']?.toString() ?? '')?.toLocal();
+    final end = DateTime.tryParse(programme?['EndDate']?.toString() ?? '')?.toLocal();
+    if (start == null || end == null) return null;
+    return '${_formatTime(start)} - ${_formatTime(end)}';
   }
 
   Widget _buildBottomOverlay() {

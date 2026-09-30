@@ -707,7 +707,15 @@ class _SearchScreenState extends State<SearchScreen> with GridFocusNodeMixin {
 
   String? _subtitle(AggregatedItem item) {
     if (item.type == 'Audio') return item.albumArtist ?? item.album;
-    return item.subtitle;
+    final source = item.rawData['SpeshSource'];
+    final number = item.rawData['ChannelNumber']?.toString();
+    final parts = [
+      if (number != null && number.isNotEmpty) '#$number',
+      if (source == 'local') 'Local',
+      if (source == 'vod') 'VOD',
+      if (item.subtitle != null && item.subtitle!.isNotEmpty) item.subtitle!,
+    ];
+    return parts.isEmpty ? null : parts.join(' / ');
   }
 
   Widget _buildVoiceActivation() {
@@ -946,6 +954,36 @@ class _SearchScreenState extends State<SearchScreen> with GridFocusNodeMixin {
                   ],
                 ),
               ),
+              if (widget.scopedLibraryId == null)
+                Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: PlatformDetection.useMobileUi ? 20 : 48,
+                    vertical: 12,
+                  ),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SegmentedButton<SearchSource>(
+                      segments: const [
+                        ButtonSegment(value: SearchSource.all, label: Text('All'), icon: Icon(Icons.search)),
+                        ButtonSegment(value: SearchSource.local, label: Text('Local'), icon: Icon(Icons.folder_outlined)),
+                        ButtonSegment(value: SearchSource.vod, label: Text('VOD'), icon: Icon(Icons.video_library_outlined)),
+                        ButtonSegment(value: SearchSource.live, label: Text('Live TV'), icon: Icon(Icons.live_tv)),
+                      ],
+                      selected: {_vm.source},
+                      onSelectionChanged: (value) => _vm.setSource(value.first),
+                    ),
+                  ),
+                ),
+              if (_vm.searching) const LinearProgressIndicator(minHeight: 2),
+              if (_vm.errorMessage.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: Row(children: [
+                    Expanded(child: Text(_vm.errorMessage)),
+                    IconButton(tooltip: 'Retry search', icon: const Icon(Icons.refresh),
+                      onPressed: () => _vm.searchImmediate(_vm.query)),
+                  ]),
+                ),
               Expanded(child: _buildBody()),
             ],
           ),
@@ -966,7 +1004,8 @@ class _SearchScreenState extends State<SearchScreen> with GridFocusNodeMixin {
         }
         return _buildResults();
       case SearchState.ready
-          when _vm.results.isEmpty && _vm.seerrResults.isEmpty:
+          when _vm.results.isEmpty && _vm.seerrResults.isEmpty && _vm.gameResults.isEmpty:
+        if (_vm.searching) return const Center(child: CircularProgressIndicator());
         return Center(
           child: Text(
             AppLocalizations.of(context).noResultsForQuery(_vm.query),

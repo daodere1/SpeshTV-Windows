@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'spesh_brand.dart';
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
@@ -954,9 +955,9 @@ class _TopToolbarState extends State<TopToolbar> with RouteAware {
                 order: (order++).toDouble(),
                 child: ExpandableIconButton(
                   key: const ValueKey('toolbar_home'),
-                  forceExpanded: alwaysExpanded,
-                  icon: Icons.home_rounded,
-                  label: l10n.home,
+                  forceExpanded: speshWeb || alwaysExpanded,
+                  icon: speshWeb ? Icons.live_tv_outlined : Icons.home_rounded,
+                  label: speshWeb ? 'SpeshTV' : l10n.home,
                   baseColor: nextNavColor(),
                   focusNode: _homeFocus,
                   onPressed: () {

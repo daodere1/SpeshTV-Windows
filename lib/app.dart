@@ -5,6 +5,7 @@ import 'package:flutter/gestures.dart'
     show kBackMouseButton, kForwardMouseButton;
 import 'package:flutter/cupertino.dart' show CupertinoTheme, CupertinoThemeData;
 import 'package:flutter/material.dart';
+import 'ui/widgets/spesh_brand.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_tvos/flutter_tvos.dart'
@@ -215,7 +216,7 @@ class _MoonfinAppState extends State<MoonfinApp> {
           builder: (context, _) {
             return MaterialApp.router(
               onGenerateTitle: (context) =>
-                  AppLocalizations.of(context).appTitle,
+                  speshWeb ? 'SpeshTV' : AppLocalizations.of(context).appTitle,
               theme: AppTheme.buildTheme(_themeController.activeSpec),
               routerConfig: appRouter,
               debugShowCheckedModeBanner: false,

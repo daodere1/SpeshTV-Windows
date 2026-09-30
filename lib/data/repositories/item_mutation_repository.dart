@@ -2,6 +2,7 @@ import 'package:get_it/get_it.dart';
 import 'package:server_core/server_core.dart';
 
 import '../../preference/user_preferences.dart';
+import '../services/member_list_changes.dart';
 
 class ItemMutationRepository {
   final MediaServerClient _client;
@@ -9,10 +10,15 @@ class ItemMutationRepository {
   ItemMutationRepository(this._client);
 
   Future<void> setFavorite(String itemId, {required bool isFavorite}) async {
+    final owner = _client.userId;
+    final server = _client.baseUrl;
     if (isFavorite) {
       await _client.userLibraryApi.markFavorite(itemId);
     } else {
       await _client.userLibraryApi.unmarkFavorite(itemId);
+    }
+    if (owner == _client.userId && server == _client.baseUrl) {
+      MemberListChanges.saved(_client, itemId, MemberListKind.favorite, isFavorite);
     }
   }
 

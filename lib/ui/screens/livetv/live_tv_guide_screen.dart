@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
@@ -6,6 +7,10 @@ import 'package:moonfin_design/moonfin_design.dart';
 import 'package:server_core/server_core.dart';
 
 import '../../../data/viewmodels/live_tv_guide_view_model.dart';
+import '../../../preference/spesh_view_preferences.dart';
+import '../../../preference/spesh_recent_channels.dart';
+import '../../widgets/spesh_empty_results.dart';
+import '../../widgets/spesh_picker_now_next.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../util/platform_detection.dart';
 import '../../../util/idiom/app_ui_idiom.dart';
@@ -26,6 +31,9 @@ import 'epg/widgets/epg_filter_rail.dart';
 import 'epg/widgets/epg_hero_preview.dart';
 import 'epg/widgets/epg_now_next_card.dart';
 import 'epg/widgets/epg_program_cell.dart';
+import '../../widgets/spesh_brand.dart';
+import 'widgets/spesh_guide_controls.dart';
+import 'widgets/spesh_channel_filters.dart';
 
 const _kChannelColumnWidth = 160.0;
 const _kRowHeight = 84.0;
@@ -67,6 +75,8 @@ class LiveTvGuideScreen extends StatefulWidget {
   /// Called when the user dismisses the embedded guide (activates the
   /// mini-player frame) instead of `Navigator.pop()`.
   final VoidCallback? onClose;
+  final VoidCallback? onReturnHome;
+  final VoidCallback? onStopPreview;
 
   const LiveTvGuideScreen({
     super.key,
@@ -76,6 +86,8 @@ class LiveTvGuideScreen extends StatefulWidget {
     this.embedded = false,
     this.onChannelSelected,
     this.onClose,
+    this.onReturnHome,
+    this.onStopPreview,
   });
 
   /// Geometry of the mini-player video box in [embedded] mode, in the host
@@ -87,6 +99,7 @@ class LiveTvGuideScreen extends StatefulWidget {
   static const double miniPlayerVideoTop = 20 + 12;
   static const double miniPlayerVideoWidth = _kMiniPlayerWidth;
   static const double miniPlayerVideoHeight = _kMiniPlayerHeight;
+  static double previewWidth(double width) => (width - 80).clamp(120, _kMiniPlayerWidth);
 
   @override
   State<LiveTvGuideScreen> createState() => _LiveTvGuideScreenState();
@@ -100,6 +113,14 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
   final _timeHeaderHorizontalScrollController = ScrollController();
   final _guideHorizontalScrollController = ScrollController();
   final _miniPlayerFocusNode = FocusNode(debugLabel: 'GuideMiniPlayer');
+  final _searchController = TextEditingController();
+  final _numberController = TextEditingController();
+  final _nowNextScrollController = ScrollController();
+  Timer? _searchDebounce;
+  Timer? _pickerNowNextTimer;
+  Timer? _programPrefetch;
+  final _pendingProgramIds = <String>{};
+  bool _prefetching = false;
   final Map<int, FocusNode> _channelFocusNodes = {};
   final Map<int, FocusNode> _filterFocusNodes = {};
 
@@ -113,6 +134,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
   final ValueNotifier<GuideChannel?> _focusedChannel = ValueNotifier(null);
   bool _didInitializeMiniPlayerMode = false;
   late EpgMobileView _mobileView;
+  String? _savedGuideView;
+  late final String _viewOwner;
+  late final String _viewServer;
 
   bool get _apple => AppUiIdiomResolver.isApple;
 
@@ -123,12 +147,29 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
   @override
   void initState() {
     super.initState();
+    final client = GetIt.instance<MediaServerClient>();
+    _viewOwner = client.userId ?? '';
+    _viewServer = client.baseUrl;
     _vm = LiveTvGuideViewModel(
-      GetIt.instance<MediaServerClient>(),
+      client,
       initialSortBy: _prefs.get(UserPreferences.liveTvChannelSortBy),
     );
+    if (const bool.fromEnvironment('SPESHTV_WEB')) {
+      _readRecentChannels();
+      _prefs.addListener(_readRecentChannels);
+      _savedGuideView = _prefs.get(speshGuidePreference(_viewServer, _viewOwner));
+      final saved = SpeshGuideView.decode(_savedGuideView!);
+      _vm.setChannelFilters(country: saved.country, package: saved.package, tag: saved.tag);
+      final filter = GuideFilter.values.where((value) => value.name == saved.filter).firstOrNull;
+      _vm.setFilter(filter ?? GuideFilter.all);
+    }
     _vm.addListener(_onChanged);
     _mobileView = _prefs.get(UserPreferences.epgMobileView);
+    if (speshWeb && widget.miniPlayerMode) {
+      _pickerNowNextTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+        if (mounted) setState(() {});
+      });
+    }
 
     _channelScrollController.addListener(_syncVerticalScroll);
     _programScrollController.addListener(_syncVerticalScroll);
@@ -198,7 +239,26 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
 
   void _onChanged() {
     if (!mounted) return;
+    if (const bool.fromEnvironment('SPESHTV_WEB') && _vm.state == GuideState.ready &&
+        !widget.miniPlayerMode && _viewOwner.isNotEmpty) {
+      final client = GetIt.instance<MediaServerClient>();
+      if (client.userId == _viewOwner && client.baseUrl == _viewServer) {
+        final saved = SpeshGuideView(country: _vm.country, package: _vm.package,
+            tag: _vm.tag, filter: _vm.filter.name).encode();
+        if (saved != _savedGuideView) {
+          _savedGuideView = saved;
+          unawaited(_prefs.set(speshGuidePreference(_viewServer, _viewOwner), saved));
+        }
+      }
+    }
     setState(_initializeMiniPlayerMode);
+  }
+
+  void _readRecentChannels() {
+    final client = GetIt.instance<MediaServerClient>();
+    if (client.userId != _viewOwner || client.baseUrl != _viewServer) return;
+    _vm.setRecentChannels(decodeRecentChannels(
+        _prefs.get(speshRecentChannelsPreference(_viewServer, _viewOwner))));
   }
 
   void _initializeMiniPlayerMode() {
@@ -365,6 +425,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
 
   @override
   void dispose() {
+    _pickerNowNextTimer?.cancel();
+    _prefs.removeListener(_readRecentChannels);
+    _searchDebounce?.cancel();
+    _programPrefetch?.cancel();
+    _searchController.dispose();
+    _numberController.dispose();
+    _nowNextScrollController.dispose();
     _vm.removeListener(_onChanged);
     _vm.dispose();
     _channelScrollController.dispose();
@@ -433,6 +500,15 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
   // Called from row itemBuilders: as the guide scrolls toward the lazily-loaded
   // edge, request the next batch of programs (the VM guards against re-entry).
   void _maybeLoadMore(int index) {
+    if (speshWeb) {
+      final channels = _vm.filteredChannels;
+      _pendingProgramIds.addAll(channels.skip(index).take(_kProgramPrefetchRows)
+        .where((channel) => !_vm.hasProgramsFor(channel.id)).map((channel) => channel.id));
+      if (_pendingProgramIds.isNotEmpty && !_prefetching && _programPrefetch == null) {
+        _programPrefetch = Timer(const Duration(milliseconds: 80), _fetchVisiblePrograms);
+      }
+      return;
+    }
     if (_vm.hasMorePrograms &&
         index + _kProgramPrefetchRows >= _vm.programsHighWater) {
       _vm.loadMorePrograms();
@@ -456,7 +532,106 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
 
   @override
   Widget build(BuildContext context) =>
-      RequestInitialFocus(child: _buildContent(context));
+      PopScope(
+        canPop: !speshWeb || widget.embedded || widget.miniPlayerMode,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop && speshWeb && !widget.embedded && !widget.miniPlayerMode) _returnHome();
+        },
+        child: RequestInitialFocus(child: _buildContent(context)),
+      );
+
+  void _returnHome() {
+    if (widget.onReturnHome != null) {
+      widget.onReturnHome!();
+    } else if (speshWeb && !widget.miniPlayerMode) {
+      context.go(Destinations.home);
+    } else if (widget.embedded) {
+      widget.onClose?.call();
+    } else {
+      Navigator.of(context).pop();
+    }
+  }
+
+  Future<void> _fetchVisiblePrograms() async {
+    _programPrefetch = null;
+    if (!mounted || _prefetching) return;
+    final ids = _pendingProgramIds.toList();
+    _pendingProgramIds.clear();
+    _prefetching = true;
+    try {
+      await _vm.ensureProgramsForChannels(ids);
+    } catch (_) {
+      // A later scroll retries guide data without interrupting the live stream.
+    } finally {
+      _prefetching = false;
+      if (mounted && _pendingProgramIds.isNotEmpty) {
+        _programPrefetch = Timer(const Duration(milliseconds: 80), _fetchVisiblePrograms);
+      }
+    }
+  }
+
+  void _searchChannels(String query) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 240), () {
+      if (!mounted) return;
+      _lastFocusedRowIndex = null;
+      _vm.setChannelQuery(query);
+      for (final controller in [_channelScrollController, _programScrollController, _nowNextScrollController]) {
+        if (controller.hasClients) controller.jumpTo(0);
+      }
+    });
+  }
+
+  void _jumpToChannel() {
+    final channel = _vm.channelForNumber(_numberController.text);
+    if (channel == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Channel number not found.')));
+      return;
+    }
+    _searchDebounce?.cancel();
+    _searchController.clear();
+    _vm.setChannelQuery('');
+    _vm.setFilter(GuideFilter.all);
+    _vm.clearChannelFilters();
+    // The fixed-height grid supports an exact jump even before distant rows build.
+    setState(() => _mobileView = EpgMobileView.grid);
+    _lastFocusedRowIndex = null;
+    _focusedChannel.value = channel;
+    _focusedProgram.value = _currentProgramForChannel(channel.id);
+    unawaited(_vm.ensureProgramsForChannels([channel.id]).catchError((Object _) {}));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final index = _vm.filteredChannels.indexWhere((c) => c.id == channel.id);
+      if (index >= 0) _focusChannelRow(index);
+    });
+  }
+
+  Widget _buildSpeshControls() => SpeshGuideControls(
+    searchController: _searchController, numberController: _numberController,
+    onSearch: _searchChannels, onJump: _jumpToChannel, onHome: _returnHome,
+    onStop: widget.onStopPreview,
+    onPreview: _vm.filteredChannels.isEmpty ? null : () {
+      final selected = _focusedChannel.value;
+      final visible = _vm.filteredChannels;
+      final id = visible.any((channel) => channel.id == selected?.id)
+          ? selected!.id : visible.first.id;
+      _watchChannel(id, preview: true);
+    },
+  );
+
+  Widget _buildChannelFilters() => SpeshChannelFilters(model: _vm,
+    onClearRecent: () {
+      final client = GetIt.instance<MediaServerClient>();
+      if (client.userId != _viewOwner || client.baseUrl != _viewServer) return;
+      unawaited(_prefs.set(speshRecentChannelsPreference(_viewServer, _viewOwner), '[]'));
+    }, onChanged: () {
+    _lastFocusedRowIndex = null;
+    _focusedChannel.value = null;
+    _focusedProgram.value = null;
+    for (final controller in [_channelScrollController, _programScrollController, _nowNextScrollController]) {
+      if (controller.hasClients) controller.jumpTo(0);
+    }
+  });
 
   Widget _buildContent(BuildContext context) {
     final body = LayoutBuilder(
@@ -506,6 +681,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
     return Column(
       children: [
         _buildTopSection(),
+        if (speshWeb && widget.miniPlayerMode && MediaQuery.sizeOf(context).width < 720) _buildPickerNowNext(),
+        if (speshWeb) _buildSpeshControls(),
+        if (speshWeb) _buildChannelFilters(),
         const SizedBox(height: 8),
         Expanded(child: _buildBody()),
       ],
@@ -516,6 +694,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
     return Column(
       children: [
         _buildMobileHeader(),
+        if (speshWeb) _buildSpeshControls(),
+        if (speshWeb) _buildChannelFilters(),
         _buildFilterRail(),
         const SizedBox(height: 8),
         Expanded(child: _buildMobileBody()),
@@ -530,7 +710,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
         builder: (context, _) {
           final focusedProgram = _focusedProgram.value;
           final focusedChannel = focusedProgram == null
-              ? (widget.currentChannel ?? _focusedChannel.value)
+              ? (_focusedChannel.value ?? widget.currentChannel)
               : _vm.channelForId(focusedProgram.channelId);
           return _buildProgramInfoHeader(
             program: focusedProgram,
@@ -550,6 +730,26 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
       ],
     );
   }
+
+  Widget _buildPickerNowNext({bool showChannel = true}) => ListenableBuilder(
+    listenable: Listenable.merge([_vm, _focusedChannel]),
+    builder: (context, _) {
+      final channel = _focusedChannel.value ?? widget.currentChannel;
+      if (channel == null) return const SizedBox.shrink();
+      final programmes = _vm.nowNextForChannel(channel.id, ignoreGenreFilter: true);
+      final now = programmes.now;
+      final next = programmes.next;
+      return SpeshPickerNowNext(
+        channel: channel.number == null ? channel.name : '${channel.number} / ${channel.name}',
+        loading: !_vm.hasProgramsFor(channel.id),
+        showChannel: showChannel,
+        nowTitle: hasGuideTitle(now?.name) ? now!.name : null,
+        nowTime: now == null ? null : '${_formatTime(now.startDate)} - ${_formatTime(now.endDate)}',
+        nextTitle: hasGuideTitle(next?.name) ? next!.name : null,
+        nextTime: next == null ? null : '${_formatTime(next.startDate)} - ${_formatTime(next.endDate)}',
+      );
+    },
+  );
 
   Widget _buildHero() {
     return ListenableBuilder(
@@ -590,7 +790,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
   }
 
   Widget _buildFilterRail() {
-    final filters = GuideFilter.values;
+    final filters = GuideFilter.values.where((filter) =>
+        const bool.fromEnvironment('SPESHTV_WEB') || filter != GuideFilter.recentlyWatched).toList();
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
       child: EpgFilterRail(
@@ -619,7 +820,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
         children: [
           _GuidePillButton(
             icon: Icons.arrow_back,
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: _returnHome,
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -677,12 +878,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
       case GuideState.ready:
         final channels = _vm.filteredChannels;
         if (channels.isEmpty) {
-          return Center(
-            child: Text(
-              AppLocalizations.of(context).noChannelsFound,
-              style: TextStyle(color: Colors.white.withAlpha(179)),
-            ),
-          );
+          return _emptyChannelResults();
         }
         return _mobileView == EpgMobileView.grid
             ? _buildGuideGrid(channels)
@@ -692,6 +888,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
 
   Widget _buildNowNextList(List<GuideChannel> channels) {
     return ListView.builder(
+      controller: _nowNextScrollController,
       padding: const EdgeInsets.fromLTRB(8, 4, 8, 16),
       itemCount: channels.length,
       itemBuilder: (context, index) {
@@ -717,7 +914,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
             logoUrl: logoUrl,
             channelName: channel.name,
             channelNumber: channel.number,
-            nowTitle: now?.name,
+            nowTitle: guideDisplayTitle(now?.name, channel.name),
             nowProgress: now?.progressAt(t) ?? 0,
             remainingLabel:
                 now == null ? null : _remainingLabel(now.endDate, t),
@@ -750,7 +947,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
     required GuideChannel? channel,
   }) {
     final l10n = AppLocalizations.of(context);
-    final title = program?.name ?? channel?.name ?? l10n.guideTimeline;
+    final title = guideDisplayTitle(program?.name, channel?.name ?? l10n.guideTimeline);
     final episodeTitle = program?.episodeTitle;
     final timeRange = program == null
         ? null
@@ -775,13 +972,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
         children: [
           if (widget.miniPlayerMode) ...[
             SizedBox(
-              width: _kMiniPlayerWidth,
-              height: _kMiniPlayerHeight,
+              width: speshWeb ? LiveTvGuideScreen.previewWidth(MediaQuery.sizeOf(context).width) : _kMiniPlayerWidth,
+              height: speshWeb ? LiveTvGuideScreen.previewWidth(MediaQuery.sizeOf(context).width) * .56 : _kMiniPlayerHeight,
               child: _buildMiniPlayerCard(),
             ),
-            const SizedBox(width: 16),
+            if (!speshWeb || MediaQuery.sizeOf(context).width >= 720) const SizedBox(width: 16),
           ],
-          Expanded(
+          if (!speshWeb || !widget.miniPlayerMode || MediaQuery.sizeOf(context).width >= 720) Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -819,7 +1016,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
-                if (overview != null && overview.isNotEmpty) ...[
+                if (speshWeb && widget.miniPlayerMode) _buildPickerNowNext(showChannel: false),
+                if (!(speshWeb && widget.miniPlayerMode) && overview != null && overview.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(
                     overview,
@@ -858,7 +1056,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
       imageUrl: imageUrl,
       channelName: currentChannel?.name ?? l10n.channels,
       channelNumber: currentChannel?.number,
-      programTitle: currentProgram?.name,
+      programTitle: guideDisplayTitle(currentProgram?.name, currentChannel?.name ?? l10n.channels),
       showLiveVideo: true,
       transparentPreview: widget.embedded,
       appleTvTextureId: widget.appleTvTextureId,
@@ -885,7 +1083,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
           if (!PlatformDetection.isTV) ...[
             _GuidePillButton(
               icon: Icons.arrow_back,
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: _returnHome,
             ),
             const SizedBox(width: 8),
           ],
@@ -945,6 +1143,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
       GuideFilter.kids => l10n.kids,
       GuideFilter.premiere => l10n.premiere,
       GuideFilter.favorites => l10n.favorites,
+      GuideFilter.recentlyWatched => 'Recently watched',
     };
   }
 
@@ -962,15 +1161,26 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
       case GuideState.ready:
         final channels = _vm.filteredChannels;
         if (channels.isEmpty) {
-          return Center(
-            child: Text(
-              AppLocalizations.of(context).noChannelsFound,
-              style: TextStyle(color: Colors.white.withAlpha(179)),
-            ),
-          );
+          return _emptyChannelResults();
         }
         return _buildGuideGrid(channels);
     }
+  }
+
+  Widget _emptyChannelResults() {
+    final l10n = AppLocalizations.of(context);
+    if (!const bool.fromEnvironment('SPESHTV_WEB')) {
+      return Center(child: Text(l10n.noChannelsFound,
+          style: TextStyle(color: Colors.white.withAlpha(179))));
+    }
+    return SpeshEmptyResults(title: l10n.noChannelsFound, clearFiltersLabel: l10n.clearFilters,
+      onClearFilters: _vm.activeChannelFilterCount > 0 ? () => _vm.clearBrowseFilters() : null,
+      onClearSearch: _searchController.text.trim().isNotEmpty ? () {
+        _searchDebounce?.cancel();
+        _searchController.clear();
+        _vm.setChannelQuery('');
+      } : null,
+    );
   }
 
   Widget _buildGuideGrid(List<GuideChannel> channels) {
@@ -1089,6 +1299,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
 
     return _GuideFocusableSurface(
       focusNode: _channelFocusNodeFor(index),
+      onPreview: speshWeb && widget.miniPlayerMode ? () {
+        _focusedProgram.value = null;
+        _focusedChannel.value = channel;
+      } : null,
       onPressed: () => _watchChannel(channel.id),
       onKeyEvent: (_, event) {
         if (index != 0 || !event.isActionable) {
@@ -1174,7 +1388,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
     );
   }
 
-  void _watchChannel(String channelId) {
+  void _watchChannel(String channelId, {bool preview = false}) {
     if (widget.embedded && widget.onChannelSelected != null) {
       widget.onChannelSelected!(channelId);
       return;
@@ -1184,12 +1398,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen> {
       return;
     }
 
-    final channels = _vm.filteredChannels;
+    final channels = speshWeb ? _vm.channels : _vm.filteredChannels;
     final index = channels.indexWhere((channel) => channel.id == channelId);
     if (index < 0) return;
     context.push(Destinations.liveTvPlayer, extra: {
       'channels': channels,
       'startIndex': index,
+      'startInGuide': preview,
     });
   }
 
@@ -1495,6 +1710,7 @@ class _GuidePillButtonState extends State<_GuidePillButton> {
 
 class _GuideFocusableSurface extends StatefulWidget {
   final VoidCallback? onPressed;
+  final VoidCallback? onPreview;
   final ValueChanged<bool>? onFocusChange;
   final Widget Function(bool focused) builder;
   final BorderRadiusGeometry? borderRadius;
@@ -1504,6 +1720,7 @@ class _GuideFocusableSurface extends StatefulWidget {
   const _GuideFocusableSurface({
     required this.builder,
     this.onPressed,
+    this.onPreview,
     this.onFocusChange,
     this.borderRadius,
     this.focusNode,
@@ -1542,6 +1759,9 @@ class _GuideFocusableSurfaceState extends State<_GuideFocusableSurface> {
     if (widget.borderRadius != null) {
       child = ClipRRect(borderRadius: widget.borderRadius!, child: child);
     }
+    if (widget.onPreview != null) {
+      child = MouseRegion(onEnter: (_) => widget.onPreview!(), child: child);
+    }
 
     return Focus(
       focusNode: _focusNode,
@@ -1555,6 +1775,7 @@ class _GuideFocusableSurfaceState extends State<_GuideFocusableSurface> {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: widget.onPressed,
+        onLongPress: widget.onPreview,
         child: child,
       ),
     );

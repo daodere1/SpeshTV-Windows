@@ -20,6 +20,7 @@ class Media3PlayerBackend extends PlayerBackend {
   static const _audioSinkErrorThreshold = 2;
 
   Media3PlayerBackend(this._prefs) {
+    if (!PlatformDetection.isAndroid) return;
     _eventSub = _events.receiveBroadcastStream().listen(
       _handleEvent,
       onError: (_) {},

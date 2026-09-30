@@ -115,7 +115,8 @@ class _RecordingItemsApi implements ItemsApi {
 }
 
 class _FakeClient implements MediaServerClient {
-  _FakeClient(this.itemsApi, {this.serverType = ServerType.jellyfin});
+  _FakeClient(this.itemsApi, {this.serverType = ServerType.jellyfin,
+    this.baseUrl = 'http://server', this.userId = 'user'});
 
   @override
   final ItemsApi itemsApi;
@@ -124,10 +125,10 @@ class _FakeClient implements MediaServerClient {
   final ServerType serverType;
 
   @override
-  String get baseUrl => 'http://server';
+  final String baseUrl;
 
   @override
-  String? get userId => 'user';
+  final String? userId;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -157,6 +158,33 @@ Future<LibraryBrowseViewModel> _viewModel(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('library sort and filters survive reopening the view', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final store = PreferenceStore();
+    await store.init();
+    final prefs = UserPreferences(store);
+    LibraryBrowseViewModel open({String user = 'user', String server = 'http://server'}) => LibraryBrowseViewModel(
+      libraryId: 'movies', client: _FakeClient(_RecordingItemsApi(), userId: user, baseUrl: server),
+      prefs: prefs, mdbListRepository: _FakeMdbListRepository(),
+    );
+    final first = open();
+    await first.setSortBy(LibrarySortBy.dateAdded);
+    await first.setPlayedFilter(PlayedStatusFilter.unwatched);
+    first.dispose();
+    final reopened = open();
+    addTearDown(reopened.dispose);
+    expect(reopened.sortBy, LibrarySortBy.dateAdded);
+    expect(reopened.playedFilter, PlayedStatusFilter.unwatched);
+    if (const bool.fromEnvironment('SPESHTV_WEB')) {
+      final otherMember = open(user: 'other');
+      final otherServer = open(server: 'http://other');
+      addTearDown(otherMember.dispose);
+      addTearDown(otherServer.dispose);
+      expect(otherMember.playedFilter, PlayedStatusFilter.all);
+      expect(otherServer.playedFilter, PlayedStatusFilter.all);
+    }
+  });
 
   test('in progress asks for the resumable items', () async {
     final api = _RecordingItemsApi();
@@ -247,10 +275,14 @@ void main() {
     await vm.toggleFeatureFilter(LibraryFeatureFilter.subtitles);
     await vm.toggleTagFilter('imax');
     expect(vm.hasActiveFilters, isTrue);
+    expect(vm.activeFilterCount, 3);
+    final sort = vm.sortBy;
 
     await vm.clearFilters();
 
     expect(vm.hasActiveFilters, isFalse);
+    expect(vm.activeFilterCount, 0);
+    expect(vm.sortBy, sort);
     expect(api.filters, isNull);
     expect(api.hasSubtitles, isNull);
     expect(api.tags, isNull);

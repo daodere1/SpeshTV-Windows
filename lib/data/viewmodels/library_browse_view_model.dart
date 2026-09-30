@@ -7,6 +7,7 @@ import 'package:server_core/server_core.dart' hide ImageType;
 
 import '../../preference/preference_constants.dart';
 import '../../preference/user_preferences.dart';
+import '../../preference/spesh_view_preferences.dart';
 import '../../util/network_errors.dart';
 import '../../util/parental_rating_severity.dart';
 import '../models/aggregated_item.dart';
@@ -440,15 +441,18 @@ class LibraryBrowseViewModel extends ChangeNotifier {
 
   String get _prefKey {
     final baseKey = genreId ?? studioName ?? libraryId;
+    final scoped = const bool.fromEnvironment('SPESHTV_WEB')
+        ? speshViewScope(_client.baseUrl, _client.userId, baseKey) : baseKey;
     if (includeItemTypes != null && includeItemTypes!.isNotEmpty) {
-      return '${baseKey}_${includeItemTypes!.join("_")}';
+      return '${scoped}_${includeItemTypes!.join("_")}';
     }
-    return baseKey;
+    return scoped;
   }
 
   String get _imagePrefKey {
     if (genreId != null && libraryId.isNotEmpty) {
-      return libraryId;
+      return const bool.fromEnvironment('SPESHTV_WEB')
+          ? speshViewScope(_client.baseUrl, _client.userId, libraryId) : libraryId;
     }
     return _prefKey;
   }
@@ -661,6 +665,8 @@ class LibraryBrowseViewModel extends ChangeNotifier {
     final groupCollections = _prefs.get(UserPreferences.groupItemsIntoCollections);
     if (includeItemTypes != null) {
       includeTypes = List<String>.from(includeItemTypes!);
+      // An omitted value lets the server regroup movies despite the UI setting.
+      collapseBoxSets = false;
       if (groupCollections &&
           (includeTypes.contains('Movie') ||
               includeTypes.contains('Series'))) {
@@ -1244,6 +1250,16 @@ class LibraryBrowseViewModel extends ChangeNotifier {
     ]);
     await load();
   }
+
+  int get activeFilterCount =>
+      (_playedFilter != PlayedStatusFilter.all ? 1 : 0) +
+      (_likedFilter != LikedStatusFilter.all ? 1 : 0) +
+      (_seriesFilter != SeriesStatusFilter.all ? 1 : 0) +
+      (_favoriteFilter && !favoritesOnly ? 1 : 0) +
+      _featureFilters.length + _videoQualityFilters.length +
+      _videoSourceFilters.length + _genreFilters.length +
+      _officialRatingFilters.length + _tagFilters.length + _yearFilters.length +
+      _audioLanguageFilters.length + _subtitleLanguageFilters.length;
 
   bool get hasActiveFilters =>
       _playedFilter != PlayedStatusFilter.all ||

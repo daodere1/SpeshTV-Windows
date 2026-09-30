@@ -16,7 +16,10 @@ import '../../../data/repositories/user_views_repository.dart';
 import '../../../data/utils/latest_media_row_normalizer.dart';
 import '../../../data/services/connectivity_service.dart';
 import '../../../data/services/home_row_cache_store.dart';
+import '../../../data/services/member_list_changes.dart';
+import '../../../data/services/progress_cache_store.dart';
 import '../../../data/services/row_data_source.dart';
+import '../../../data/services/spesh_progress_resolver.dart';
 import '../../../data/services/topshelf_service.dart';
 import '../../../data/services/tv_channels_service.dart';
 import '../../../data/services/watch_next_service.dart';
@@ -35,6 +38,7 @@ import '../../../util/server_url.dart';
 import '../../../preference/seerr_preferences.dart';
 import '../../../data/viewmodels/seerr_discover_view_model.dart';
 import '../../widgets/seerr/seerr_shortcuts.dart';
+import '../../widgets/spesh_brand.dart' show speshWeb;
 import '../../../data/services/custom_external_lists_service.dart';
 import '../../../util/seerr_genre_art.dart';
 
@@ -51,6 +55,55 @@ class HomeViewModel extends ChangeNotifier {
   final HomeRowCacheStore _cacheStore = HomeRowCacheStore();
   final Set<String> _inFlightPagingRowIds = {};
   final Map<String, int> _rowOffsets = {};
+  bool _progressDisposed = false;
+  StreamSubscription<MemberListChange>? _memberListsSubscription;
+  final Set<MemberListKind> _pendingMemberLists = {};
+  bool _memberListsRefreshing = false;
+  final _progressCache = ProgressCacheStore();
+  String? _progressHydratedKey;
+  int _progressRevision = 0;
+  Future<void>? _progressRefreshFuture;
+  bool _progressRefreshPending = false;
+  bool get _speshProgressEnabled => speshWeb && !_multiServerEnabled && !_isOffline;
+  late final _progressResolver = SpeshProgressResolver(_client);
+  late final _progressFeed = SpeshProgressFeed(
+    resolve: _progressResolver.resolve,
+    resume: (offset) => _dataSource.loadResume(_serverId, startIndex: offset),
+    nextUp: (offset) => _dataSource.loadNextUp(_serverId, startIndex: offset),
+    filterResume: _prefs.filterContinueWatching,
+    filterNextUp: _prefs.filterNextUp,
+  );
+
+  bool get liveProgressEnabled => _speshProgressEnabled &&
+      !_progressDisposed && _ownerUserId.isNotEmpty &&
+      _ownerUserId == _client.userId &&
+      _prefs.get(UserPreferences.mergeContinueWatchingNextUp) &&
+      (_prefs.activeHomeSectionConfigs.isEmpty ||
+       _prefs.activeHomeSectionConfigs.any((c) => c.isBuiltin && c.type == HomeSectionType.resume));
+
+  String _progressCacheKey() => jsonEncode([
+    'local-first-v1', _serverId, _ownerUserId,
+    _prefs.get(UserPreferences.homeSectionsJson),
+    _prefs.get(UserPreferences.hiddenContinueWatchingItems),
+    _prefs.get(UserPreferences.hiddenNextUpSeries),
+    _prefs.get(UserPreferences.blockedParentalRatings),
+  ]);
+
+  void invalidateProgressCache({bool refreshIdentities = false}) {
+    if (!liveProgressEnabled) return;
+    _progressRevision++;
+    if (refreshIdentities) _progressResolver.invalidate();
+    _progressFeed.invalidate();
+    unawaited(_progressCache.invalidate(_progressCacheKey()));
+  }
+
+  @override
+  void dispose() {
+    _progressDisposed = true;
+    unawaited(_memberListsSubscription?.cancel());
+    _progressFeed.invalidate();
+    super.dispose();
+  }
 
   /// How many items a row asks for per page, matching what RowDataSource
   /// requests so the offsets tracked here stay in step with it.
@@ -126,7 +179,7 @@ class HomeViewModel extends ChangeNotifier {
     // Offline rows are cached separately so cached online rows never hydrate
     // an offline home (and vice versa).
     final offline = _isOffline;
-    return '$_serverId|$userId|$sections|$multiServer|$merge|$blocked|offline:$offline';
+    return '$_serverId|$userId|$sections|$multiServer|$merge|$blocked|offline:$offline|localProgress:$_speshProgressEnabled';
   }
 
   static bool _isFavoriteSectionType(HomeSectionType type) {
@@ -334,7 +387,74 @@ class HomeViewModel extends ChangeNotifier {
        _client = client,
        _mediaBarViewModel = mediaBarViewModel,
        _multiServerRepo = multiServerRepo,
-       _ownerUserId = client.userId ?? '';
+       _ownerUserId = client.userId ?? '' {
+    if (speshWeb) {
+      _memberListsSubscription = MemberListChanges.events.listen((change) {
+        if (_progressDisposed || !change.belongsTo(_client) ||
+            _ownerUserId != _client.userId || _multiServerEnabled) {
+          return;
+        }
+        if (change.kind == MemberListKind.favorite) {
+          _rows = _rows.map((row) => row.copyWith(items: row.items.map((item) {
+            if (item.id != change.item || item.serverId != _serverId) return item;
+            final raw = Map<String, dynamic>.from(item.rawData);
+            raw['UserData'] = {
+              ...Map<String, dynamic>.from((raw['UserData'] as Map?) ?? {}),
+              'IsFavorite': change.selected,
+            };
+            return AggregatedItem(id: item.id, serverId: item.serverId, rawData: raw);
+          }).toList())).toList();
+          notifyListeners();
+          unawaited(_progressCache.invalidate(_progressCacheKey()));
+        }
+        _pendingMemberLists.add(change.kind);
+        unawaited(_refreshMemberLists());
+      });
+    }
+  }
+
+  Future<void> _refreshMemberLists() async {
+    if (_memberListsRefreshing) return;
+    _memberListsRefreshing = true;
+    try {
+      while (_pendingMemberLists.isNotEmpty && !_progressDisposed) {
+        final kinds = Set<MemberListKind>.of(_pendingMemberLists);
+        _pendingMemberLists.clear();
+        for (final cfg in _prefs.activeHomeSectionConfigs) {
+          if (!cfg.isBuiltin ||
+              !(kinds.contains(MemberListKind.favorite) && _isFavoriteSectionType(cfg.type) ||
+                kinds.contains(MemberListKind.watchlist) && cfg.type == HomeSectionType.seerrWatchlist)) {
+            continue;
+          }
+          try {
+            final fresh = await _loadConfig(cfg, forceRefresh: true);
+            if (_progressDisposed || _ownerUserId != _client.userId) return;
+            final anchor = _rows.indexWhere((row) => _rowBelongsToConfig(row, cfg));
+            _rows = List.of(_rows)..removeWhere((row) => _rowBelongsToConfig(row, cfg));
+            _rows.insertAll(anchor < 0 ? _rows.length : anchor,
+                fresh.where((row) => !row.isEmpty));
+            notifyListeners();
+          } catch (_) {
+            // Keep the last good row if a refresh fails after a successful save.
+          }
+        }
+        if (kinds.contains(MemberListKind.favorite) &&
+            _prefs.activeHomeSectionConfigs.any((cfg) => cfg.type == HomeSectionType.liveTv)) {
+          try {
+            final fresh = await _dataSource.loadFavoritesChannels(_serverId);
+            if (_progressDisposed || _ownerUserId != _client.userId) return;
+            final anchor = _rows.indexWhere((row) => row.rowType == HomeRowType.liveTvFavorites);
+            _rows = List.of(_rows)..removeWhere((row) => row.rowType == HomeRowType.liveTvFavorites);
+            if (!fresh.isEmpty) _rows.insert(anchor < 0 ? _rows.length : anchor, fresh);
+            notifyListeners();
+          } catch (_) {}
+        }
+        if (!_progressDisposed) unawaited(_cacheStore.write(_homeCacheKey(), _rows));
+      }
+    } finally {
+      _memberListsRefreshing = false;
+    }
+  }
 
   /// Whether a section whose load threw keeps what is already on screen.
   ///
@@ -604,6 +724,11 @@ class HomeViewModel extends ChangeNotifier {
         notifyListeners();
       }
 
+      // Progress is independent of the potentially slow library/external rows.
+      if (showMergedResume) {
+        unawaited(_loadResumeAndNextUpInBackground());
+      }
+
       await mapBounded<HomeSectionConfig, void>(
         nonResumeEffectiveConfigs,
         3,
@@ -615,9 +740,6 @@ class HomeViewModel extends ChangeNotifier {
       _watchNext.update(_rows);
       _tvChannels.update();
 
-      if (showMergedResume) {
-        unawaited(_loadResumeAndNextUpInBackground());
-      }
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -827,6 +949,10 @@ class HomeViewModel extends ChangeNotifier {
   /// pagination, scroll, and focus state) untouched. A full [refresh] still runs
   /// on the Home button, pull-to-refresh, cold start, and periodic refresh.
   Future<void> refreshResumeAndNextUp() async {
+    if (liveProgressEnabled) {
+      await _loadResumeAndNextUpInBackground();
+      return;
+    }
     // A full load already covers these rows, so don't compete with it.
     if (_isLoading) return;
 
@@ -2088,6 +2214,7 @@ class HomeViewModel extends ChangeNotifier {
   }
 
   Future<void> _loadResumeAndNextUpInBackground() {
+    if (liveProgressEnabled) return _refreshSpeshProgress();
     if (_bgMergeInFlight) return Future<void>.value();
     _bgMergeInFlight = true;
     return () async {
@@ -2118,6 +2245,76 @@ class HomeViewModel extends ChangeNotifier {
         _bgMergeInFlight = false;
       }
     }();
+  }
+
+  Future<void> _loadSpeshProgress({bool refresh = false}) async {
+    if (!liveProgressEnabled) return;
+    final elapsed = Stopwatch()..start();
+    final revision = _progressRevision;
+    final key = _progressCacheKey();
+    if (refresh && _progressHydratedKey != key) {
+      _progressHydratedKey = key;
+      final cached = await _progressCache.read(key);
+      debugPrint('[SpeshProgress] Snapshot ${cached == null ? "miss" : "hit (${cached.items.length} cards)"}');
+      if (!liveProgressEnabled || revision != _progressRevision || key != _progressCacheKey()) return;
+      if (cached != null && !_rows.any((r) => r.id == 'resume' && !r.isLoading)) {
+        _applyMergedResumeResult(cached.items,
+          totalCount: cached.items.length + (cached.hasMore ? 1 : 0));
+      }
+    }
+    final hasSnapshot = _rows.any((r) => r.id == 'resume' && !r.isLoading && r.items.isNotEmpty);
+    var result = await _progressFeed.load(refresh: refresh, onPartial: (items, hasMore) {
+      if (hasSnapshot || !liveProgressEnabled || revision != _progressRevision || key != _progressCacheKey()) return;
+      final sorted = _filterEmptyElements(items).toList()..sort(_byLastPlayedDate);
+      _applyMergedResumeResult(sorted, totalCount: sorted.length + (hasMore ? 1 : 0));
+    });
+    // An entirely filtered page has no visible card to trigger load-more.
+    while (!_progressDisposed && result != null && result.items.isEmpty && result.hasMore) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      if (_progressDisposed || revision != _progressRevision || key != _progressCacheKey()) return;
+      result = await _progressFeed.load();
+    }
+    if (result == null || !liveProgressEnabled || revision != _progressRevision || key != _progressCacheKey()) {
+      debugPrint('[SpeshProgress] Refresh unavailable or superseded');
+      return;
+    }
+    if (refresh && !result.complete && _rows.any((r) => r.id == 'resume' && !r.isLoading)) return;
+    final indexed = _filterEmptyElements(result.items).indexed.toList()
+      ..sort((a, b) {
+        final byDate = _byLastPlayedDate(a.$2, b.$2);
+        return byDate != 0 ? byDate : a.$1.compareTo(b.$1);
+      });
+    final items = indexed.map((entry) => entry.$2).toList();
+    debugPrint('[SpeshProgress] Refresh ${result.complete ? "complete" : "partial"}: ${items.length} cards in ${elapsed.elapsedMilliseconds} ms');
+    _applyMergedResumeResult(items,
+      totalCount: items.length + (result.hasMore ? 1 : 0));
+    if (result.complete && liveProgressEnabled && revision == _progressRevision && key == _progressCacheKey()) {
+      await _progressCache.write(key, ProgressSnapshot(items, result.hasMore));
+    }
+  }
+
+  Future<void> _refreshSpeshProgress() {
+    if (_progressRefreshFuture != null) {
+      _progressRefreshPending = true;
+      return _progressRefreshFuture!;
+    }
+    final done = Completer<void>();
+    _progressRefreshFuture = done.future;
+    unawaited(() async {
+      try {
+        do {
+          _progressRefreshPending = false;
+          await _loadSpeshProgress(refresh: true);
+        } while (_progressRefreshPending && liveProgressEnabled);
+      } catch (error) {
+        // Preserve the last successful row; server notifications or Home retry.
+        debugPrint('[SpeshProgress] Refresh failed (${error.runtimeType})');
+      } finally {
+        _progressRefreshFuture = null;
+        done.complete();
+      }
+    }());
+    return done.future;
   }
 
   /// Newest first by when the user last played the item.
@@ -2167,8 +2364,21 @@ class HomeViewModel extends ChangeNotifier {
     List<AggregatedItem> mergedItems, {
     int? totalCount,
   }) {
-    final resumeIndex = _rows.indexWhere((r) => r.id == 'resume');
-    if (resumeIndex < 0) return;
+    var resumeIndex = _rows.indexWhere((r) => r.id == 'resume');
+    if (resumeIndex < 0) {
+      if (!liveProgressEnabled || mergedItems.isEmpty) return;
+      final configs = _prefs.activeHomeSectionConfigs;
+      final sectionIndex = configs.indexWhere((c) => c.isBuiltin && c.type == HomeSectionType.resume);
+      resumeIndex = _rows.length;
+      for (final cfg in configs.skip(sectionIndex + 1)) {
+        final anchor = _rows.indexWhere((r) => _rowBelongsToConfig(r, cfg));
+        if (anchor >= 0) { resumeIndex = anchor; break; }
+      }
+      _rows = List.of(_rows)..insert(resumeIndex, HomeRow(
+        id: 'resume', title: 'Continue Watching & Next Up', items: const [],
+        rowType: HomeRowType.resume, totalCount: 0,
+      ));
+    }
     _rows = List.of(_rows);
     if (mergedItems.isEmpty) {
       _rows.removeAt(resumeIndex);
@@ -2189,6 +2399,11 @@ class HomeViewModel extends ChangeNotifier {
   /// only drops what is already on screen, so nothing gets skipped. The counts
   /// the two report overlap, so a page that adds nothing new closes the row.
   Future<void> _loadMoreMergedResume(int rowIndex) async {
+    if (_speshProgressEnabled) {
+      if (_progressRefreshFuture != null) return;
+      await _loadSpeshProgress();
+      return;
+    }
     final row = _rows[rowIndex];
     final offset = _rowOffsets[row.id] ?? row.items.length;
 

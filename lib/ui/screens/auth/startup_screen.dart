@@ -19,6 +19,7 @@ import '../../widgets/adaptive/adaptive_dialog.dart';
 import '../../widgets/overlay_sheet.dart';
 import '../../widgets/pin_entry_dialog.dart';
 import '../../widgets/focus/request_initial_focus.dart';
+import '../../widgets/spesh_brand.dart';
 
 class StartupScreen extends StatefulWidget {
   final bool bootstrapActiveSession;
@@ -216,7 +217,8 @@ class _StartupScreenState extends State<StartupScreen>
     return Scaffold(
       body: Container(
         decoration: BoxDecoration(
-          gradient: LinearGradient(
+          color: speshWeb ? const Color(0xFF121416) : null,
+          gradient: speshWeb ? null : LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: gradientColors,
@@ -228,7 +230,9 @@ class _StartupScreenState extends State<StartupScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Image.asset(
+                if (speshWeb)
+                  const SpeshBrand(height: 64)
+                else Image.asset(
                   'assets/images/logo_and_text.png',
                   height: _isLargeScreen ? 80 : 56,
                 ),
