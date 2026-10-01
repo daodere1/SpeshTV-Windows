@@ -5,6 +5,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../../preference/preference_constants.dart';
+import '../spesh_brand.dart';
 
 /// Extension helpers to map loading animation enums to layout properties.
 extension LoadingAnimationSizeX on LoadingAnimationSize {
@@ -305,7 +306,8 @@ class _MoonfinLogoAnimationState extends State<MoonfinLogoAnimation>
           child: child,
         );
       },
-      child: SvgPicture.asset(
+      child: speshWeb ? Icon(Icons.live_tv_outlined,
+        color: const Color(0xFF56D9CC), size: widget.size) : SvgPicture.asset(
         'assets/icons/moonfin_logo.svg',
         width: widget.size,
         height: widget.size,

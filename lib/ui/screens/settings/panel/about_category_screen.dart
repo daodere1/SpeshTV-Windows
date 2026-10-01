@@ -13,7 +13,8 @@ class _AboutCategoryScreen extends StatelessWidget {
         children: [
           const SizedBox(height: 24),
           Center(
-            child: Image.asset('assets/images/logo_and_text.png', height: 72),
+            child: speshWeb ? const SpeshBrand(height: 72)
+                : Image.asset('assets/images/logo_and_text.png', height: 72),
           ),
           const SizedBox(height: 8),
           Center(
@@ -23,6 +24,7 @@ class _AboutCategoryScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
+          if (speshWeb) const Center(child: Text('SpeshTV is a customized fork of Moonfin.')),
           const Divider(),
           _SectionHeader(l10n.settingsAppInfo),
           adaptiveListSection(

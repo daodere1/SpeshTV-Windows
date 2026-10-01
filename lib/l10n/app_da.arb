@@ -1,6 +1,6 @@
 {
     "@@locale": "da",
-    "appTitle": "Moonfin",
+    "appTitle": "SpeshTV",
     "@appTitle": {
         "description": "The application title"
     },
@@ -82,7 +82,7 @@
     "@selectServer": {
         "description": "Button to navigate back to server selection"
     },
-    "appVersionFooter": "Moonfin version {version}",
+    "appVersionFooter": "SpeshTV version {version}",
     "@appVersionFooter": {
         "description": "App version shown in footer",
         "placeholders": {
@@ -156,7 +156,7 @@
     "@secureStorageUnavailable": {
         "description": "Dialog title when system keyring is inaccessible"
     },
-    "secureStorageUnavailableMessage": "Moonfin kunne ikke få adgang til din systemnøglering. Login kan fortsætte, men sikker token-opbevaring er muligvis ikke tilgængelig, før nøgleringen er låst op.",
+    "secureStorageUnavailableMessage": "SpeshTV kunne ikke få adgang til din systemnøglering. Login kan fortsætte, men sikker token-opbevaring er muligvis ikke tilgængelig, før nøgleringen er låst op.",
     "@secureStorageUnavailableMessage": {
         "description": "Explanation when secure storage is not available"
     },
@@ -168,15 +168,15 @@
     "@settingsAppearanceTheme": {
         "description": "Title for the theme selection screen and theme settings entry"
     },
-    "settingsAppearanceThemeSubtitle": "Skift mellem Moonfin og Neon Pulse uden at genstarte appen",
+    "settingsAppearanceThemeSubtitle": "Skift mellem SpeshTV og Neon Pulse uden at genstarte appen",
     "@settingsAppearanceThemeSubtitle": {
         "description": "Subtitle for the theme selection screen and theme settings entry"
     },
-    "themeMoonfin": "Moonfin",
+    "themeMoonfin": "SpeshTV",
     "@themeMoonfin": {
         "description": "Display name for the Moonfin theme"
     },
-    "themeMoonfinSubtitle": "Det nuværende Moonfin-udseende, som alle vil komme til at elske",
+    "themeMoonfinSubtitle": "Det nuværende SpeshTV-udseende, som alle vil komme til at elske",
     "@themeMoonfinSubtitle": {
         "description": "Preview description for the Moonfin theme"
     },
@@ -249,7 +249,7 @@
             }
         }
     },
-    "exitApp": "Afslut Moonfin?",
+    "exitApp": "Afslut SpeshTV?",
     "@exitApp": {
         "description": "Title of exit confirmation dialog"
     },
@@ -3109,7 +3109,7 @@
     "@customMpvConfPath": {
         "description": "Setting for custom mpv.conf path"
     },
-    "notSetMpvConf": "Ikke indstillet. Moonfin vil prøve en standard mpv.conf i app/data-mapper.",
+    "notSetMpvConf": "Ikke indstillet. SpeshTV vil prøve en standard mpv.conf i app/data-mapper.",
     "@notSetMpvConf": {
         "description": "Description when no custom mpv.conf is set"
     },
@@ -3336,7 +3336,7 @@
     "@saveToDownloadsFolder": {
         "description": "Setting for saving to downloads folder"
     },
-    "downloadsVisibleToOtherApps": "Downloads/Moonfin — synlig for andre apps",
+    "downloadsVisibleToOtherApps": "Downloads/SpeshTV — synlig for andre apps",
     "@downloadsVisibleToOtherApps": {
         "description": "Description for downloads folder visibility"
     },
@@ -3372,7 +3372,7 @@
     "@saveToDownloadsFolderQuestion": {
         "description": "Dialog title for saving to downloads folder"
     },
-    "saveToDownloadsFolderDescription": "Downloadede medier vil blive gemt i Downloads/Moonfin på din enhed. Disse filer vil være synlige for andre apps, såsom dit galleri eller din musikafspiller.\n\nEksisterende downloads forbliver på deres nuværende placering.",
+    "saveToDownloadsFolderDescription": "Downloadede medier vil blive gemt i Downloads/SpeshTV på din enhed. Disse filer vil være synlige for andre apps, såsom dit galleri eller din musikafspiller.\n\nEksisterende downloads forbliver på deres nuværende placering.",
     "@saveToDownloadsFolderDescription": {
         "description": "Description for saving to downloads folder"
     },
@@ -3512,7 +3512,7 @@
     "@libraryVisibility": {
         "description": "Section title for library visibility"
     },
-    "libraryVisibilityDescription": "Skift startsidesynlighed pr. bibliotek. Genstart Moonfin for at ændringerne træder i kraft.",
+    "libraryVisibilityDescription": "Skift startsidesynlighed pr. bibliotek. Genstart SpeshTV for at ændringerne træder i kraft.",
     "@libraryVisibilityDescription": {
         "description": "Explanation shown on the library visibility settings screen"
     },
@@ -3561,7 +3561,7 @@
     "@mediaBarModeDescription": {
         "description": "Description for media bar style setting"
     },
-    "mediaBarModeMoonfin": "Moonfin",
+    "mediaBarModeMoonfin": "SpeshTV",
     "@mediaBarModeMoonfin": {
         "description": "Media bar style option: Moonfin"
     },
@@ -4293,7 +4293,7 @@
     "@cancelRequest": {
         "description": "Button/dialog title to cancel a media request"
     },
-    "playInMoonfin": "Spil i Moonfin",
+    "playInMoonfin": "Spil i SpeshTV",
     "@playInMoonfin": {
         "description": "Button to play available media in Moonfin"
     },
@@ -4347,7 +4347,7 @@
     "@keep": {
         "description": "Button to keep/dismiss a cancel dialog"
     },
-    "itemNotFoundInLibrary": "Element blev ikke fundet i dit Moonfin-bibliotek",
+    "itemNotFoundInLibrary": "Element blev ikke fundet i dit SpeshTV-bibliotek",
     "@itemNotFoundInLibrary": {
         "description": "Snackbar when Seerr item cannot be found in Jellyfin"
     },
@@ -4651,7 +4651,7 @@
         }
     },
     "adminServerRebootInProgress": "Servergenstart er i gang",
-    "adminServerRebootMessage": "Servergenstart er i gang. Genstart venligst Moonfin",
+    "adminServerRebootMessage": "Servergenstart er i gang. Genstart venligst SpeshTV",
     "adminActiveSessions": "Aktive sessioner",
     "adminSessionsLoadFailed": "Kunne ikke indlæse sessioner",
     "adminNoActiveSessions": "Ingen aktive sessioner",
@@ -6539,7 +6539,7 @@
     "settingsShowGenresButtonInNavigation": "Vis genreknappen i navigationslinjen",
     "settingsShowFavoritesButtonInNavigation": "Vis knappen Favoritter i navigationslinjen",
     "settingsShowLibrariesButtonInNavigation": "Vis biblioteksknappen i navigationslinjen",
-    "settingsLibraryVisibilitySubtitle": "Skift startsidesynlighed pr. bibliotek. Genstart Moonfin for at ændringerne træder i kraft.",
+    "settingsLibraryVisibilitySubtitle": "Skift startsidesynlighed pr. bibliotek. Genstart SpeshTV for at ændringerne træder i kraft.",
     "settingsMediaBarAndLocalPreviews": "Mediebar og lokale forhåndsvisninger",
     "settingsVisualOverlays": "Visuelle overlejringer",
     "settingsSeasonalSurprise": "Sæsonbestemt overraskelse",
@@ -6558,14 +6558,14 @@
     "settingsJoinDiscord": "Tilmeld dig Discord",
     "settingsJoinDiscordSubtitle": "Chat med fællesskabet",
     "settingsJoinTheDiscord": "Deltag i Discord",
-    "settingsSupportMoonfin": "Støt Moonfin",
+    "settingsSupportMoonfin": "Support upstream project",
     "settingsLegal": "JURIDISK",
     "settingsLicenses": "Licenser",
     "settingsOpenSourceLicenseNotices": "Open source-licensmeddelelser",
     "settingsPrivacyPolicy": "Privatlivspolitik",
-    "settingsPrivacyPolicySubtitle": "Hvordan Moonfin håndterer dine data",
+    "settingsPrivacyPolicySubtitle": "Hvordan SpeshTV håndterer dine data",
     "settingsCheckForUpdates": "Se efter opdateringer",
-    "settingsCheckForUpdatesSubtitle": "Se efter den seneste Moonfin-udgivelse",
+    "settingsCheckForUpdatesSubtitle": "Se efter den seneste SpeshTV-udgivelse",
     "settingsPoweredByFlutter": "Drevet af Flutter",
     "settingsLicenseNoticesCount": "{count, plural, one {# licensmeddelelse} other {# licensmeddelelser}}",
     "@settingsLicenseNoticesCount": {
@@ -7035,7 +7035,7 @@
         }
     },
     "savedThemesTitle": "Gemte temaer",
-    "savedThemesDescription": "Disse er temaer, der er downloadet fra Moonfin plugin til den aktuelle server. Sletning fjerner kun denne lokale kopi.",
+    "savedThemesDescription": "Themes downloaded from the server theme plugin. Deleting removes only this local copy.",
     "savedThemesEmpty": "Der blev ikke fundet nogen gemte temaer for denne server.",
     "savedThemesCurrentThemeId": "{themeId} • Aktiv i øjeblikket",
     "@savedThemesCurrentThemeId": {
@@ -7049,7 +7049,7 @@
     "savedThemesDeleteTooltip": "Slet gemt tema",
     "savedThemesManageSubtitle": "Administrer downloadede plugin-temaer på denne enhed",
     "themeEditor": "Tema redaktør",
-    "themeEditorSubtitle": "Åbn Moonfin Theme Editor i din browser",
+    "themeEditorSubtitle": "Open the server theme editor in your browser",
     "homeScreen": "Startskærm",
     "bottomBar": "Nederste bjælke",
     "homeRowsStyleClassic": "Klassisk",
@@ -7098,12 +7098,12 @@
     "preferSdhSubtitles": "Foretrækker SDH undertekster",
     "preferSdhSubtitlesSubtitle": "Prioriter SDH/CC-undertekstspor ved automatisk valg.",
     "webDiagnostics": "Webdiagnostik",
-    "webDiagnosticsTitle": "Moonfin Webdiagnostik",
+    "webDiagnosticsTitle": "SpeshTV Webdiagnostik",
     "webDiagnosticsIntro": "Brug denne side til at diagnosticere problemer med browserforbindelse (CORS, blandet indhold og indstillinger for opdagelse).",
     "webDiagnosticsDetectedMixedContentFailure": "Detekteret blandet indholdsfejl",
     "webDiagnosticsDetectedCorsPreflightFailure": "Detekteret CORS/Preflight-fejl",
-    "webDiagnosticsMixedContentFailureBody": "Moonfin registrerede en HTTPS-side, der forsøgte at kalde en HTTP-server-URL. Browsere blokerer denne anmodning, før den når din server.",
-    "webDiagnosticsCorsFailureBody": "Moonfin har registreret en anmodningsfejl på browserniveau, der almindeligvis er forårsaget af manglende CORS eller preflight-headers på medieserveren.",
+    "webDiagnosticsMixedContentFailureBody": "SpeshTV registrerede en HTTPS-side, der forsøgte at kalde en HTTP-server-URL. Browsere blokerer denne anmodning, før den når din server.",
+    "webDiagnosticsCorsFailureBody": "SpeshTV har registreret en anmodningsfejl på browserniveau, der almindeligvis er forårsaget af manglende CORS eller preflight-headers på medieserveren.",
     "webDiagnosticsTargetUrl": "Mål-URL: {url}",
     "@webDiagnosticsTargetUrl": {
         "description": "Target URL shown in diagnostics summary",
@@ -7133,7 +7133,7 @@
     "notConfigured": "ikke konfigureret",
     "webDiagnosticsMixedContent": "Blandet indhold",
     "webDiagnosticsMixedContentDetected": "Denne side indlæses via HTTPS, men en eller flere konfigurerede URL'er er HTTP. Browsere blokerer HTTPS-sider fra at kalde HTTP API'er.",
-    "webDiagnosticsMixedContentFix": "Fix: server din medieserver eller proxy-slutpunkt via HTTPS, eller indlæs kun Moonfin over HTTP på betroede lokale netværk.",
+    "webDiagnosticsMixedContentFix": "Fix: server din medieserver eller proxy-slutpunkt via HTTPS, eller indlæs kun SpeshTV over HTTP på betroede lokale netværk.",
     "webDiagnosticsNoMixedContentDetected": "Ingen åbenlys konfiguration af blandet indhold fundet fra aktuelle runtime-indstillinger.",
     "webDiagnosticsCorsChecklist": "CORS tjekliste",
     "webDiagnosticsCorsChecklistItem1": "• Tillad browserens oprindelse i Access-Control-Allow-Origin.",
@@ -7379,7 +7379,7 @@
     "@detailScreenStyle": {
         "description": "Label for the media detail screen layout style setting"
     },
-    "detailScreenStyleSubtitle": "Klassisk er det oprindelige centrerede Moonfin-layout. Moderne er et responsivt, filmisk layout.",
+    "detailScreenStyleSubtitle": "Klassisk er det oprindelige centrerede SpeshTV-layout. Moderne er et responsivt, filmisk layout.",
     "@detailScreenStyleSubtitle": {
         "description": "Explanation under the detail screen style setting"
     },
@@ -7411,11 +7411,11 @@
     "@recommendationSystem": {
         "description": "Label for the Recommendation System setting"
     },
-    "recommendationSystemSubtitle": "Brug Moonfin Anbefaler-algoritmen til dit lokale bibliotek eller TMDb's lighedsmålinger online. Bemærk: Onlineanbefalinger kræver Seerr-integration.",
+    "recommendationSystemSubtitle": "Brug SpeshTV Anbefaler-algoritmen til dit lokale bibliotek eller TMDb's lighedsmålinger online. Bemærk: Onlineanbefalinger kræver Seerr-integration.",
     "@recommendationSystemSubtitle": {
         "description": "Explanation under the recommendation system setting"
     },
-    "recommendationSystemMoonfin": "Moonfin Anbefaler",
+    "recommendationSystemMoonfin": "SpeshTV Anbefaler",
     "@recommendationSystemMoonfin": {
         "description": "Recommendation system option: Moonfin Recommends"
     },
@@ -7427,7 +7427,7 @@
     "@recommendationsApplyParentalRatingCap": {
         "description": "Label for the toggle that controls whether similar suggestions are capped by target media parental rating"
     },
-    "recommendationsApplyParentalRatingCapSubtitle": "Begræns forslag fra Moonfin Anbefaler efter målmediets aldersgrænse",
+    "recommendationsApplyParentalRatingCapSubtitle": "Begræns forslag fra SpeshTV Anbefaler efter målmediets aldersgrænse",
     "@recommendationsApplyParentalRatingCapSubtitle": {
         "description": "Explanation under the parental rating cap setting toggle"
     },
@@ -7475,7 +7475,7 @@
     "@customThemeTitle": {
         "description": "Title for the custom theme settings section"
     },
-    "customThemeSubtitle": "Brugerdefinerede temaer ændrer visuelle elementer i hele Moonfin. Vælg en af disse muligheder, der passer til din stil.",
+    "customThemeSubtitle": "Brugerdefinerede temaer ændrer visuelle elementer i hele SpeshTV. Vælg en af disse muligheder, der passer til din stil.",
     "@customThemeSubtitle": {
         "description": "Description under custom themes section"
     },
@@ -7627,7 +7627,7 @@
     "@shuffleAllMusic": {
         "description": "Car browse action that shuffles the whole music library"
     },
-    "carSignInPrompt": "Log ind på Moonfin på din telefon",
+    "carSignInPrompt": "Log ind på SpeshTV på din telefon",
     "@carSignInPrompt": {
         "description": "Shown in the car when no account is signed in"
     },
@@ -8940,7 +8940,7 @@
     "@impellerRendering": {
         "description": "Title of the setting that selects the Flutter rendering engine (Impeller vs. legacy)."
     },
-    "impellerRenderingSubtitle": "Impeller er Flutters moderne GPU-renderer, der giver jævnere animationer og mindre hakken. På nogle TV-bokse og ældre GPU'er kan den give grafikfejl eller sort video; slå den fra, hvis du oplever det. Automatisk vælger den bedste standardindstilling til din enhed. Genstart Moonfin for at anvende ændringen.",
+    "impellerRenderingSubtitle": "Impeller er Flutters moderne GPU-renderer, der giver jævnere animationer og mindre hakken. På nogle TV-bokse og ældre GPU'er kan den give grafikfejl eller sort video; slå den fra, hvis du oplever det. Automatisk vælger den bedste standardindstilling til din enhed. Genstart SpeshTV for at anvende ændringen.",
     "@impellerRenderingSubtitle": {
         "description": "Explanatory description under the rendering engine setting."
     },
@@ -8951,7 +8951,7 @@
     "@impellerRestartTitle": {
         "description": "Title of the dialog shown after changing the rendering engine."
     },
-    "impellerRestartMessage": "Moonfin skal genstartes for at skifte gengivelsesmotor. Luk appen nu, og åbn den igen for at anvende ændringen.",
+    "impellerRestartMessage": "SpeshTV skal genstartes for at skifte gengivelsesmotor. Luk appen nu, og åbn den igen for at anvende ændringen.",
     "@impellerRestartMessage": {
         "description": "Body of the dialog shown after changing the rendering engine."
     },

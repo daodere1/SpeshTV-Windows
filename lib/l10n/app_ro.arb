@@ -1,6 +1,6 @@
 {
     "@@locale": "ro",
-    "appTitle": "Moonfin",
+    "appTitle": "SpeshTV",
     "@appTitle": {
         "description": "The application title"
     },
@@ -82,7 +82,7 @@
     "@selectServer": {
         "description": "Button to navigate back to server selection"
     },
-    "appVersionFooter": "Moonfin versiunea {version}",
+    "appVersionFooter": "SpeshTV versiunea {version}",
     "@appVersionFooter": {
         "description": "App version shown in footer",
         "placeholders": {
@@ -156,7 +156,7 @@
     "@secureStorageUnavailable": {
         "description": "Dialog title when system keyring is inaccessible"
     },
-    "secureStorageUnavailableMessage": "Moonfin nu a putut accesa breloul de chei de sistem. Conectarea poate continua, dar stocarea securizată a token-ului poate fi indisponibilă până când inelul de chei este deblocat.",
+    "secureStorageUnavailableMessage": "SpeshTV nu a putut accesa breloul de chei de sistem. Conectarea poate continua, dar stocarea securizată a token-ului poate fi indisponibilă până când inelul de chei este deblocat.",
     "@secureStorageUnavailableMessage": {
         "description": "Explanation when secure storage is not available"
     },
@@ -172,11 +172,11 @@
     "@settingsAppearanceThemeSubtitle": {
         "description": "Subtitle for the theme selection screen and theme settings entry"
     },
-    "themeMoonfin": "Moonfin",
+    "themeMoonfin": "SpeshTV",
     "@themeMoonfin": {
         "description": "Display name for the Moonfin theme"
     },
-    "themeMoonfinSubtitle": "Aspectul original, simplu și curat, implicit în Moonfin.",
+    "themeMoonfinSubtitle": "Aspectul original, simplu și curat, implicit în SpeshTV.",
     "@themeMoonfinSubtitle": {
         "description": "Preview description for the Moonfin theme"
     },
@@ -249,7 +249,7 @@
             }
         }
     },
-    "exitApp": "Ieși din Moonfin?",
+    "exitApp": "Ieși din SpeshTV?",
     "@exitApp": {
         "description": "Title of exit confirmation dialog"
     },
@@ -3109,7 +3109,7 @@
     "@customMpvConfPath": {
         "description": "Setting for custom mpv.conf path"
     },
-    "notSetMpvConf": "Nu setat. Moonfin va încerca un mpv.conf implicit în folderele aplicații/date.",
+    "notSetMpvConf": "Nu setat. SpeshTV va încerca un mpv.conf implicit în folderele aplicații/date.",
     "@notSetMpvConf": {
         "description": "Description when no custom mpv.conf is set"
     },
@@ -3336,7 +3336,7 @@
     "@saveToDownloadsFolder": {
         "description": "Setting for saving to downloads folder"
     },
-    "downloadsVisibleToOtherApps": "Descărcări/Moonfin — vizibil pentru alte aplicații",
+    "downloadsVisibleToOtherApps": "Descărcări/SpeshTV — vizibil pentru alte aplicații",
     "@downloadsVisibleToOtherApps": {
         "description": "Description for downloads folder visibility"
     },
@@ -3372,7 +3372,7 @@
     "@saveToDownloadsFolderQuestion": {
         "description": "Dialog title for saving to downloads folder"
     },
-    "saveToDownloadsFolderDescription": "Media descărcate va fi salvat în Descărcări/Moonfin pe dispozitivul dvs. Aceste fișiere vor fi vizibile pentru alte aplicații, cum ar fi galeria sau playerul muzical.\n\nDescărcările existente vor rămâne în locația lor actuală.",
+    "saveToDownloadsFolderDescription": "Media descărcate va fi salvat în Descărcări/SpeshTV pe dispozitivul dvs. Aceste fișiere vor fi vizibile pentru alte aplicații, cum ar fi galeria sau playerul muzical.\n\nDescărcările existente vor rămâne în locația lor actuală.",
     "@saveToDownloadsFolderDescription": {
         "description": "Description for saving to downloads folder"
     },
@@ -3512,7 +3512,7 @@
     "@libraryVisibility": {
         "description": "Section title for library visibility"
     },
-    "libraryVisibilityDescription": "Comutați vizibilitatea paginii de pornire pentru fiecare bibliotecă. Reporniți Moonfin pentru ca modificările să intre în vigoare.",
+    "libraryVisibilityDescription": "Comutați vizibilitatea paginii de pornire pentru fiecare bibliotecă. Reporniți SpeshTV pentru ca modificările să intre în vigoare.",
     "@libraryVisibilityDescription": {
         "description": "Explanation shown on the library visibility settings screen"
     },
@@ -3561,7 +3561,7 @@
     "@mediaBarModeDescription": {
         "description": "Description for media bar style setting"
     },
-    "mediaBarModeMoonfin": "Moonfin",
+    "mediaBarModeMoonfin": "SpeshTV",
     "@mediaBarModeMoonfin": {
         "description": "Media bar style option: Moonfin"
     },
@@ -4293,7 +4293,7 @@
     "@cancelRequest": {
         "description": "Button/dialog title to cancel a media request"
     },
-    "playInMoonfin": "Joacă în Moonfin",
+    "playInMoonfin": "Joacă în SpeshTV",
     "@playInMoonfin": {
         "description": "Button to play available media in Moonfin"
     },
@@ -4347,7 +4347,7 @@
     "@keep": {
         "description": "Button to keep/dismiss a cancel dialog"
     },
-    "itemNotFoundInLibrary": "Articol nu a fost găsit în biblioteca dvs. Moonfin",
+    "itemNotFoundInLibrary": "Articol nu a fost găsit în biblioteca dvs. SpeshTV",
     "@itemNotFoundInLibrary": {
         "description": "Snackbar when Seerr item cannot be found in Jellyfin"
     },
@@ -4651,7 +4651,7 @@
         }
     },
     "adminServerRebootInProgress": "Repornirea serverului este în curs",
-    "adminServerRebootMessage": "Repornirea serverului este în curs, vă rugăm să reporniți Moonfin",
+    "adminServerRebootMessage": "Repornirea serverului este în curs, vă rugăm să reporniți SpeshTV",
     "adminActiveSessions": "Sesiuni active",
     "adminSessionsLoadFailed": "Nu s-au încărcat sesiunile",
     "adminNoActiveSessions": "Fără sesiuni active",
@@ -6539,7 +6539,7 @@
     "settingsShowGenresButtonInNavigation": "Afișați butonul genuri în bara de navigare",
     "settingsShowFavoritesButtonInNavigation": "Afișați butonul de favorite în bara de navigare",
     "settingsShowLibrariesButtonInNavigation": "Afișați butonul biblioteci în bara de navigare",
-    "settingsLibraryVisibilitySubtitle": "Comutați vizibilitatea paginii de pornire pentru fiecare bibliotecă. Reporniți Moonfin pentru ca modificările să intre în vigoare.",
+    "settingsLibraryVisibilitySubtitle": "Comutați vizibilitatea paginii de pornire pentru fiecare bibliotecă. Reporniți SpeshTV pentru ca modificările să intre în vigoare.",
     "settingsMediaBarAndLocalPreviews": "Bara media și previzualizările locale",
     "settingsVisualOverlays": "Suprapuneri vizuale",
     "settingsSeasonalSurprise": "Surpriză de sezon",
@@ -6558,14 +6558,14 @@
     "settingsJoinDiscord": "Alăturați-vă Discordului",
     "settingsJoinDiscordSubtitle": "Chat cu comunitatea",
     "settingsJoinTheDiscord": "Alăturați-vă Discordului",
-    "settingsSupportMoonfin": "Susține Moonfin",
+    "settingsSupportMoonfin": "Support upstream project",
     "settingsLegal": "LEGALE",
     "settingsLicenses": "Licențe",
     "settingsOpenSourceLicenseNotices": "Notificări de licență open-source",
     "settingsPrivacyPolicy": "Politica de confidențialitate",
-    "settingsPrivacyPolicySubtitle": "Cum vă gestionează Moonfin datele",
+    "settingsPrivacyPolicySubtitle": "Cum vă gestionează SpeshTV datele",
     "settingsCheckForUpdates": "Verificați actualizările",
-    "settingsCheckForUpdatesSubtitle": "Verificați cea mai recentă versiune Moonfin",
+    "settingsCheckForUpdatesSubtitle": "Verificați cea mai recentă versiune SpeshTV",
     "settingsPoweredByFlutter": "Alimentat de Flutter",
     "settingsLicenseNoticesCount": "{count, plural, one {# notificare de licență} few {# notificări de licență} other {# de notificări de licență}}",
     "@settingsLicenseNoticesCount": {
@@ -7035,7 +7035,7 @@
         }
     },
     "savedThemesTitle": "Teme salvate",
-    "savedThemesDescription": "Acestea sunt teme descărcate din pluginul Moonfin pentru serverul curent. Ștergerea elimină numai această copie locală.",
+    "savedThemesDescription": "Themes downloaded from the server theme plugin. Deleting removes only this local copy.",
     "savedThemesEmpty": "Nu au fost găsite teme salvate pentru acest server.",
     "savedThemesCurrentThemeId": "{themeId} • Activ în prezent",
     "@savedThemesCurrentThemeId": {
@@ -7049,7 +7049,7 @@
     "savedThemesDeleteTooltip": "Ștergeți tema salvată",
     "savedThemesManageSubtitle": "Gestionați temele de plugin descărcate pe acest dispozitiv",
     "themeEditor": "Editor de teme",
-    "themeEditorSubtitle": "Deschideți editorul de teme Moonfin în browser",
+    "themeEditorSubtitle": "Open the server theme editor in your browser",
     "homeScreen": "Ecran principal",
     "bottomBar": "Bară inferioară",
     "homeRowsStyleClassic": "Clasic",
@@ -7098,12 +7098,12 @@
     "preferSdhSubtitles": "Preferă subtitrările SDH",
     "preferSdhSubtitlesSubtitle": "Prioritizează pistele de subtitrare SDH/CC la selectarea automată.",
     "webDiagnostics": "Diagnosticare web",
-    "webDiagnosticsTitle": "Diagnosticare web Moonfin",
+    "webDiagnosticsTitle": "Diagnosticare web SpeshTV",
     "webDiagnosticsIntro": "Folosiți această pagină pentru a diagnostica problemele de conectivitate ale browserului (CORS, conținut mixt și setări de descoperire).",
     "webDiagnosticsDetectedMixedContentFailure": "A fost detectată o eroare de conținut mixt",
     "webDiagnosticsDetectedCorsPreflightFailure": "A fost detectată o eroare CORS/preflight",
-    "webDiagnosticsMixedContentFailureBody": "Moonfin a detectat o pagină HTTPS care încearcă să apeleze un URL de server HTTP. Browserele blochează această cerere înainte să ajungă la server.",
-    "webDiagnosticsCorsFailureBody": "Moonfin a detectat o eroare de cerere la nivel de browser, cauzată de obicei de lipsa antetelor CORS sau preflight de pe serverul media.",
+    "webDiagnosticsMixedContentFailureBody": "SpeshTV a detectat o pagină HTTPS care încearcă să apeleze un URL de server HTTP. Browserele blochează această cerere înainte să ajungă la server.",
+    "webDiagnosticsCorsFailureBody": "SpeshTV a detectat o eroare de cerere la nivel de browser, cauzată de obicei de lipsa antetelor CORS sau preflight de pe serverul media.",
     "webDiagnosticsTargetUrl": "URL țintă: {url}",
     "@webDiagnosticsTargetUrl": {
         "description": "Target URL shown in diagnostics summary",
@@ -7133,7 +7133,7 @@
     "notConfigured": "neconfigurat",
     "webDiagnosticsMixedContent": "Conținut mixt",
     "webDiagnosticsMixedContentDetected": "Această pagină este încărcată prin HTTPS, dar unul sau mai multe URL-uri configurate folosesc HTTP. Browserele blochează apelurile către API-uri HTTP din pagini HTTPS.",
-    "webDiagnosticsMixedContentFix": "Soluție: serviți serverul media sau punctul final proxy prin HTTPS ori încărcați Moonfin prin HTTP doar în rețele locale de încredere.",
+    "webDiagnosticsMixedContentFix": "Soluție: serviți serverul media sau punctul final proxy prin HTTPS ori încărcați SpeshTV prin HTTP doar în rețele locale de încredere.",
     "webDiagnosticsNoMixedContentDetected": "Nu a fost detectată nicio configurație evidentă de conținut mixt în setările curente de execuție.",
     "webDiagnosticsCorsChecklist": "Listă de verificare CORS",
     "webDiagnosticsCorsChecklistItem1": "• Permiteți originea browserului în Access-Control-Allow-Origin.",
@@ -7330,7 +7330,7 @@
     "@detailScreenStyle": {
         "description": "Label for the media detail screen layout style setting"
     },
-    "detailScreenStyleSubtitle": "Clasic este aspectul centrat original Moonfin. Modern este un aspect cinematografic adaptiv.",
+    "detailScreenStyleSubtitle": "Clasic este aspectul centrat original SpeshTV. Modern este un aspect cinematografic adaptiv.",
     "@detailScreenStyleSubtitle": {
         "description": "Explanation under the detail screen style setting"
     },
@@ -7362,11 +7362,11 @@
     "@recommendationSystem": {
         "description": "Label for the Recommendation System setting"
     },
-    "recommendationSystemSubtitle": "Folosiți algoritmul local Moonfin Recommends sau metricile de similaritate TMDb online. Notă: recomandările online necesită integrarea Seerr.",
+    "recommendationSystemSubtitle": "Folosiți algoritmul local SpeshTV Recommends sau metricile de similaritate TMDb online. Notă: recomandările online necesită integrarea Seerr.",
     "@recommendationSystemSubtitle": {
         "description": "Explanation under the recommendation system setting"
     },
-    "recommendationSystemMoonfin": "Moonfin Recommends",
+    "recommendationSystemMoonfin": "SpeshTV Recommends",
     "@recommendationSystemMoonfin": {
         "description": "Recommendation system option: Moonfin Recommends"
     },
@@ -7378,7 +7378,7 @@
     "@recommendationsApplyParentalRatingCap": {
         "description": "Label for the toggle that controls whether similar suggestions are capped by target media parental rating"
     },
-    "recommendationsApplyParentalRatingCapSubtitle": "Limitează sugestiile Moonfin Recommends în funcție de clasificarea parentală a conținutului vizat",
+    "recommendationsApplyParentalRatingCapSubtitle": "Limitează sugestiile SpeshTV Recommends în funcție de clasificarea parentală a conținutului vizat",
     "@recommendationsApplyParentalRatingCapSubtitle": {
         "description": "Explanation under the parental rating cap setting toggle"
     },
@@ -7426,7 +7426,7 @@
     "@customThemeTitle": {
         "description": "Title for the custom theme settings section"
     },
-    "customThemeSubtitle": "Temele personalizate modifică elementele vizuale din întreaga aplicație Moonfin. Alegeți una dintre aceste opțiuni, potrivită stilului dvs.",
+    "customThemeSubtitle": "Temele personalizate modifică elementele vizuale din întreaga aplicație SpeshTV. Alegeți una dintre aceste opțiuni, potrivită stilului dvs.",
     "@customThemeSubtitle": {
         "description": "Description under custom themes section"
     },
@@ -7599,7 +7599,7 @@
     "@shuffleAllMusic": {
         "description": "Car browse action that shuffles the whole music library"
     },
-    "carSignInPrompt": "Conectați-vă la Moonfin pe telefon",
+    "carSignInPrompt": "Conectați-vă la SpeshTV pe telefon",
     "@carSignInPrompt": {
         "description": "Shown in the car when no account is signed in"
     },
@@ -8940,7 +8940,7 @@
     "@impellerRendering": {
         "description": "Title of the setting that selects the Flutter rendering engine (Impeller vs. legacy)."
     },
-    "impellerRenderingSubtitle": "Impeller este motorul GPU modern al Flutter, pentru animații mai fluide și mai puține sacadări. Pe unele TV box-uri și plăci grafice mai vechi poate provoca artefacte sau imagine neagră; dezactivați-l dacă observați astfel de probleme. Opțiunea Automat alege cea mai bună valoare implicită pentru dispozitivul dvs. Reporniți Moonfin pentru a aplica modificarea.",
+    "impellerRenderingSubtitle": "Impeller este motorul GPU modern al Flutter, pentru animații mai fluide și mai puține sacadări. Pe unele TV box-uri și plăci grafice mai vechi poate provoca artefacte sau imagine neagră; dezactivați-l dacă observați astfel de probleme. Opțiunea Automat alege cea mai bună valoare implicită pentru dispozitivul dvs. Reporniți SpeshTV pentru a aplica modificarea.",
     "@impellerRenderingSubtitle": {
         "description": "Explanatory description under the rendering engine setting."
     },
@@ -8951,7 +8951,7 @@
     "@impellerRestartTitle": {
         "description": "Title of the dialog shown after changing the rendering engine."
     },
-    "impellerRestartMessage": "Moonfin trebuie repornit pentru a schimba motorul de randare. Închideți aplicația acum, apoi redeschideți-o pentru a aplica modificarea.",
+    "impellerRestartMessage": "SpeshTV trebuie repornit pentru a schimba motorul de randare. Închideți aplicația acum, apoi redeschideți-o pentru a aplica modificarea.",
     "@impellerRestartMessage": {
         "description": "Body of the dialog shown after changing the rendering engine."
     },
@@ -9180,7 +9180,7 @@
     "@sdCard": {
         "description": "Download location option for a removable storage volume"
     },
-    "downloadLocationLimitedByAndroid": "Android permite aplicației Moonfin să scrie doar în folderele proprii, iar acest dispozitiv nu are spațiu de stocare detașabil. Activați mai sus „Salvare în folderul Descărcări” pentru a păstra descărcările într-un loc accesibil și altor aplicații.",
+    "downloadLocationLimitedByAndroid": "Android permite aplicației SpeshTV să scrie doar în folderele proprii, iar acest dispozitiv nu are spațiu de stocare detașabil. Activați mai sus „Salvare în folderul Descărcări” pentru a păstra descărcările într-un loc accesibil și altor aplicații.",
     "@downloadLocationLimitedByAndroid": {
         "description": "Note shown when the only download location Android allows is the default one"
     },

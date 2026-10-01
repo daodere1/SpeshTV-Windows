@@ -33,6 +33,12 @@ class _RecordingItemsApi implements ItemsApi {
 
   QueryFilterValues facets = QueryFilterValues.empty;
   int facetRequests = 0;
+  final List<int> offsets = [];
+  List<Map<String, dynamic>>? pageResponses;
+  @override
+  Future<List<Map<String, dynamic>>> getAncestors(String itemId) async => [
+    {'Id': itemId.startsWith('local') ? 'local-library' : 'vod-library'},
+  ];
 
   @override
   Future<Map<String, dynamic>> getItems({
@@ -100,6 +106,10 @@ class _RecordingItemsApi implements ItemsApi {
     this.excludeItemTypes = excludeItemTypes;
     this.genreIds = genreIds;
     this.collapseBoxSetItems = collapseBoxSetItems;
+    offsets.add(startIndex ?? 0);
+    if (pageResponses != null && pageResponses!.isNotEmpty) {
+      return pageResponses!.removeAt(0);
+    }
     return <String, dynamic>{'TotalRecordCount': 0, 'Items': const []};
   }
 
@@ -143,6 +153,21 @@ class _FakeClient implements MediaServerClient {
   final String? userId;
 
   @override
+  UserViewsApi get userViewsApi => _BrowseViews();
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _BrowseViews implements UserViewsApi {
+  @override
+  Future<Map<String, dynamic>> getUserViews({bool includeHidden = false}) async => {
+    'Items': [
+      {'Id': 'local-library', 'Name': 'Movies', 'CollectionType': 'movies'},
+      {'Id': 'vod-library', 'Name': 'VOD FHD Movies', 'CollectionType': 'movies'},
+    ],
+  };
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
@@ -178,6 +203,69 @@ Future<LibraryBrowseViewModel> _viewModel(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('combined pages prefer local and finish at the raw server total', () async {
+    Map<String, dynamic> page(String id) => {
+      'TotalRecordCount': 2,
+      'Items': [{'Id': id, 'Name': 'Title', 'Type': 'Movie',
+        'ProductionYear': 2020, 'ProviderIds': {'Tmdb': '10'}}],
+    };
+    final api = _RecordingItemsApi()..pageResponses = [page('vod'), page('local')];
+    final vm = await _viewModel(api, libraryId: '', includeItemTypes: ['Movie']);
+    addTearDown(vm.dispose);
+    await vm.setPlayedFilter(PlayedStatusFilter.unwatched);
+    await vm.loadMore();
+    expect(vm.items.map((item) => item.id), ['local']);
+    expect(vm.hasMore, isFalse);
+    expect(api.offsets, [0, 1]);
+  });
+
+  test('a specific library preserves all editions', () async {
+    final api = _RecordingItemsApi()..pageResponses = [{
+      'TotalRecordCount': 2,
+      'Items': [for (final id in ['vod', 'local'])
+        {'Id': id, 'Name': 'Title', 'Type': 'Movie',
+          'ProductionYear': 2020, 'ProviderIds': {'Tmdb': '10'}}],
+    }];
+    final vm = await _viewModel(api);
+    addTearDown(vm.dispose);
+    await vm.setPlayedFilter(PlayedStatusFilter.unwatched);
+    expect(vm.items.length, 2);
+  });
+
+  test('infinite browsing backfills duplicates using raw server offsets', () async {
+    Map<String, dynamic> page(String id) => {
+      'TotalRecordCount': 20,
+      'Items': [{'Id': id, 'Name': id, 'Type': 'Movie'}],
+    };
+    final api = _RecordingItemsApi()
+      ..pageResponses = [page('first'), page('first'), page('second')];
+    final vm = await _viewModel(api);
+    addTearDown(vm.dispose);
+    await vm.setPlayedFilter(PlayedStatusFilter.unwatched);
+    await vm.loadMore();
+    expect(vm.items.map((item) => item.id), ['first', 'second']);
+    expect(api.offsets, [0, 1, 2]);
+    expect(vm.loadingMore, isFalse);
+  });
+
+  test('duplicate backfill is bounded and an empty page ends paging', () async {
+    final duplicate = <String, dynamic>{
+      'TotalRecordCount': 100,
+      'Items': [{'Id': 'first', 'Name': 'First', 'Type': 'Movie'}],
+    };
+    final api = _RecordingItemsApi()
+      ..pageResponses = List.generate(7, (_) => duplicate);
+    final vm = await _viewModel(api);
+    addTearDown(vm.dispose);
+    await vm.setPlayedFilter(PlayedStatusFilter.unwatched);
+    await vm.loadMore();
+    expect(api.offsets.length, 6);
+    expect(vm.hasMore, isTrue);
+    api.pageResponses = [{'TotalRecordCount': 100, 'Items': []}];
+    await vm.loadMore();
+    expect(vm.hasMore, isFalse);
+  });
 
   test('library sort and filters survive reopening the view', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});

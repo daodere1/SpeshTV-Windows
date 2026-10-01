@@ -10,7 +10,7 @@ class AppLocalizationsLt extends AppLocalizations {
   AppLocalizationsLt([String locale = 'lt']) : super(locale);
 
   @override
-  String get appTitle => 'Moonfin';
+  String get appTitle => 'SpeshTV';
 
   @override
   String get animeMarkerFiller => 'Filler';
@@ -108,7 +108,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String appVersionFooter(String version) {
-    return 'Moonfin versija $version';
+    return 'SpeshTV versija $version';
   }
 
   @override
@@ -160,7 +160,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get secureStorageUnavailableMessage =>
-      'Moonfin negalėjo pasiekti jūsų sistemos raktų pakabuko. Prisijungimas gali būti tęsiamas, tačiau saugi žetonų saugykla gali būti nepasiekiama, kol nebus atrakintas raktų pakabukas.';
+      'SpeshTV negalėjo pasiekti jūsų sistemos raktų pakabuko. Prisijungimas gali būti tęsiamas, tačiau saugi žetonų saugykla gali būti nepasiekiama, kol nebus atrakintas raktų pakabukas.';
 
   @override
   String get ok => 'Gerai';
@@ -173,7 +173,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get detailScreenStyleSubtitle =>
-      'Klasikinis – originalus centruotas Moonfin išdėstymas. Modernus – prisitaikantis kinematografinis išdėstymas.';
+      'Klasikinis – originalus centruotas SpeshTV išdėstymas. Modernus – prisitaikantis kinematografinis išdėstymas.';
 
   @override
   String get detailScreenStyleMoonfin => 'Klasikinis';
@@ -410,10 +410,10 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get recommendationSystemSubtitle =>
-      'Naudokite Moonfin Recommends vietinės bibliotekos algoritmą arba internetinius TMDB panašumo rodiklius. Pastaba: internetinėms rekomendacijoms reikia Seerr integracijos.';
+      'Naudokite SpeshTV Recommends vietinės bibliotekos algoritmą arba internetinius TMDB panašumo rodiklius. Pastaba: internetinėms rekomendacijoms reikia Seerr integracijos.';
 
   @override
-  String get recommendationSystemMoonfin => 'Moonfin Recommends';
+  String get recommendationSystemMoonfin => 'SpeshTV Recommends';
 
   @override
   String get recommendationSystemJellyfin => 'Jellyfin Recommends';
@@ -427,7 +427,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get recommendationsApplyParentalRatingCapSubtitle =>
-      'Riboti Moonfin Recommends pasiūlymus pagal pasirinktos medijos amžiaus cenzą';
+      'Riboti SpeshTV Recommends pasiūlymus pagal pasirinktos medijos amžiaus cenzą';
 
   @override
   String get interfaceStyle => 'Sąsajos stilius';
@@ -450,7 +450,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get interfaceLayoutSubtitle =>
-      'Override the detected layout when this device is read wrong. Restart Moonfin for changes to take effect.';
+      'Override the detected layout when this device is read wrong. Restart SpeshTV for changes to take effect.';
 
   @override
   String get interfaceLayoutAutomatic => 'Automatic';
@@ -515,14 +515,14 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get settingsAppearanceThemeSubtitle =>
-      'Perjunkite „Moonfin“ ir „Neon Pulse“ iš naujo nepaleidę programos';
+      'Perjunkite „SpeshTV“ ir „Neon Pulse“ iš naujo nepaleidę programos';
 
   @override
   String get customThemeTitle => 'Pasirinktinė tema';
 
   @override
   String get customThemeSubtitle =>
-      'Pasirinktinės temos keičia vaizdo elementus visoje Moonfin programoje. Pasirinkite vieną iš šių parinkčių pagal savo stilių.';
+      'Pasirinktinės temos keičia vaizdo elementus visoje SpeshTV programoje. Pasirinkite vieną iš šių parinkčių pagal savo stilių.';
 
   @override
   String get keyboardPreferSystemIme => 'Pirmenybė sistemos klaviatūrai';
@@ -542,11 +542,11 @@ class AppLocalizationsLt extends AppLocalizations {
       'Let a connected game controller move focus and select items';
 
   @override
-  String get themeMoonfin => 'Moonfin';
+  String get themeMoonfin => 'SpeshTV';
 
   @override
   String get themeMoonfinSubtitle =>
-      'Dabartinė Moonfin išvaizda, kurią jūs visi pamėgote';
+      'Dabartinė SpeshTV išvaizda, kurią jūs visi pamėgote';
 
   @override
   String get themeNeonPulse => 'Neoninis pulsas';
@@ -621,7 +621,7 @@ class AppLocalizationsLt extends AppLocalizations {
   }
 
   @override
-  String get exitApp => 'Išeiti iš Moonfin?';
+  String get exitApp => 'Išeiti iš SpeshTV?';
 
   @override
   String get exitAppConfirmation => 'Ar tikrai norite išeiti?';
@@ -1770,7 +1770,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get shuffleAllMusic => 'Maišyti visą muziką';
 
   @override
-  String get carSignInPrompt => 'Prisijunkite prie Moonfin telefone';
+  String get carSignInPrompt => 'Prisijunkite prie SpeshTV telefone';
 
   @override
   String get carServerUnreachable => 'Nepavyksta pasiekti serverio';
@@ -2060,7 +2060,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get shortcutToggleFullscreen => 'Fullscreen on or off';
 
   @override
-  String get shortcutQuit => 'Quit Moonfin';
+  String get shortcutQuit => 'Quit SpeshTV';
 
   @override
   String get shortcutPlayPause => 'Play or pause';
@@ -3013,7 +3013,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get loadingAnimationDescription =>
-      'Customize the loading animations used throughout Moonfin';
+      'Customize the loading animations used throughout SpeshTV';
 
   @override
   String get loadingAnimationConfiguration => 'Loading Animation Configuration';
@@ -3022,7 +3022,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get loadingAnimationImage => 'Image';
 
   @override
-  String get loadingAnimationImageMoonfinLogo => 'Moonfin Logo';
+  String get loadingAnimationImageMoonfinLogo => 'SpeshTV Logo';
 
   @override
   String get loadingAnimationImageSpinner => 'Spinner';
@@ -3034,7 +3034,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get loadingAnimationImageMoonPhases => 'Moon Phases';
 
   @override
-  String get loadingAnimationImageMoonfinPhases => 'Moonfin Phases';
+  String get loadingAnimationImageMoonfinPhases => 'SpeshTV Phases';
 
   @override
   String get loadingAnimationImageNeonfinPhases => 'Neonfin Phases';
@@ -3833,7 +3833,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get notSetMpvConf =>
-      'Nenustatyta. „Moonfin“ išbandys numatytąjį mpv.conf failą programų / duomenų aplankuose.';
+      'Nenustatyta. „SpeshTV“ išbandys numatytąjį mpv.conf failą programų / duomenų aplankuose.';
 
   @override
   String get selectMpvConf => 'Pasirinkite mpv.conf';
@@ -4113,14 +4113,14 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get downloadLocationLimitedByAndroid =>
-      'Android only lets Moonfin write to the folders it owns, and this device has no removable storage. Turn on Save to Downloads folder above to keep downloads somewhere other apps can reach.';
+      'Android only lets SpeshTV write to the folders it owns, and this device has no removable storage. Turn on Save to Downloads folder above to keep downloads somewhere other apps can reach.';
 
   @override
   String get saveToDownloadsFolder => 'Išsaugoti atsisiuntimų aplanke';
 
   @override
   String get downloadsVisibleToOtherApps =>
-      'Atsisiuntimai / Moonfin – matoma kitoms programoms';
+      'Atsisiuntimai / SpeshTV – matoma kitoms programoms';
 
   @override
   String get dangerZone => 'Pavojaus zona';
@@ -4150,7 +4150,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get saveToDownloadsFolderDescription =>
-      'Atsisiųsta medija bus išsaugota jūsų įrenginio aplanke „Atsisiuntimai/Moonfin“. Šiuos failus matys kitos programos, pvz., galerija ar muzikos grotuvas.\n\nEsami atsisiuntimai liks dabartinėje vietoje.';
+      'Atsisiųsta medija bus išsaugota jūsų įrenginio aplanke „Atsisiuntimai/SpeshTV“. Šiuos failus matys kitos programos, pvz., galerija ar muzikos grotuvas.\n\nEsami atsisiuntimai liks dabartinėje vietoje.';
 
   @override
   String get transcodingTimeRemainingUnavailable =>
@@ -4301,7 +4301,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get libraryVisibilityDescription =>
-      'Perjungti pagrindinio puslapio matomumą pagal biblioteką. Iš naujo paleiskite „Moonfin“, kad pakeitimai įsigaliotų.';
+      'Perjungti pagrindinio puslapio matomumą pagal biblioteką. Iš naujo paleiskite „SpeshTV“, kad pakeitimai įsigaliotų.';
 
   @override
   String get showInNavigation => 'Rodyti navigacijoje';
@@ -4353,7 +4353,7 @@ class AppLocalizationsLt extends AppLocalizations {
       'Pasirinkite iš įvairių medijos juostos stilių arba išjunkite medijos juostą';
 
   @override
-  String get mediaBarModeMoonfin => 'Moonfin';
+  String get mediaBarModeMoonfin => 'SpeshTV';
 
   @override
   String get mediaBarModeMakd => 'MakD';
@@ -4688,7 +4688,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get screensaverBackdropBlack => 'Black';
 
   @override
-  String get screensaverBackdropMoonfin => 'Moonfin';
+  String get screensaverBackdropMoonfin => 'SpeshTV';
 
   @override
   String get screensaverBackdropCalm => 'Calm';
@@ -4703,7 +4703,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get screensaverAdditionalComponent => 'Additional Component';
 
   @override
-  String get screensaverComponentMoonfinLogo => 'Moonfin Logo';
+  String get screensaverComponentMoonfinLogo => 'SpeshTV Logo';
 
   @override
   String get screensaverComponentRunner => 'Runner';
@@ -5163,7 +5163,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get cancelRequest4k => 'Cancel 4K Request';
 
   @override
-  String get playInMoonfin => 'Žaisk „Moonfin“.';
+  String get playInMoonfin => 'Žaisk „SpeshTV“.';
 
   @override
   String get requestedByLabel => 'Requested by';
@@ -5209,7 +5209,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get itemNotFoundInLibrary =>
-      'Elementas nerastas jūsų Moonfin bibliotekoje';
+      'Elementas nerastas jūsų SpeshTV bibliotekoje';
 
   @override
   String get errorSearchingLibrary => 'Klaida ieškant bibliotekoje';
@@ -5804,7 +5804,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get adminServerRebootMessage =>
-      'Serveris perkraunamas, iš naujo paleiskite „Moonfin“.';
+      'Serveris perkraunamas, iš naujo paleiskite „SpeshTV“.';
 
   @override
   String get adminActiveSessions => 'Aktyvūs užsiėmimai';
@@ -9880,7 +9880,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get settingsLibraryVisibilitySubtitle =>
-      'Perjungti pagrindinio puslapio matomumą pagal biblioteką. Iš naujo paleiskite „Moonfin“, kad pakeitimai įsigaliotų.';
+      'Perjungti pagrindinio puslapio matomumą pagal biblioteką. Iš naujo paleiskite „SpeshTV“, kad pakeitimai įsigaliotų.';
 
   @override
   String get settingsMediaBarAndLocalPreviews =>
@@ -10013,7 +10013,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get settingsJoinTheDiscord => 'Prisijunkite prie Discord';
 
   @override
-  String get settingsSupportMoonfin => 'Palaikykite Moonfin';
+  String get settingsSupportMoonfin => 'Support upstream project';
 
   @override
   String get settingsSupportMoonfinSubtitle => 'Pavaišinkite kūrėją kava';
@@ -10033,14 +10033,14 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get settingsPrivacyPolicySubtitle =>
-      'Kaip Moonfin tvarko jūsų duomenis';
+      'Kaip SpeshTV tvarko jūsų duomenis';
 
   @override
   String get settingsCheckForUpdates => 'Patikrinkite, ar nėra atnaujinimų';
 
   @override
   String get settingsCheckForUpdatesSubtitle =>
-      'Patikrinkite naujausią „Moonfin“ leidimą';
+      'Patikrinkite naujausią „SpeshTV“ leidimą';
 
   @override
   String get settingsPoweredByFlutter => 'Maitinamas Flutter';
@@ -10519,7 +10519,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get savedThemesDescription =>
-      'Tai temos, atsisiųstos iš Moonfin įskiepio dabartiniam serveriui. Ištrynus pašalinama tik ši vietinė kopija.';
+      'Themes downloaded from the server theme plugin. Deleting removes only this local copy.';
 
   @override
   String get savedThemesEmpty => 'Šiam serveriui išsaugotų temų nerasta.';
@@ -10541,7 +10541,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get themeEditorSubtitle =>
-      'Naršyklėje atidarykite Moonfin temų rengyklę';
+      'Open the server theme editor in your browser';
 
   @override
   String get homeScreen => 'Pagrindinis ekranas';
@@ -10865,7 +10865,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get webDiagnostics => 'Interneto diagnostika';
 
   @override
-  String get webDiagnosticsTitle => 'Moonfin Žiniatinklio diagnostika';
+  String get webDiagnosticsTitle => 'SpeshTV Žiniatinklio diagnostika';
 
   @override
   String get webDiagnosticsIntro =>
@@ -10881,11 +10881,11 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get webDiagnosticsMixedContentFailureBody =>
-      'Moonfin aptiko HTTPS puslapį, bandantį iškviesti HTTP serverio URL. Naršyklės blokuoja šią užklausą, kol ji pasiekia jūsų serverį.';
+      'SpeshTV aptiko HTTPS puslapį, bandantį iškviesti HTTP serverio URL. Naršyklės blokuoja šią užklausą, kol ji pasiekia jūsų serverį.';
 
   @override
   String get webDiagnosticsCorsFailureBody =>
-      'Moonfin aptiko naršyklės lygio užklausos gedimą, kurį dažniausiai sukelia trūkstamos CORS arba išankstinio patikrinimo antraštės medijos serveryje.';
+      'SpeshTV aptiko naršyklės lygio užklausos gedimą, kurį dažniausiai sukelia trūkstamos CORS arba išankstinio patikrinimo antraštės medijos serveryje.';
 
   @override
   String webDiagnosticsTargetUrl(String url) {
@@ -10935,7 +10935,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get webDiagnosticsMixedContentFix =>
-      'Pataisymas: aptarnaukite medijos serverį arba tarpinį serverį per HTTPS arba įkelkite Moonfin per HTTP tik patikimuose vietiniuose tinkluose.';
+      'Pataisymas: aptarnaukite medijos serverį arba tarpinį serverį per HTTPS arba įkelkite SpeshTV per HTTP tik patikimuose vietiniuose tinkluose.';
 
   @override
   String get webDiagnosticsNoMixedContentDetected =>
@@ -12299,7 +12299,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get impellerRenderingSubtitle =>
-      'Impeller – modernus Flutter GPU atvaizdavimo variklis, užtikrinantis sklandesnes animacijas ir mažiau trūkčiojimų. Kai kuriuose TV priedėliuose ir senesniuose GPU jis gali sukelti trikdžius ar juodą vaizdą; tokiu atveju jį išjunkite. „Automatinis“ parenka geriausią numatytąjį variantą jūsų įrenginiui. Kad pakeitimai įsigaliotų, paleiskite Moonfin iš naujo.';
+      'Impeller – modernus Flutter GPU atvaizdavimo variklis, užtikrinantis sklandesnes animacijas ir mažiau trūkčiojimų. Kai kuriuose TV priedėliuose ir senesniuose GPU jis gali sukelti trikdžius ar juodą vaizdą; tokiu atveju jį išjunkite. „Automatinis“ parenka geriausią numatytąjį variantą jūsų įrenginiui. Kad pakeitimai įsigaliotų, paleiskite SpeshTV iš naujo.';
 
   @override
   String get impellerAuto => 'Automatinis';
@@ -12315,7 +12315,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get impellerRestartMessage =>
-      'Kad būtų pakeistas atvaizdavimo variklis, Moonfin reikia paleisti iš naujo. Uždarykite programą dabar ir vėl ją atidarykite.';
+      'Kad būtų pakeistas atvaizdavimo variklis, SpeshTV reikia paleisti iš naujo. Uždarykite programą dabar ir vėl ją atidarykite.';
 
   @override
   String get impellerCloseNow => 'Uždaryti programą dabar';
@@ -12810,7 +12810,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get autoDownloadTranscodedForegroundNote =>
-      'Transcoded qualities only download while Moonfin is open. Original quality also downloads in the background.';
+      'Transcoded qualities only download while SpeshTV is open. Original quality also downloads in the background.';
 
   @override
   String get autoDownloadTranscodedRunningNote =>
@@ -12818,7 +12818,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get autoDownloadForegroundOnly =>
-      'Downloads only while Moonfin is open';
+      'Downloads only while SpeshTV is open';
 
   @override
   String get autoDownloadQualityTitle => 'Auto-download quality';
@@ -12873,15 +12873,15 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get autoDownloadBackgroundRefreshSubtitle =>
-      'Allow the system to check for new episodes periodically while Moonfin is closed';
+      'Allow the system to check for new episodes periodically while SpeshTV is closed';
 
   @override
   String get autoDownloadBackgroundRefreshDenied =>
-      'Background App Refresh is disabled for Moonfin. Enable it in iOS Settings.';
+      'Background App Refresh is disabled for SpeshTV. Enable it in iOS Settings.';
 
   @override
   String get autoDownloadBackgroundRestrictedAndroid =>
-      'Background usage is restricted for Moonfin in Android Settings.';
+      'Background usage is restricted for SpeshTV in Android Settings.';
 
   @override
   String get autoDownloadCheckNow => 'Check now';

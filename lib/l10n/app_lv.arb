@@ -1,6 +1,6 @@
 {
     "@@locale": "lv",
-    "appTitle": "Moonfin",
+    "appTitle": "SpeshTV",
     "@appTitle": {
         "description": "The application title"
     },
@@ -82,7 +82,7 @@
     "@selectServer": {
         "description": "Button to navigate back to server selection"
     },
-    "appVersionFooter": "Moonfin versija {version}",
+    "appVersionFooter": "SpeshTV versija {version}",
     "@appVersionFooter": {
         "description": "App version shown in footer",
         "placeholders": {
@@ -156,7 +156,7 @@
     "@secureStorageUnavailable": {
         "description": "Dialog title when system keyring is inaccessible"
     },
-    "secureStorageUnavailableMessage": "Moonfin nevarēja piekļūt jūsu sistēmas atslēgu piekariņam. Pieteikšanos var turpināt, taču droša marķiera krātuve var nebūt pieejama, kamēr atslēgu piekariņš nav atbloķēts.",
+    "secureStorageUnavailableMessage": "SpeshTV nevarēja piekļūt jūsu sistēmas atslēgu piekariņam. Pieteikšanos var turpināt, taču droša marķiera krātuve var nebūt pieejama, kamēr atslēgu piekariņš nav atbloķēts.",
     "@secureStorageUnavailableMessage": {
         "description": "Explanation when secure storage is not available"
     },
@@ -168,15 +168,15 @@
     "@settingsAppearanceTheme": {
         "description": "Title for the theme selection screen and theme settings entry"
     },
-    "settingsAppearanceThemeSubtitle": "Pārslēdzieties starp Moonfin un Neon Pulse, nerestartējot lietotni",
+    "settingsAppearanceThemeSubtitle": "Pārslēdzieties starp SpeshTV un Neon Pulse, nerestartējot lietotni",
     "@settingsAppearanceThemeSubtitle": {
         "description": "Subtitle for the theme selection screen and theme settings entry"
     },
-    "themeMoonfin": "Moonfin",
+    "themeMoonfin": "SpeshTV",
     "@themeMoonfin": {
         "description": "Display name for the Moonfin theme"
     },
-    "themeMoonfinSubtitle": "Pašreizējais Moonfin izskats, ko jūs visi esat iemīlējuši",
+    "themeMoonfinSubtitle": "Pašreizējais SpeshTV izskats, ko jūs visi esat iemīlējuši",
     "@themeMoonfinSubtitle": {
         "description": "Preview description for the Moonfin theme"
     },
@@ -249,7 +249,7 @@
             }
         }
     },
-    "exitApp": "Vai iziet no Moonfin?",
+    "exitApp": "Vai iziet no SpeshTV?",
     "@exitApp": {
         "description": "Title of exit confirmation dialog"
     },
@@ -3109,7 +3109,7 @@
     "@customMpvConfPath": {
         "description": "Setting for custom mpv.conf path"
     },
-    "notSetMpvConf": "Nav iestatīts. Moonfin izmēģinās noklusējuma mpv.conf lietotņu/datu mapēs.",
+    "notSetMpvConf": "Nav iestatīts. SpeshTV izmēģinās noklusējuma mpv.conf lietotņu/datu mapēs.",
     "@notSetMpvConf": {
         "description": "Description when no custom mpv.conf is set"
     },
@@ -3336,7 +3336,7 @@
     "@saveToDownloadsFolder": {
         "description": "Setting for saving to downloads folder"
     },
-    "downloadsVisibleToOtherApps": "Lejupielādes/Moonfin — redzams citām lietotnēm",
+    "downloadsVisibleToOtherApps": "Lejupielādes/SpeshTV — redzams citām lietotnēm",
     "@downloadsVisibleToOtherApps": {
         "description": "Description for downloads folder visibility"
     },
@@ -3372,7 +3372,7 @@
     "@saveToDownloadsFolderQuestion": {
         "description": "Dialog title for saving to downloads folder"
     },
-    "saveToDownloadsFolderDescription": "Lejupielādētie multivide tiks saglabāti jūsu ierīces mapē Lejupielādes/Moonfin. Šie faili būs redzami citām lietotnēm, piemēram, jūsu galerijai vai mūzikas atskaņotājam.\n\nEsošās lejupielādes paliks to pašreizējā atrašanās vietā.",
+    "saveToDownloadsFolderDescription": "Lejupielādētie multivide tiks saglabāti jūsu ierīces mapē Lejupielādes/SpeshTV. Šie faili būs redzami citām lietotnēm, piemēram, jūsu galerijai vai mūzikas atskaņotājam.\n\nEsošās lejupielādes paliks to pašreizējā atrašanās vietā.",
     "@saveToDownloadsFolderDescription": {
         "description": "Description for saving to downloads folder"
     },
@@ -3512,7 +3512,7 @@
     "@libraryVisibility": {
         "description": "Section title for library visibility"
     },
-    "libraryVisibilityDescription": "Pārslēgt mājas lapas redzamību katrai bibliotēkai. Restartējiet Moonfin, lai izmaiņas stātos spēkā.",
+    "libraryVisibilityDescription": "Pārslēgt mājas lapas redzamību katrai bibliotēkai. Restartējiet SpeshTV, lai izmaiņas stātos spēkā.",
     "@libraryVisibilityDescription": {
         "description": "Explanation shown on the library visibility settings screen"
     },
@@ -3561,7 +3561,7 @@
     "@mediaBarModeDescription": {
         "description": "Description for media bar style setting"
     },
-    "mediaBarModeMoonfin": "Moonfin",
+    "mediaBarModeMoonfin": "SpeshTV",
     "@mediaBarModeMoonfin": {
         "description": "Media bar style option: Moonfin"
     },
@@ -4293,7 +4293,7 @@
     "@cancelRequest": {
         "description": "Button/dialog title to cancel a media request"
     },
-    "playInMoonfin": "Spēlē Moonfin",
+    "playInMoonfin": "Spēlē SpeshTV",
     "@playInMoonfin": {
         "description": "Button to play available media in Moonfin"
     },
@@ -4347,7 +4347,7 @@
     "@keep": {
         "description": "Button to keep/dismiss a cancel dialog"
     },
-    "itemNotFoundInLibrary": "Vienums nav atrasts jūsu Moonfin bibliotēkā",
+    "itemNotFoundInLibrary": "Vienums nav atrasts jūsu SpeshTV bibliotēkā",
     "@itemNotFoundInLibrary": {
         "description": "Snackbar when Seerr item cannot be found in Jellyfin"
     },
@@ -4651,7 +4651,7 @@
         }
     },
     "adminServerRebootInProgress": "Notiek servera atsāknēšana",
-    "adminServerRebootMessage": "Notiek servera atsāknēšana, lūdzu, restartējiet Moonfin",
+    "adminServerRebootMessage": "Notiek servera atsāknēšana, lūdzu, restartējiet SpeshTV",
     "adminActiveSessions": "Aktīvās sesijas",
     "adminSessionsLoadFailed": "Neizdevās ielādēt sesijas",
     "adminNoActiveSessions": "Nav aktīvu sesiju",
@@ -6539,7 +6539,7 @@
     "settingsShowGenresButtonInNavigation": "Rādīt žanru pogu navigācijas joslā",
     "settingsShowFavoritesButtonInNavigation": "Parādiet izlases pogu navigācijas joslā",
     "settingsShowLibrariesButtonInNavigation": "Parādiet bibliotēkas pogu navigācijas joslā",
-    "settingsLibraryVisibilitySubtitle": "Pārslēgt mājas lapas redzamību katrai bibliotēkai. Restartējiet Moonfin, lai izmaiņas stātos spēkā.",
+    "settingsLibraryVisibilitySubtitle": "Pārslēgt mājas lapas redzamību katrai bibliotēkai. Restartējiet SpeshTV, lai izmaiņas stātos spēkā.",
     "settingsMediaBarAndLocalPreviews": "Multivides josla un vietējie priekšskatījumi",
     "settingsVisualOverlays": "Vizuālie pārklājumi",
     "settingsSeasonalSurprise": "Sezonas pārsteigums",
@@ -6558,14 +6558,14 @@
     "settingsJoinDiscord": "Pievienojieties Discord",
     "settingsJoinDiscordSubtitle": "Tērzējiet ar kopienu",
     "settingsJoinTheDiscord": "Pievienojieties Discord",
-    "settingsSupportMoonfin": "Atbalstiet Moonfin",
+    "settingsSupportMoonfin": "Support upstream project",
     "settingsLegal": "JURIDISKĀS",
     "settingsLicenses": "Licences",
     "settingsOpenSourceLicenseNotices": "Atvērtā koda licences paziņojumi",
     "settingsPrivacyPolicy": "Privātuma politika",
-    "settingsPrivacyPolicySubtitle": "Kā Moonfin apstrādā jūsu datus",
+    "settingsPrivacyPolicySubtitle": "Kā SpeshTV apstrādā jūsu datus",
     "settingsCheckForUpdates": "Pārbaudiet atjauninājumus",
-    "settingsCheckForUpdatesSubtitle": "Pārbaudiet jaunāko Moonfin versiju",
+    "settingsCheckForUpdatesSubtitle": "Pārbaudiet jaunāko SpeshTV versiju",
     "settingsPoweredByFlutter": "Darbojas ar Flutter",
     "settingsLicenseNoticesCount": "{count, plural, zero {# licenču paziņojumu} one {# licences paziņojums} other {# licences paziņojumi}}",
     "@settingsLicenseNoticesCount": {
@@ -7035,7 +7035,7 @@
         }
     },
     "savedThemesTitle": "Saglabātie motīvi",
-    "savedThemesDescription": "Tie ir motīvi, kas lejupielādēti no pašreizējā servera spraudņa Moonfin. Dzēšot, tiek noņemta tikai šī vietējā kopija.",
+    "savedThemesDescription": "Themes downloaded from the server theme plugin. Deleting removes only this local copy.",
     "savedThemesEmpty": "Šim serverim netika atrasts neviens saglabāts motīvs.",
     "savedThemesCurrentThemeId": "{themeId} • Pašlaik aktīvs",
     "@savedThemesCurrentThemeId": {
@@ -7049,7 +7049,7 @@
     "savedThemesDeleteTooltip": "Dzēst saglabāto motīvu",
     "savedThemesManageSubtitle": "Pārvaldiet šajā ierīcē lejupielādētos spraudņu motīvus",
     "themeEditor": "Tēmas redaktors",
-    "themeEditorSubtitle": "Pārlūkprogrammā atveriet Moonfin motīvu redaktoru",
+    "themeEditorSubtitle": "Open the server theme editor in your browser",
     "homeScreen": "Sākuma ekrāns",
     "bottomBar": "Apakšējā josla",
     "homeRowsStyleClassic": "Klasika",
@@ -7098,12 +7098,12 @@
     "preferSdhSubtitles": "Dodiet priekšroku SDH subtitriem",
     "preferSdhSubtitlesSubtitle": "Veicot automātisko atlasi, piešķiriet prioritāti SDH/CC subtitru celiņiem.",
     "webDiagnostics": "Web diagnostika",
-    "webDiagnosticsTitle": "Moonfin Tīmekļa diagnostika",
+    "webDiagnosticsTitle": "SpeshTV Tīmekļa diagnostika",
     "webDiagnosticsIntro": "Izmantojiet šo lapu, lai diagnosticētu pārlūkprogrammas savienojamības problēmas (CORS, jaukts saturs un atklāšanas iestatījumi).",
     "webDiagnosticsDetectedMixedContentFailure": "Konstatēta jaukta satura kļūme",
     "webDiagnosticsDetectedCorsPreflightFailure": "Konstatēta CORS/pirmslidojuma kļūme",
-    "webDiagnosticsMixedContentFailureBody": "Moonfin atklāja HTTPS lapu, kas mēģina izsaukt HTTP servera URL. Pārlūkprogrammas bloķē šo pieprasījumu, pirms tas sasniedz jūsu serveri.",
-    "webDiagnosticsCorsFailureBody": "Moonfin atklāja pārlūkprogrammas līmeņa pieprasījuma kļūmi, ko parasti izraisa trūkstošas ​​CORS vai pirmspārbaudes galvenes multivides serverī.",
+    "webDiagnosticsMixedContentFailureBody": "SpeshTV atklāja HTTPS lapu, kas mēģina izsaukt HTTP servera URL. Pārlūkprogrammas bloķē šo pieprasījumu, pirms tas sasniedz jūsu serveri.",
+    "webDiagnosticsCorsFailureBody": "SpeshTV atklāja pārlūkprogrammas līmeņa pieprasījuma kļūmi, ko parasti izraisa trūkstošas ​​CORS vai pirmspārbaudes galvenes multivides serverī.",
     "webDiagnosticsTargetUrl": "Mērķa URL: {url}",
     "@webDiagnosticsTargetUrl": {
         "description": "Target URL shown in diagnostics summary",
@@ -7133,7 +7133,7 @@
     "notConfigured": "nav konfigurēts",
     "webDiagnosticsMixedContent": "Jaukts saturs",
     "webDiagnosticsMixedContentDetected": "Šī lapa tiek ielādēta, izmantojot HTTPS, bet viens vai vairāki konfigurētie URL ir HTTP. Pārlūkprogrammas neļauj HTTPS lapām izsaukt HTTP API.",
-    "webDiagnosticsMixedContentFix": "Labojums: apkalpojiet multivides serveri vai starpniekservera galapunktu, izmantojot HTTPS, vai ielādējiet Moonfin, izmantojot HTTP, tikai uzticamos lokālos tīklos.",
+    "webDiagnosticsMixedContentFix": "Labojums: apkalpojiet multivides serveri vai starpniekservera galapunktu, izmantojot HTTPS, vai ielādējiet SpeshTV, izmantojot HTTP, tikai uzticamos lokālos tīklos.",
     "webDiagnosticsNoMixedContentDetected": "Pašreizējos izpildlaika iestatījumos nav konstatēta acīmredzama jaukta satura konfigurācija.",
     "webDiagnosticsCorsChecklist": "CORS kontrolsaraksts",
     "webDiagnosticsCorsChecklistItem1": "• Atļaut pārlūkprogrammas izcelsmi sadaļā Access-Control-Allow-Origin.",
@@ -7330,7 +7330,7 @@
     "@detailScreenStyle": {
         "description": "Label for the media detail screen layout style setting"
     },
-    "detailScreenStyleSubtitle": "Klasiskais ir oriģinālais centrētais Moonfin izkārtojums. Modernais ir adaptīvs kinematogrāfisks izkārtojums.",
+    "detailScreenStyleSubtitle": "Klasiskais ir oriģinālais centrētais SpeshTV izkārtojums. Modernais ir adaptīvs kinematogrāfisks izkārtojums.",
     "@detailScreenStyleSubtitle": {
         "description": "Explanation under the detail screen style setting"
     },
@@ -7362,11 +7362,11 @@
     "@recommendationSystem": {
         "description": "Label for the Recommendation System setting"
     },
-    "recommendationSystemSubtitle": "Izmantojiet Moonfin Recommends vietējās bibliotēkas algoritmu vai tiešsaistes TMDB līdzības rādītājus. Piezīme: tiešsaistes ieteikumiem nepieciešama Seerr integrācija.",
+    "recommendationSystemSubtitle": "Izmantojiet SpeshTV Recommends vietējās bibliotēkas algoritmu vai tiešsaistes TMDB līdzības rādītājus. Piezīme: tiešsaistes ieteikumiem nepieciešama Seerr integrācija.",
     "@recommendationSystemSubtitle": {
         "description": "Explanation under the recommendation system setting"
     },
-    "recommendationSystemMoonfin": "Moonfin Recommends",
+    "recommendationSystemMoonfin": "SpeshTV Recommends",
     "@recommendationSystemMoonfin": {
         "description": "Recommendation system option: Moonfin Recommends"
     },
@@ -7378,7 +7378,7 @@
     "@recommendationsApplyParentalRatingCap": {
         "description": "Label for the toggle that controls whether similar suggestions are capped by target media parental rating"
     },
-    "recommendationsApplyParentalRatingCapSubtitle": "Ierobežot Moonfin Recommends ieteikumus atbilstoši izvēlētā satura vecuma ierobežojumam",
+    "recommendationsApplyParentalRatingCapSubtitle": "Ierobežot SpeshTV Recommends ieteikumus atbilstoši izvēlētā satura vecuma ierobežojumam",
     "@recommendationsApplyParentalRatingCapSubtitle": {
         "description": "Explanation under the parental rating cap setting toggle"
     },
@@ -7426,7 +7426,7 @@
     "@customThemeTitle": {
         "description": "Title for the custom theme settings section"
     },
-    "customThemeSubtitle": "Pielāgotas tēmas maina vizuālos elementus visā Moonfin lietotnē. Izvēlieties vienu no šīm iespējām atbilstoši savam stilam.",
+    "customThemeSubtitle": "Pielāgotas tēmas maina vizuālos elementus visā SpeshTV lietotnē. Izvēlieties vienu no šīm iespējām atbilstoši savam stilam.",
     "@customThemeSubtitle": {
         "description": "Description under custom themes section"
     },
@@ -7599,7 +7599,7 @@
     "@shuffleAllMusic": {
         "description": "Car browse action that shuffles the whole music library"
     },
-    "carSignInPrompt": "Pierakstieties Moonfin savā tālrunī",
+    "carSignInPrompt": "Pierakstieties SpeshTV savā tālrunī",
     "@carSignInPrompt": {
         "description": "Shown in the car when no account is signed in"
     },
@@ -8940,7 +8940,7 @@
     "@impellerRendering": {
         "description": "Title of the setting that selects the Flutter rendering engine (Impeller vs. legacy)."
     },
-    "impellerRenderingSubtitle": "Impeller ir Flutter modernais GPU renderētājs, kas nodrošina plūstošākas animācijas un mazāku raustīšanos. Dažās TV pierīcēs un vecākos GPU tas var radīt traucējumus vai melnu attēlu; tādā gadījumā izslēdziet to. “Automātiski” izvēlas jūsu ierīcei piemērotāko noklusējumu. Lai lietotu izmaiņas, restartējiet Moonfin.",
+    "impellerRenderingSubtitle": "Impeller ir Flutter modernais GPU renderētājs, kas nodrošina plūstošākas animācijas un mazāku raustīšanos. Dažās TV pierīcēs un vecākos GPU tas var radīt traucējumus vai melnu attēlu; tādā gadījumā izslēdziet to. “Automātiski” izvēlas jūsu ierīcei piemērotāko noklusējumu. Lai lietotu izmaiņas, restartējiet SpeshTV.",
     "@impellerRenderingSubtitle": {
         "description": "Explanatory description under the rendering engine setting."
     },
@@ -8951,7 +8951,7 @@
     "@impellerRestartTitle": {
         "description": "Title of the dialog shown after changing the rendering engine."
     },
-    "impellerRestartMessage": "Lai mainītu renderēšanas dzinēju, Moonfin ir jārestartē. Aizveriet lietotni tagad un atveriet to no jauna.",
+    "impellerRestartMessage": "Lai mainītu renderēšanas dzinēju, SpeshTV ir jārestartē. Aizveriet lietotni tagad un atveriet to no jauna.",
     "@impellerRestartMessage": {
         "description": "Body of the dialog shown after changing the rendering engine."
     },

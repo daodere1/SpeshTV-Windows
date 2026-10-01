@@ -75,7 +75,7 @@ android {
     flavorDimensions += "device"
     productFlavors {
         val baseAppId = "dev.speshmedia.moonfin"
-        val baseAppName = "SpeshMedia"
+        val baseAppName = "SpeshTV"
         val testIdSuffix = System.getenv("MOONFIN_TEST_ID_SUFFIX").orEmpty()
         val mobileAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         val tvAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")

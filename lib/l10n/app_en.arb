@@ -1,6 +1,6 @@
 {
   "@@locale": "en",
-  "appTitle": "Moonfin",
+  "appTitle": "SpeshTV",
   "@appTitle": {
     "description": "The application title"
   },
@@ -138,7 +138,7 @@
   "@selectServer": {
     "description": "Button to navigate back to server selection"
   },
-  "appVersionFooter": "Moonfin version {version}",
+  "appVersionFooter": "SpeshTV version {version}",
   "@appVersionFooter": {
     "description": "App version shown in footer",
     "placeholders": {
@@ -212,7 +212,7 @@
   "@secureStorageUnavailable": {
     "description": "Dialog title when system keyring is inaccessible"
   },
-  "secureStorageUnavailableMessage": "Moonfin could not access your system keyring. Login can continue, but secure token storage may be unavailable until the keyring is unlocked.",
+  "secureStorageUnavailableMessage": "SpeshTV could not access your system keyring. Login can continue, but secure token storage may be unavailable until the keyring is unlocked.",
   "@secureStorageUnavailableMessage": {
     "description": "Explanation when secure storage is not available"
   },
@@ -228,7 +228,7 @@
   "@detailScreenStyle": {
     "description": "Label for the media detail screen layout style setting"
   },
-  "detailScreenStyleSubtitle": "Classic is the original centered moonfin layout. Modern is a responsive cinematic layout. Spotlight is a hero-first layout with pop-up content cards. Nouveau is a full-screen layout with sections stacked down the page. Minimalist is artwork, one play button and the episodes.",
+  "detailScreenStyleSubtitle": "Classic is the original centered SpeshTV layout. Modern is a responsive cinematic layout. Spotlight is a hero-first layout with pop-up content cards. Nouveau is a full-screen layout with sections stacked down the page. Minimalist is artwork, one play button and the episodes.",
   "@detailScreenStyleSubtitle": {
     "description": "Explanation under the detail screen style setting"
   },
@@ -455,11 +455,11 @@
   "@recommendationSystem": {
     "description": "Label for the Recommendation System setting"
   },
-  "recommendationSystemSubtitle": "Use the Moonfin Recommends local-library algorithm, Jellyfin Recommends server engine, or the online TMDb's Similarity Metrics. Note: Online recommendations require Seerr integration.",
+  "recommendationSystemSubtitle": "Use the SpeshTV Recommends local-library algorithm, Jellyfin Recommends server engine, or the online TMDb's Similarity Metrics. Note: Online recommendations require Seerr integration.",
   "@recommendationSystemSubtitle": {
     "description": "Explanation under the recommendation system setting"
   },
-  "recommendationSystemMoonfin": "Moonfin Recommends",
+  "recommendationSystemMoonfin": "SpeshTV Recommends",
   "@recommendationSystemMoonfin": {
     "description": "Recommendation system option: Moonfin Recommends"
   },
@@ -475,7 +475,7 @@
   "@recommendationsApplyParentalRatingCap": {
     "description": "Label for the toggle that controls whether similar suggestions are capped by target media parental rating"
   },
-  "recommendationsApplyParentalRatingCapSubtitle": "Limit Moonfin Recommends suggestions by parental rating of target media",
+  "recommendationsApplyParentalRatingCapSubtitle": "Limit SpeshTV Recommends suggestions by parental rating of target media",
   "@recommendationsApplyParentalRatingCapSubtitle": {
     "description": "Explanation under the parental rating cap setting toggle"
   },
@@ -503,7 +503,7 @@
   "@interfaceLayout": {
     "description": "Setting to override which UI layout the app uses"
   },
-  "interfaceLayoutSubtitle": "Override the detected layout when this device is read wrong. Restart Moonfin for changes to take effect.",
+  "interfaceLayoutSubtitle": "Override the detected layout when this device is read wrong. Restart SpeshTV for changes to take effect.",
   "@interfaceLayoutSubtitle": {
     "description": "Subtitle for the interface layout setting"
   },
@@ -591,7 +591,7 @@
   "@customThemeTitle": {
     "description": "Title for the custom theme settings section"
   },
-  "customThemeSubtitle": "Custom themes alter visual elements across Moonfin. Choose one of these options to suit your style.",
+  "customThemeSubtitle": "Custom themes alter visual elements across SpeshTV. Choose one of these options to suit your style.",
   "@customThemeSubtitle": {
     "description": "Description under custom themes section"
   },
@@ -615,11 +615,11 @@
   "@gamepadNavigationDescription": {
     "description": "Settings subtitle for the gamepad navigation switch"
   },
-  "themeMoonfin": "Moonfin",
+  "themeMoonfin": "SpeshTV",
   "@themeMoonfin": {
     "description": "Display name for the Moonfin theme"
   },
-  "themeMoonfinSubtitle": "The original clean Moonfin default.",
+  "themeMoonfinSubtitle": "The original clean SpeshTV default.",
   "@themeMoonfinSubtitle": {
     "description": "Preview description for the Moonfin theme"
   },
@@ -708,7 +708,7 @@
       }
     }
   },
-  "exitApp": "Exit Moonfin?",
+  "exitApp": "Exit SpeshTV?",
   "@exitApp": {
     "description": "Title of exit confirmation dialog"
   },
@@ -2297,7 +2297,7 @@
   "@shuffleAllMusic": {
     "description": "Car browse action that shuffles the whole music library"
   },
-  "carSignInPrompt": "Sign in to Moonfin on your phone",
+  "carSignInPrompt": "Sign in to SpeshTV on your phone",
   "@carSignInPrompt": {
     "description": "Shown in the car when no account is signed in"
   },
@@ -2741,7 +2741,7 @@
   "@shortcutToggleFullscreen": {
     "description": "F11 and Alt+Enter anywhere, F in the player"
   },
-  "shortcutQuit": "Quit Moonfin",
+  "shortcutQuit": "Quit SpeshTV",
   "@shortcutQuit": {
     "description": "What Ctrl+Q does on desktop"
   },
@@ -4064,7 +4064,7 @@
   "@loadingAnimation": {
     "description": "Setting title for custom loading animation"
   },
-  "loadingAnimationDescription": "Customize the loading animations used throughout Moonfin",
+  "loadingAnimationDescription": "Customize the loading animations used throughout SpeshTV",
   "@loadingAnimationDescription": {
     "description": "Description for loading animation customization settings"
   },
@@ -4076,7 +4076,7 @@
   "@loadingAnimationImage": {
     "description": "Title for loading animation image selection"
   },
-  "loadingAnimationImageMoonfinLogo": "Moonfin Logo",
+  "loadingAnimationImageMoonfinLogo": "SpeshTV Logo",
   "@loadingAnimationImageMoonfinLogo": {
     "description": "Loading animation image option: Moonfin Logo"
   },
@@ -4092,7 +4092,7 @@
   "@loadingAnimationImageMoonPhases": {
     "description": "Loading animation image option: Moon Phases"
   },
-  "loadingAnimationImageMoonfinPhases": "Moonfin Phases",
+  "loadingAnimationImageMoonfinPhases": "SpeshTV Phases",
   "@loadingAnimationImageMoonfinPhases": {
     "description": "Loading animation image option: Moonfin Phases in brand gradient"
   },
@@ -5061,7 +5061,7 @@
   "@customMpvConfPath": {
     "description": "Setting for custom mpv.conf path"
   },
-  "notSetMpvConf": "Not set. Moonfin will try a default mpv.conf in app/data folders.",
+  "notSetMpvConf": "Not set. SpeshTV will try a default mpv.conf in app/data folders.",
   "@notSetMpvConf": {
     "description": "Description when no custom mpv.conf is set"
   },
@@ -5422,7 +5422,7 @@
   "@sdCard": {
     "description": "Download location option for a removable storage volume"
   },
-  "downloadLocationLimitedByAndroid": "Android only lets Moonfin write to the folders it owns, and this device has no removable storage. Turn on Save to Downloads folder above to keep downloads somewhere other apps can reach.",
+  "downloadLocationLimitedByAndroid": "Android only lets SpeshTV write to the folders it owns, and this device has no removable storage. Turn on Save to Downloads folder above to keep downloads somewhere other apps can reach.",
   "@downloadLocationLimitedByAndroid": {
     "description": "Note shown when the only download location Android allows is the default one"
   },
@@ -5430,7 +5430,7 @@
   "@saveToDownloadsFolder": {
     "description": "Setting for saving to downloads folder"
   },
-  "downloadsVisibleToOtherApps": "Downloads/Moonfin — visible to other apps",
+  "downloadsVisibleToOtherApps": "Downloads/SpeshTV — visible to other apps",
   "@downloadsVisibleToOtherApps": {
     "description": "Description for downloads folder visibility"
   },
@@ -5466,7 +5466,7 @@
   "@saveToDownloadsFolderQuestion": {
     "description": "Dialog title for saving to downloads folder"
   },
-  "saveToDownloadsFolderDescription": "Downloaded media will be saved to Downloads/Moonfin on your device. These files will be visible to other apps such as your gallery or music player.\n\nExisting downloads will remain in their current location.",
+  "saveToDownloadsFolderDescription": "Downloaded media will be saved to Downloads/SpeshTV on your device. These files will be visible to other apps such as your gallery or music player.\n\nExisting downloads will remain in their current location.",
   "@saveToDownloadsFolderDescription": {
     "description": "Description for saving to downloads folder"
   },
@@ -5654,7 +5654,7 @@
   "@libraryVisibility": {
     "description": "Section title for library visibility"
   },
-  "libraryVisibilityDescription": "Toggle home page visibility per library. Restart Moonfin for changes to take effect.",
+  "libraryVisibilityDescription": "Toggle home page visibility per library. Restart SpeshTV for changes to take effect.",
   "@libraryVisibilityDescription": {
     "description": "Explanation shown on the library visibility settings screen"
   },
@@ -5723,7 +5723,7 @@
   "@mediaBarModeDescription": {
     "description": "Description for media bar style setting"
   },
-  "mediaBarModeMoonfin": "Moonfin",
+  "mediaBarModeMoonfin": "SpeshTV",
   "@mediaBarModeMoonfin": {
     "description": "Media bar style option: Moonfin"
   },
@@ -6148,7 +6148,7 @@
   "@screensaverBackdropBlack": {
     "description": "Screensaver backdrop: Black"
   },
-  "screensaverBackdropMoonfin": "Moonfin",
+  "screensaverBackdropMoonfin": "SpeshTV",
   "@screensaverBackdropMoonfin": {
     "description": "Screensaver backdrop: Moonfin"
   },
@@ -6168,7 +6168,7 @@
   "@screensaverAdditionalComponent": {
     "description": "Setting for screensaver additional component"
   },
-  "screensaverComponentMoonfinLogo": "Moonfin Logo",
+  "screensaverComponentMoonfinLogo": "SpeshTV Logo",
   "@screensaverComponentMoonfinLogo": {
     "description": "Screensaver component: Moonfin Logo"
   },
@@ -6768,7 +6768,7 @@
   "@cancelRequest4k": {
     "description": "Button/dialog title to cancel a 4K media request"
   },
-  "playInMoonfin": "Play in Moonfin",
+  "playInMoonfin": "Play in SpeshTV",
   "@playInMoonfin": {
     "description": "Button to play available media in Moonfin"
   },
@@ -6838,7 +6838,7 @@
   "@keep": {
     "description": "Button to keep/dismiss a cancel dialog"
   },
-  "itemNotFoundInLibrary": "Item not found in your Moonfin library",
+  "itemNotFoundInLibrary": "Item not found in your SpeshTV library",
   "@itemNotFoundInLibrary": {
     "description": "Snackbar when Seerr item cannot be found in Jellyfin"
   },
@@ -7384,7 +7384,7 @@
     }
   },
   "adminServerRebootInProgress": "Server reboot in progress",
-  "adminServerRebootMessage": "Server reboot in progress, please restart Moonfin",
+  "adminServerRebootMessage": "Server reboot in progress, please restart SpeshTV",
 
   "adminActiveSessions": "Active Sessions",
   "adminSessionsLoadFailed": "Failed to load sessions",
@@ -9531,7 +9531,7 @@
   "settingsShowLibrariesButtonInNavigation": "Show the libraries button in the navigation bar",
   "settingsShowSeerrButtonInNavigation": "Show the Seerr button in the navigation bar",
   "settingsAlwaysExpandNavbarLabels": "Always show text labels in the top navigation bar",
-  "settingsLibraryVisibilitySubtitle": "Toggle home page visibility per library. Restart Moonfin for changes to take effect.",
+  "settingsLibraryVisibilitySubtitle": "Toggle home page visibility per library. Restart SpeshTV for changes to take effect.",
   "settingsMediaBarAndLocalPreviews": "Media Bar & Local Previews",
   "settingsVisualOverlays": "Visual Overlays",
   "settingsSeasonalSurprise": "Seasonal Surprise",
@@ -9626,15 +9626,15 @@
   "settingsJoinDiscord": "Join Discord",
   "settingsJoinDiscordSubtitle": "Chat with the community",
   "settingsJoinTheDiscord": "Join the Discord",
-  "settingsSupportMoonfin": "Support Moonfin",
+  "settingsSupportMoonfin": "Support upstream project",
   "settingsSupportMoonfinSubtitle": "Donate a coffee to the developer",
   "settingsLegal": "LEGAL",
   "settingsLicenses": "Licenses",
   "settingsOpenSourceLicenseNotices": "Open-source license notices",
   "settingsPrivacyPolicy": "Privacy Policy",
-  "settingsPrivacyPolicySubtitle": "How Moonfin handles your data",
+  "settingsPrivacyPolicySubtitle": "How SpeshTV handles your data",
   "settingsCheckForUpdates": "Check for Updates",
-  "settingsCheckForUpdatesSubtitle": "Check for the latest Moonfin release",
+  "settingsCheckForUpdatesSubtitle": "Check for the latest SpeshTV release",
   "settingsPoweredByFlutter": "Powered by Flutter",
   "settingsLicenseNoticesCount": "{count, plural, one {# license notice} other {# license notices}}",
   "@settingsLicenseNoticesCount": {
@@ -9945,7 +9945,7 @@
     }
   },
   "savedThemesTitle": "Saved themes",
-  "savedThemesDescription": "These are themes downloaded from the Moonfin plugin for the current server. Deleting removes only this local copy.",
+  "savedThemesDescription": "Themes downloaded from the server theme plugin. Deleting removes only this local copy.",
   "savedThemesEmpty": "No saved themes were found for this server.",
   "savedThemesCurrentThemeId": "{themeId} • Currently active",
   "@savedThemesCurrentThemeId": {
@@ -9959,7 +9959,7 @@
   "savedThemesDeleteTooltip": "Delete saved theme",
   "savedThemesManageSubtitle": "Manage downloaded plugin themes on this device",
   "themeEditor": "Theme Editor",
-  "themeEditorSubtitle": "Open the Moonfin Theme Editor in your browser",
+  "themeEditorSubtitle": "Open the server theme editor in your browser",
   "homeScreen": "Home Screen",
   "bottomBar": "Bottom Bar",
   "homeRowsStyleClassic": "Classic",
@@ -10056,12 +10056,12 @@
   "preferSdhSubtitles": "Prefer SDH subtitles",
   "preferSdhSubtitlesSubtitle": "Prioritize SDH/CC subtitle tracks when auto-selecting.",
   "webDiagnostics": "Web diagnostics",
-  "webDiagnosticsTitle": "Moonfin Web Diagnostics",
+  "webDiagnosticsTitle": "SpeshTV Web Diagnostics",
   "webDiagnosticsIntro": "Use this page to diagnose browser connectivity issues (CORS, mixed content, and discovery settings).",
   "webDiagnosticsDetectedMixedContentFailure": "Detected Mixed-Content Failure",
   "webDiagnosticsDetectedCorsPreflightFailure": "Detected CORS/Preflight Failure",
-  "webDiagnosticsMixedContentFailureBody": "Moonfin detected an HTTPS page trying to call an HTTP server URL. Browsers block this request before it reaches your server.",
-  "webDiagnosticsCorsFailureBody": "Moonfin detected a browser-level request failure that is commonly caused by missing CORS or preflight headers on the media server.",
+  "webDiagnosticsMixedContentFailureBody": "SpeshTV detected an HTTPS page trying to call an HTTP server URL. Browsers block this request before it reaches your server.",
+  "webDiagnosticsCorsFailureBody": "SpeshTV detected a browser-level request failure that is commonly caused by missing CORS or preflight headers on the media server.",
   "webDiagnosticsTargetUrl": "Target URL: {url}",
   "@webDiagnosticsTargetUrl": {
     "description": "Target URL shown in diagnostics summary",
@@ -10091,7 +10091,7 @@
   "notConfigured": "not configured",
   "webDiagnosticsMixedContent": "Mixed Content",
   "webDiagnosticsMixedContentDetected": "This page is loaded over HTTPS, but one or more configured URLs are HTTP. Browsers block HTTPS pages from calling HTTP APIs.",
-  "webDiagnosticsMixedContentFix": "Fix: serve your media server or proxy endpoint via HTTPS, or load Moonfin over HTTP on trusted local networks only.",
+  "webDiagnosticsMixedContentFix": "Fix: serve your media server or proxy endpoint via HTTPS, or load SpeshTV over HTTP on trusted local networks only.",
   "webDiagnosticsNoMixedContentDetected": "No obvious mixed-content configuration detected from current runtime settings.",
   "webDiagnosticsCorsChecklist": "CORS Checklist",
   "webDiagnosticsCorsChecklistItem1": "• Allow the browser origin in Access-Control-Allow-Origin.",
@@ -11134,7 +11134,7 @@
   "@impellerRendering": {
     "description": "Title of the setting that selects the Flutter rendering engine (Impeller vs. legacy)."
   },
-  "impellerRenderingSubtitle": "Impeller is Flutter's modern GPU renderer for smoother animations and less stutter. On some TV boxes and older GPUs it can cause glitches or black video; switch it Off if you see those. Automatic picks the best default for your device. Restart Moonfin to apply.",
+  "impellerRenderingSubtitle": "Impeller is Flutter's modern GPU renderer for smoother animations and less stutter. On some TV boxes and older GPUs it can cause glitches or black video; switch it Off if you see those. Automatic picks the best default for your device. Restart SpeshTV to apply.",
   "@impellerRenderingSubtitle": {
     "description": "Explanatory description under the rendering engine setting."
   },
@@ -11145,7 +11145,7 @@
   "@impellerRestartTitle": {
     "description": "Title of the dialog shown after changing the rendering engine."
   },
-  "impellerRestartMessage": "Moonfin needs to restart to change the rendering engine. Close the app now, then reopen it to apply.",
+  "impellerRestartMessage": "SpeshTV needs to restart to change the rendering engine. Close the app now, then reopen it to apply.",
   "@impellerRestartMessage": {
     "description": "Body of the dialog shown after changing the rendering engine."
   },
@@ -11752,7 +11752,7 @@
       }
     }
   },
-  "autoDownloadTranscodedForegroundNote": "Transcoded qualities only download while Moonfin is open. Original quality also downloads in the background.",
+  "autoDownloadTranscodedForegroundNote": "Transcoded qualities only download while SpeshTV is open. Original quality also downloads in the background.",
   "@autoDownloadTranscodedForegroundNote": {
     "description": "Shown under transcoded options when choosing the quality of an auto-download subscription"
   },
@@ -11760,7 +11760,7 @@
   "@autoDownloadTranscodedRunningNote": {
     "description": "Shown under a running transcoded download that a subscription queued"
   },
-  "autoDownloadForegroundOnly": "Downloads only while Moonfin is open",
+  "autoDownloadForegroundOnly": "Downloads only while SpeshTV is open",
   "@autoDownloadForegroundOnly": {
     "description": "Short note next to a followed series in a transcoded quality"
   },
@@ -11834,15 +11834,15 @@
   "@autoDownloadBackgroundRefresh": {
     "description": "Setting that lets the system wake the app to check for new episodes"
   },
-  "autoDownloadBackgroundRefreshSubtitle": "Allow the system to check for new episodes periodically while Moonfin is closed",
+  "autoDownloadBackgroundRefreshSubtitle": "Allow the system to check for new episodes periodically while SpeshTV is closed",
   "@autoDownloadBackgroundRefreshSubtitle": {
     "description": "Explains the background refresh setting"
   },
-  "autoDownloadBackgroundRefreshDenied": "Background App Refresh is disabled for Moonfin. Enable it in iOS Settings.",
+  "autoDownloadBackgroundRefreshDenied": "Background App Refresh is disabled for SpeshTV. Enable it in iOS Settings.",
   "@autoDownloadBackgroundRefreshDenied": {
     "description": "Shown when iOS forbids background refresh for the app"
   },
-  "autoDownloadBackgroundRestrictedAndroid": "Background usage is restricted for Moonfin in Android Settings.",
+  "autoDownloadBackgroundRestrictedAndroid": "Background usage is restricted for SpeshTV in Android Settings.",
   "@autoDownloadBackgroundRestrictedAndroid": {
     "description": "Shown when Android restricts the app from running in the background"
   },

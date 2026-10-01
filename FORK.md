@@ -73,3 +73,29 @@ Windows native build path issues and removes that mapping when finished.
 Java selection, native-assets tool invocation and Ninja staging-path length
 issues have also been addressed. This is a development build, not a store release.
 Do not treat test success as proof of Android device playback or HDR support.
+
+## SpeshTV Branding
+
+Build 30000157 uses SpeshTV as the Android application name, localized UI brand,
+default theme label, exit prompt, loading logo and screensaver logo. New public
+downloads use Downloads/SpeshTV; stored paths for existing downloads are not
+migrated. The package ID, internal theme keys and Moonfin plugin API paths stay
+unchanged for compatibility. About credits Moonfin as the upstream project and
+retains its source, license and support links. Run tools/rebrand-localizations.ps1
+with PowerShell 7 after an upstream merge to apply the same label changes without
+renaming ARB keys or URLs.
+
+## Combined Library Browsing
+
+Build 30000156 prefers confirmed local copies over VOD matches in unscoped
+combined library, genre and studio browsing. Specific libraries and playlists
+retain their editions. Matching uses provider IDs or normalized title/year,
+preserves explicit conflicting language suffixes and release years, and does
+not merge conflicting IDs through an ID-less intermediary. Unknown sources
+remain visible. Only duplicate candidates need cached source lookups, with
+bounded concurrency and a two-second timeout per lookup.
+
+Matches are resolved as pages arrive; a local copy on a later page replaces
+the earlier VOD card in place. This does not scan unseen pages or copy watch
+history. Raw server offsets drive pagination; visible totals settle when the
+last page arrives. Duplicate-only pages backfill up to five pages per request.

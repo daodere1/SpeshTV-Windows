@@ -8,6 +8,7 @@ import '../../preference/user_preferences.dart';
 import '../../util/artwork_timing.dart';
 import '../../util/clock_format.dart';
 import '../widgets/offline_aware_image.dart';
+import '../widgets/spesh_brand.dart';
 import '../widgets/playback/loading_animation_widget.dart';
 import 'bouncing_box.dart';
 import 'screensaver_content_service.dart';
@@ -176,6 +177,7 @@ class _ScreensaverViewState extends State<ScreensaverView> {
         case ScreensaverComponent.none:
           return const SizedBox.shrink();
         case ScreensaverComponent.moonfinLogo:
+          if (speshWeb) return SpeshBrand(height: height);
           return Image.asset(
             'assets/images/logo_and_text.png',
             fit: BoxFit.contain,

@@ -1,4 +1,7 @@
 import 'dart:async';
+import '../services/spesh_browse_dedupe.dart';
+import '../services/spesh_progress_resolver.dart';
+import '../../ui/widgets/spesh_brand.dart';
 import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:get_it/get_it.dart';
@@ -134,6 +137,8 @@ class LibraryBrowseViewModel extends ChangeNotifier {
 
   bool _loadingMore = false;
   bool get loadingMore => _loadingMore;
+  late final _browseSourceResolver = SpeshProgressResolver(_client);
+  bool get _dedupeCombined => speshWeb && _effectiveParentId == null && !isPlaylistBrowse;
 
   late LibrarySortBy _sortBy;
   LibrarySortBy get sortBy => _sortBy;
@@ -538,6 +543,7 @@ class LibraryBrowseViewModel extends ChangeNotifier {
     _filteredOutCount = 0;
     _fetchedCount = 0;
     _renderedItemIds.clear();
+    _browseSourceResolver.invalidate();
     _playlistCategoryMap.clear();
     _totalCountKnown = true;
     _hasMoreFromPageSize = false;
@@ -673,19 +679,23 @@ class LibraryBrowseViewModel extends ChangeNotifier {
     _loadingMore = true;
     if (notify) notifyListeners();
 
-    final previouslyFetched = _fetchedCount;
     try {
-      await _fetchPage(_fetchedCount, pageSizeOverride: pageSizeOverride);
-      // Stop on a page the server had nothing left for, not on one that only
-      // repeated what is already shown, which a random sort does by chance.
-      if (_fetchedCount <= previouslyFetched) {
-        _totalCount = _items.length;
-        _hasMoreFromPageSize = false;
+      final visibleCount = _items.length;
+      // Backfill duplicate-only pages without walking an entire library.
+      for (var attempt = 0; attempt < 5 && !_disposed; attempt++) {
+        final previouslyFetched = _fetchedCount;
+        await _fetchPage(_fetchedCount, pageSizeOverride: pageSizeOverride);
+        if (_fetchedCount <= previouslyFetched) {
+          _totalCount = _items.length;
+          _hasMoreFromPageSize = false;
+          break;
+        }
+        if (_items.length > visibleCount || !hasMore) break;
       }
     } catch (_) {}
 
     _loadingMore = false;
-    if (notify) notifyListeners();
+    if (notify && !_disposed) notifyListeners();
   }
 
   Future<void> _fetchPage(int startIndex, {int? pageSizeOverride}) async {
@@ -897,7 +907,7 @@ class LibraryBrowseViewModel extends ChangeNotifier {
         startIndex: startIndex,
         limit: pageSize,
         recursive: recursive,
-        fields: _browseFields,
+        fields: _dedupeCombined ? '$_browseFields,ProviderIds' : _browseFields,
         filters: filters.isEmpty ? null : filters,
         seriesStatus: seriesStatus.isEmpty ? null : seriesStatus,
         isFavorite: _favoriteFilter ? true : null,
@@ -955,6 +965,18 @@ class LibraryBrowseViewModel extends ChangeNotifier {
       _items = filtered;
     } else {
       _items = [..._items, ...filtered];
+    }
+    if (_dedupeCombined) {
+      final before = _items.length;
+      _items = await preferLocalBrowseItems(_items, (item) async =>
+        (await _browseSourceResolver.describe(item)).source);
+      _filteredOutCount += before - _items.length;
+      // Paging follows raw server offsets, never the number of visible cards.
+      if (totalFromServer != null) {
+        _hasMoreFromPageSize = _fetchedCount < totalFromServer;
+        _totalCount = _hasMoreFromPageSize
+            ? totalFromServer - _filteredOutCount : _items.length;
+      }
     }
   }
 

@@ -1,3 +1,4 @@
+import '../../widgets/spesh_brand.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
@@ -621,7 +622,7 @@ class _ScreensaverSettingsScreenState extends State<ScreensaverSettingsScreen> {
       case ScreensaverComponent.moonfinLogo:
         compWidth = 100 * scale;
         compHeight = 44 * scale;
-        componentWidget = Image.asset(
+        componentWidget = speshWeb ? SpeshBrand(height: compHeight) : Image.asset(
           'assets/images/logo_and_text.png',
           width: compWidth,
           height: compHeight,
