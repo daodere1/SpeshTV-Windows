@@ -23,11 +23,13 @@ class _DetailsScreenSettingsScreenState
 
   @override
   Widget build(BuildContext context) {
-    final bottomPad = PlatformDetection.isTV ? 96.0 : 24.0;
+    final bottomPad =
+        (PlatformDetection.isTV ? 96.0 : 24.0) +
+        MediaQuery.paddingOf(context).bottom;
     final l10n = AppLocalizations.of(context);
     final prefs = GetIt.instance<UserPreferences>();
     return Scaffold(
-      appBar: buildSettingsAppBar(context, Text(l10n.settingsDetailsScreen)),
+      appBar: buildSettingsAppBar(context, Text(l10n.detailsPage)),
       body: FocusScope(
         node: _detailsScreenScope,
         child: ListenableBuilder(
@@ -73,6 +75,25 @@ class _DetailsScreenSettingsScreenState
                       PersonalRatingStyle.numeric => l10n.personalRatingNumeric,
                     },
                   ),
+                  SwitchPreferenceTile(
+                    preference: UserPreferences.detailsBackdropEnabled,
+                    title: l10n.detailsScreenBackdrop,
+                    icon: Icons.photo,
+                    onChanged: _pushPersonalizationSync,
+                  ),
+                  if (PlatformDetection.useMobileUi)
+                    StringPickerPreferenceTile(
+                      preference: UserPreferences.detailsBackdropSize,
+                      title: l10n.detailsBackdropSize,
+                      icon: Icons.fit_screen,
+                      options: {
+                        UserPreferences.detailsBackdropFullScreen:
+                            l10n.detailsBackdropFullScreen,
+                        UserPreferences.detailsBackdropFit:
+                            l10n.detailsBackdropFit,
+                      },
+                      onChanged: _pushPersonalizationSync,
+                    ),
                   if (prefs.get(UserPreferences.detailScreenStyle) == DetailScreenStyle.classic)
                     SliderPreferenceTile(
                       preference: UserPreferences.detailsBackgroundBlurAmount,
@@ -136,6 +157,14 @@ class _DetailsScreenSettingsScreenState
                       const _DetailMetadataScreen(),
                     ),
                   ),
+                  _TvSettingsListTile(
+                    leading: const Icon(Icons.dashboard_customize_outlined),
+                    title: Text(l10n.detailSections),
+                    subtitle: Text(l10n.detailSectionsDescription),
+                    onTap: () => context.pushSettingsScreen(
+                      const _DetailSectionsScreen(),
+                    ),
+                  ),
                   if (prefs.get(UserPreferences.detailScreenStyle) == DetailScreenStyle.modern)
                     SwitchPreferenceTile(
                       preference: UserPreferences.detailExpandedTabs,
@@ -156,6 +185,13 @@ class _DetailsScreenSettingsScreenState
                     title: l10n.openTrailersExternally,
                     subtitle: l10n.openTrailersExternallySubtitle,
                     icon: Icons.open_in_new,
+                    onChanged: _pushPersonalizationSync,
+                  ),
+                  SwitchPreferenceTile(
+                    preference: UserPreferences.mediaBarTrailerCaptions,
+                    title: l10n.trailerCaptions,
+                    subtitle: l10n.trailerCaptionsDescription,
+                    icon: Icons.closed_caption_outlined,
                     onChanged: _pushPersonalizationSync,
                   ),
                   SwitchPreferenceTile(
@@ -193,11 +229,49 @@ class _DetailsScreenSettingsScreenState
                     },
                     onChanged: _pushPersonalizationSync,
                   ),
+                ],
+              ),
+              _SectionHeader(l10n.ratings),
+              adaptiveListSection(
+                children: _ratingsSettingsTiles(
+                  context,
+                  l10n,
+                  UserPreferences.detailsRatings,
+                ),
+              ),
+              _SectionHeader(l10n.themeMusic),
+              adaptiveListSection(
+                children: [
                   SwitchPreferenceTile(
-                    preference: UserPreferences.recommendationsApplyParentalRatingCap,
-                    title: l10n.recommendationsApplyParentalRatingCap,
-                    subtitle: l10n.recommendationsApplyParentalRatingCapSubtitle,
-                    icon: Icons.family_restroom,
+                    preference: UserPreferences.themeMusicEnabled,
+                    title: l10n.themeMusic,
+                    subtitle: l10n.playThemeMusicOnDetailPages,
+                    icon: Icons.music_note,
+                    onChanged: _pushPersonalizationSync,
+                  ),
+                  SliderPreferenceTile(
+                    preference: UserPreferences.themeMusicVolume,
+                    title: l10n.themeMusicVolume,
+                    icon: Icons.volume_down,
+                    min: 0,
+                    max: 100,
+                    divisions: 20,
+                    labelOf: (v) => '$v%',
+                    onChangeEnd: _pushPersonalizationSync,
+                  ),
+                  if (!PlatformDetection.isMobile)
+                    SwitchPreferenceTile(
+                      preference: UserPreferences.themeMusicOnHomeRows,
+                      title: l10n.themeMusicOnHomeRows,
+                      subtitle: l10n.playWhenBrowsingHomeScreen,
+                      icon: Icons.queue_music,
+                      onChanged: _pushPersonalizationSync,
+                    ),
+                  SwitchPreferenceTile(
+                    preference: UserPreferences.themeMusicLoop,
+                    title: l10n.loopThemeMusic,
+                    subtitle: l10n.loopThemeMusicSubtitle,
+                    icon: Icons.repeat,
                     onChanged: _pushPersonalizationSync,
                   ),
                 ],
@@ -209,3 +283,46 @@ class _DetailsScreenSettingsScreenState
     );
   }
 }
+
+List<Widget> _ratingsSettingsTiles(
+  BuildContext context,
+  AppLocalizations l10n,
+  RatingSettings settings,
+) => [
+  SwitchPreferenceTile(
+    preference: settings.additionalRatings,
+    title: l10n.additionalRatings,
+    subtitle: l10n.showMdbListAndTmdbRatings,
+    icon: Icons.star,
+    onChanged: _pushPersonalizationSync,
+  ),
+  _TvSettingsListTile(
+    leading: const Icon(Icons.reorder),
+    title: Text(l10n.ratingSources),
+    subtitle: Text(l10n.ratingSourcesDescription),
+    onTap: () =>
+        context.pushSettingsScreen(RatingsConfigScreen(settings: settings)),
+  ),
+  if (settings.episodeRatings case final episodeRatings?)
+    SwitchPreferenceTile(
+      preference: episodeRatings,
+      title: l10n.episodeRatings,
+      subtitle: l10n.showRatingsOnEpisodes,
+      icon: Icons.stars,
+      onChanged: _pushPersonalizationSync,
+    ),
+  SwitchPreferenceTile(
+    preference: settings.labels,
+    title: l10n.ratingLabels,
+    subtitle: l10n.showLabelsNextToIcons,
+    icon: Icons.label,
+    onChanged: _pushPersonalizationSync,
+  ),
+  SwitchPreferenceTile(
+    preference: settings.badges,
+    title: l10n.ratingBadges,
+    subtitle: l10n.showDecorativeBadges,
+    icon: Icons.style,
+    onChanged: _pushPersonalizationSync,
+  ),
+];

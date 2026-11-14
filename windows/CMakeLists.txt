@@ -2,11 +2,14 @@
 cmake_minimum_required(VERSION 3.14)
 project(moonfin LANGUAGES CXX)
 
-set(BINARY_NAME "moonfin")
+set(BINARY_NAME "SpeshTV")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.
 cmake_policy(VERSION 3.14...3.25)
+
+# Flutter plugins still use the pre-CMake-3.31 custom-command signature.
+set(CMAKE_POLICY_DEFAULT_CMP0175 OLD)
 
 # Define build configuration option.
 get_property(IS_MULTICONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)

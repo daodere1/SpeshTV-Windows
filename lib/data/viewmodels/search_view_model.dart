@@ -8,6 +8,7 @@ import '../models/aggregated_item.dart';
 import '../models/search_source.dart';
 export '../models/search_source.dart' show SearchSource;
 import '../repositories/search_repository.dart';
+import '../repositories/multi_server_repository.dart';
 import '../repositories/seerr_repository.dart';
 import '../services/seerr/seerr_api_models.dart';
 
@@ -42,6 +43,9 @@ class SearchViewModel extends ChangeNotifier {
   final SearchRepository _searchRepository;
   final MediaServerClient _client;
   final String? _scopedParentId;
+  final MultiServerRepository? _multiServerRepository;
+  Map<String, String> _serverNames = const {};
+  String? serverNameFor(AggregatedItem item) => _serverNames[item.serverId];
   SeerrRepository? _seerrRepository;
 
   SearchViewModel(
@@ -49,7 +53,9 @@ class SearchViewModel extends ChangeNotifier {
     this._client, {
     SeerrRepository? seerrRepository,
     String? scopedParentId,
+    MultiServerRepository? multiServerRepository,
   }) : _seerrRepository = seerrRepository,
+       _multiServerRepository = multiServerRepository,
        _scopedParentId =
            (scopedParentId != null && scopedParentId.isNotEmpty)
                ? scopedParentId
@@ -60,6 +66,8 @@ class SearchViewModel extends ChangeNotifier {
   }
 
   ImageApi get imageApi => _client.imageApi;
+  ImageApi imageApiFor(AggregatedItem item) =>
+      _multiServerRepository?.getImageApiForServer(item.serverId) ?? _client.imageApi;
 
   SearchState _state = SearchState.idle;
   SearchState get state => _state;
@@ -211,7 +219,9 @@ class SearchViewModel extends ChangeNotifier {
             : libraryItems.where((i) => group.itemTypes.contains(i.type)).toList();
         return group.copyWith(items: items.take(_resultLimit).toList());
       }).where((g) => g.items.isNotEmpty).toList();
-      _state = SearchState.ready;
+      _state = _results.isNotEmpty || _seerrResults.isNotEmpty ||
+              _gameResults.isNotEmpty || !_searching
+          ? SearchState.ready : SearchState.loading;
       notifyListeners();
     }
     Future<void> guarded(Future<void> Function() task) async {
@@ -237,8 +247,29 @@ class SearchViewModel extends ChangeNotifier {
     } else {
       if (source != SearchSource.live) {
         libraryTask = guarded(() async {
-          await _searchRepository.searchLibraries(query, source: source,
-            isCurrent: current, onResults: (items) { libraryItems = items; publish(); });
+          final multi = _multiServerRepository;
+          if (multi == null) {
+            await _searchRepository.searchLibraries(query, source: source,
+              isCurrent: current, onResults: (items) { libraryItems = items; publish(); });
+          } else {
+            final sessions = await multi.getLoggedInServers();
+            if (!current()) return;
+            _serverNames = sessions.length > 1
+                ? {for (final session in sessions) session.server.id: session.server.name}
+                : const {};
+            final partial = <int, List<AggregatedItem>>{};
+            var nextIndex = 0;
+            await multi.searchEachServer((repository) async {
+              final index = nextIndex++;
+              await repository.searchLibraries(query, source: source,
+                isCurrent: current, onResults: (items) {
+                  partial[index] = items;
+                  libraryItems = _interleave(partial.values.toList());
+                  publish();
+                });
+              return partial[index] ?? <AggregatedItem>[];
+            }, label: 'search');
+          }
         });
         tasks.add(libraryTask);
       }
@@ -247,10 +278,19 @@ class SearchViewModel extends ChangeNotifier {
       }
       if (source == SearchSource.all) {
         tasks.add(guarded(() async {
-          await libraryTask;
+          await Future<void>.value();
           if (!current()) return;
-          people = await _searchRepository.searchPeople(query,
-            limit: _resultLimit, isCurrent: current);
+          final multi = _multiServerRepository;
+          if (multi == null) {
+            people = await _searchRepository.searchPeople(query,
+              limit: _resultLimit, isCurrent: current)
+                .timeout(const Duration(seconds: 10));
+          } else {
+            people = _interleave(await multi.searchEachServer(
+              (repository) => repository.searchPeople(query,
+                limit: _resultLimit, isCurrent: current)
+                  .timeout(const Duration(seconds: 10)), label: 'people search'));
+          }
           publish();
         }));
         tasks.add(guarded(() async {
@@ -277,10 +317,19 @@ class SearchViewModel extends ChangeNotifier {
   // since /LiveTv/Channels has no search parameter of its own.
   Future<List<AggregatedItem>>? _channelsFuture;
 
+  static List<AggregatedItem> _interleave(List<List<AggregatedItem>> perServer) {
+    final longest = perServer.fold<int>(0, (most, items) => items.length > most ? items.length : most);
+    return [for (var i = 0; i < longest; i++)
+      for (final items in perServer) if (i < items.length) items[i]];
+  }
+
   Future<List<AggregatedItem>> _channelMatches(String query) async {
     final q = query.trim().toLowerCase();
     if (q.isEmpty || q.startsWith('studio:')) return const [];
-    _channelsFuture ??= _searchRepository.fetchLiveTvChannels();
+    _channelsFuture ??= _multiServerRepository == null
+        ? _searchRepository.fetchLiveTvChannels()
+        : _multiServerRepository.searchEachServer(
+            (repository) => repository.fetchLiveTvChannels(), label: 'channels').then(_interleave);
     try {
       final all = await _channelsFuture!;
       return matchSearchChannels(all, q, limit: _resultLimit);

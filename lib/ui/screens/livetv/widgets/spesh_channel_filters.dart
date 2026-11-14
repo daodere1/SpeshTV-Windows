@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../../../data/models/channel_facets.dart';
 import '../../../../data/viewmodels/live_tv_guide_view_model.dart';
+import '../../../../util/platform_detection.dart';
+import 'spesh_tv_filter_selector.dart';
 
 class SpeshChannelFilters extends StatelessWidget {
   const SpeshChannelFilters({super.key, required this.model, required this.onChanged, this.onClearRecent});
@@ -9,6 +11,10 @@ class SpeshChannelFilters extends StatelessWidget {
   final VoidCallback? onClearRecent;
 
   Widget _selector(String label, String value, List<ChannelFilterOption> options, ValueChanged<String> select) {
+    if (PlatformDetection.isTV) {
+      return SpeshTvFilterSelector(label: label, value: value, options: options,
+        onSelected: (next) { select(next); onChanged(); });
+    }
     return InputDecorator(
       decoration: InputDecoration(labelText: label, isDense: true, border: const OutlineInputBorder()),
       child: DropdownButtonHideUnderline(child: DropdownButton<String>(

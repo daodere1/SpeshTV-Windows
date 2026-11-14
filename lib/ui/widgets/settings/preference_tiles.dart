@@ -12,6 +12,7 @@ import '../../../util/focus/input_mode_tracker.dart';
 import '../adaptive/adaptive_icons.dart';
 import '../adaptive/sf_symbol.dart';
 import '../overlay_sheet.dart';
+import 'multi_select_dialog.dart';
 import 'preference_binding.dart';
 
 Widget withBackClose(BuildContext dialogContext, Widget child) {
@@ -441,6 +442,8 @@ class EnumPreferenceTile<T extends Enum> extends StatefulWidget {
   final ValueChanged<T>? onChangedValue;
   final List<T>? values;
   final bool autofocus;
+  final bool enabled;
+  final FocusNode? focusNode;
 
   const EnumPreferenceTile({
     super.key,
@@ -455,6 +458,8 @@ class EnumPreferenceTile<T extends Enum> extends StatefulWidget {
     this.onChangedValue,
     this.values,
     this.autofocus = false,
+    this.enabled = true,
+    this.focusNode,
   });
 
   @override
@@ -464,15 +469,17 @@ class EnumPreferenceTile<T extends Enum> extends StatefulWidget {
 class _EnumPreferenceTileState<T extends Enum>
     extends State<EnumPreferenceTile<T>> {
   late PreferenceBinding<T> _binding;
-  late final FocusNode _focusNode;
+  FocusNode? _internalFocusNode;
+  FocusNode get _effectiveFocusNode =>
+      widget.focusNode ??
+      (_internalFocusNode ??= FocusNode(
+        debugLabel: 'EnumPreferenceTile_${widget.preference.key}',
+      ));
   bool _pickerOpen = false;
 
   @override
   void initState() {
     super.initState();
-    _focusNode = FocusNode(
-      debugLabel: 'EnumPreferenceTile_${widget.preference.key}',
-    );
     _binding = PreferenceBinding(
       GetIt.instance<PreferenceStore>(),
       widget.preference,
@@ -491,7 +498,7 @@ class _EnumPreferenceTileState<T extends Enum>
 
   @override
   void dispose() {
-    _focusNode.dispose();
+    _internalFocusNode?.dispose();
     _binding.dispose();
     super.dispose();
   }
@@ -500,13 +507,15 @@ class _EnumPreferenceTileState<T extends Enum>
   Widget build(BuildContext context) {
     final values = widget.values ?? widget.preference.values.toList();
     return TvFocusHighlight(
+      enabled: widget.enabled,
       builder: (context, focused) => ValueListenableBuilder<T>(
         valueListenable: _binding,
         builder: (context, value, _) {
           final current = values.contains(value) ? value : values.first;
           final label = widget.labelOf(current);
           return ListTile(
-            focusNode: _focusNode,
+            enabled: widget.enabled,
+            focusNode: _effectiveFocusNode,
             autofocus: widget.autofocus,
             leading: widget.icon != null
                 ? buildSettingsLeadingIconShell(
@@ -529,7 +538,7 @@ class _EnumPreferenceTileState<T extends Enum>
             isThreeLine: widget.description != null,
             titleAlignment: ListTileTitleAlignment.center,
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            onTap: () => _showPicker(context, current),
+            onTap: widget.enabled ? () => _showPicker(context, current) : null,
           );
         },
       ),
@@ -539,73 +548,13 @@ class _EnumPreferenceTileState<T extends Enum>
   void _showPicker(BuildContext context, T current) async {
     if (_pickerOpen) return;
     _pickerOpen = true;
-    final values = widget.values ?? widget.preference.values.toList();
-    final selectedIndex = values.indexOf(current);
-    final autofocusIndex = selectedIndex >= 0 ? selectedIndex : 0;
-    var picked = false;
-    final result = await showFocusRestoringDialog<T>(
-      context: context,
-      useRootNavigator: false,
-      builder: (ctx) => withBackClose(
-        ctx,
-        SimpleDialog(
-          title: Text(widget.title, style: _kSettingsTitleTextStyle),
-          children: values.asMap().entries.map((entry) {
-            final i = entry.key;
-            final v = entry.value;
-            final selected = v == current;
-            return TvFocusHighlight(
-              builder: (_, focused) {
-                final invert = focused && settingsTileInvertsOnFocus;
-                return ListTile(
-                  autofocus: i == autofocusIndex,
-                  focusColor: Colors.transparent,
-                  hoverColor: Colors.transparent,
-                  title: Text(
-                    (widget.dialogLabelOf ?? widget.labelOf)(v),
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: invert
-                          ? AppColors.black.withValues(alpha: 0.87)
-                          : AppColorScheme.onSurface,
-                    ),
-                  ),
-                  subtitle: widget.dialogSubtitleOf != null
-                      ? Text(
-                          widget.dialogSubtitleOf!(v),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: invert
-                                ? AppColors.black.withValues(alpha: 0.54)
-                                : AppColorScheme.onSurface.withValues(
-                                    alpha: 0.6,
-                                  ),
-                          ),
-                        )
-                      : null,
-                  isThreeLine: widget.dialogSubtitleOf != null,
-                  trailing: selected
-                      ? Icon(
-                          Icons.check,
-                          color: invert
-                              ? AppColors.black.withValues(alpha: 0.54)
-                              : (AppUiIdiomResolver.isApple
-                                  ? AppColorScheme.accent
-                                  : null),
-                        )
-                      : null,
-                  onTap: () {
-                    if (picked) return;
-                    picked = true;
-                    Navigator.pop(ctx, v);
-                  },
-                );
-              },
-            );
-          }).toList(),
-        ),
-      ),
+    final result = await showSettingsPicker<T>(
+      context,
+      title: widget.title,
+      values: widget.values ?? widget.preference.values.toList(),
+      current: current,
+      labelOf: widget.dialogLabelOf ?? widget.labelOf,
+      subtitleOf: widget.dialogSubtitleOf,
     );
     _pickerOpen = false;
     if (!mounted || result == null || result == _binding.value) return;
@@ -614,12 +563,92 @@ class _EnumPreferenceTileState<T extends Enum>
     widget.onChangedValue?.call(result);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted &&
-          !_focusNode.hasFocus &&
+          !_effectiveFocusNode.hasFocus &&
           (ModalRoute.of(context)?.isCurrent ?? true)) {
-        _focusNode.requestFocus();
+        _effectiveFocusNode.requestFocus();
       }
     });
   }
+}
+
+/// The list a settings picker opens: every value, the current one ticked, and
+/// an optional line under each. Resolves to the value pressed, or null when
+/// the dialog is closed without a choice.
+Future<T?> showSettingsPicker<T>(
+  BuildContext context, {
+  required String title,
+  required List<T> values,
+  required T current,
+  required String Function(T value) labelOf,
+  String Function(T value)? subtitleOf,
+}) {
+  final selectedIndex = values.indexOf(current);
+  final autofocusIndex = selectedIndex >= 0 ? selectedIndex : 0;
+  var picked = false;
+  return showFocusRestoringDialog<T>(
+    context: context,
+    useRootNavigator: false,
+    builder: (ctx) => withBackClose(
+      ctx,
+      SimpleDialog(
+        title: Text(title, style: _kSettingsTitleTextStyle),
+        children: values.asMap().entries.map((entry) {
+          final i = entry.key;
+          final v = entry.value;
+          final selected = v == current;
+          return TvFocusHighlight(
+            builder: (_, focused) {
+              final invert = focused && settingsTileInvertsOnFocus;
+              return ListTile(
+                autofocus: i == autofocusIndex,
+                focusColor: Colors.transparent,
+                hoverColor: Colors.transparent,
+                title: Text(
+                  labelOf(v),
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: invert
+                        ? AppColors.black.withValues(alpha: 0.87)
+                        : AppColorScheme.onSurface,
+                  ),
+                ),
+                subtitle: subtitleOf != null
+                    ? Text(
+                        subtitleOf(v),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: invert
+                              ? AppColors.black.withValues(alpha: 0.54)
+                              : AppColorScheme.onSurface.withValues(
+                                  alpha: 0.6,
+                                ),
+                        ),
+                      )
+                    : null,
+                isThreeLine: subtitleOf != null,
+                trailing: selected
+                    ? Icon(
+                        Icons.check,
+                        color: invert
+                            ? AppColors.black.withValues(alpha: 0.54)
+                            : (AppUiIdiomResolver.isApple
+                                ? AppColorScheme.accent
+                                : null),
+                      )
+                    : null,
+                onTap: () {
+                  if (picked) return;
+                  picked = true;
+                  Navigator.pop(ctx, v);
+                },
+              );
+            },
+          );
+        }).toList(),
+      ),
+    ),
+  );
 }
 
 class SliderPreferenceTile extends StatefulWidget {
@@ -981,6 +1010,128 @@ class _StringPickerPreferenceTileState
       _binding.value = result;
       widget.onChanged?.call();
     }
+  }
+}
+
+/// A preference holding a comma separated list of [options] keys, stored in the
+/// order they were picked. Shows [emptyLabel] while nothing is picked.
+class MultiSelectPreferenceTile extends StatefulWidget {
+  final Preference<String> preference;
+  final String title;
+  final String? description;
+  final IconData? icon;
+  final Map<String, String> options;
+  final String emptyLabel;
+  final int? maxSelected;
+
+  const MultiSelectPreferenceTile({
+    super.key,
+    required this.preference,
+    required this.title,
+    this.description,
+    this.icon,
+    required this.options,
+    required this.emptyLabel,
+    this.maxSelected,
+  });
+
+  @override
+  State<MultiSelectPreferenceTile> createState() =>
+      _MultiSelectPreferenceTileState();
+}
+
+class _MultiSelectPreferenceTileState extends State<MultiSelectPreferenceTile> {
+  late PreferenceBinding<String> _binding;
+  bool _pickerOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _binding = PreferenceBinding(
+      GetIt.instance<PreferenceStore>(),
+      widget.preference,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant MultiSelectPreferenceTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _binding = _rebindOnPreferenceChange(
+      _binding,
+      widget.preference,
+      oldWidget.preference,
+    );
+  }
+
+  @override
+  void dispose() {
+    _binding.dispose();
+    super.dispose();
+  }
+
+  List<String> _picked(String value) => value
+      .split(',')
+      .map((key) => key.trim())
+      .where(widget.options.containsKey)
+      .toList();
+
+  @override
+  Widget build(BuildContext context) {
+    return TvFocusHighlight(
+      builder: (context, focused) => ValueListenableBuilder<String>(
+        valueListenable: _binding,
+        builder: (context, value, _) {
+          final picked = _picked(value);
+          final label = picked.isEmpty
+              ? widget.emptyLabel
+              : picked.map((key) => widget.options[key]!).join(', ');
+          return ListTile(
+            leading: widget.icon != null
+                ? buildSettingsLeadingIconShell(
+                    context,
+                    icon: Icon(widget.icon),
+                    focused: focused,
+                    iconColor: focused && settingsTileInvertsOnFocus
+                        ? AppColors.black.withValues(alpha: 0.54)
+                        : AppColorScheme.onSurface.withValues(alpha: 0.78),
+                  )
+                : null,
+            title: Text(widget.title, style: _kSettingsTitleTextStyle),
+            trailing: buildSettingsSelectionBubble(context, label, focused),
+            subtitle: widget.description != null
+                ? Text(
+                    widget.description!,
+                    style: _kSettingsDescriptionTextStyle,
+                  )
+                : null,
+            isThreeLine: widget.description != null,
+            titleAlignment: ListTileTitleAlignment.center,
+            onTap: () => _showPicker(context, picked),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showPicker(BuildContext context, List<String> picked) async {
+    if (_pickerOpen) return;
+    _pickerOpen = true;
+    final result = await showMultiSelectDialog(
+      context: context,
+      title: widget.title,
+      items: widget.options,
+      selected: picked.toSet(),
+      sortByLabel: false,
+      maxSelected: widget.maxSelected,
+    );
+    _pickerOpen = false;
+    if (!mounted || result == null) return;
+    // Keeps what was picked before in its place and adds the new picks after.
+    final ordered = [
+      ...picked.where(result.contains),
+      ...result.where((key) => !picked.contains(key)),
+    ];
+    _binding.value = ordered.join(',');
   }
 }
 

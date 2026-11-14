@@ -14,6 +14,102 @@ class _FakeServer extends Interceptor {
 }
 
 void main() {
+  test('discovery IDs do not request Jellyfin theme media', () async {
+    var requests = 0;
+    final dio = Dio()..interceptors.add(_FakeServer((options, handler) {
+      requests++;
+      handler.resolve(Response(requestOptions: options, data: <String, dynamic>{}));
+    }));
+    final result = await JellyfinItemsApi(dio, () => 'user-1').getThemeMedia('tmdb:movie:1236045');
+    expect(requests, 0);
+    expect(result['ThemeSongsResult']['Items'], isEmpty);
+    expect(result['ThemeVideosResult']['Items'], isEmpty);
+  });
+
+  test(
+    'genres extends timeout and caches only matching user queries',
+    () async {
+      var requests = 0;
+      var user = 'one';
+      final dio = Dio()
+        ..interceptors.add(
+          _FakeServer((options, handler) {
+            requests++;
+            expect(options.receiveTimeout, const Duration(seconds: 60));
+            expect(options.queryParameters['IncludeItemTypes'], 'Movie,Series');
+            handler.resolve(
+              Response(
+                requestOptions: options,
+                data: <String, dynamic>{'Items': [], 'TotalRecordCount': 0},
+              ),
+            );
+          }),
+        );
+      final api = JellyfinItemsApi(dio, () => user);
+      await api.getGenres(includeItemTypes: ['Movie', 'Series']);
+      await api.getGenres(includeItemTypes: ['Movie', 'Series']);
+      expect(requests, 1);
+      user = 'two';
+      await api.getGenres(includeItemTypes: ['Movie', 'Series']);
+      await api.getGenres(
+        parentId: 'library',
+        includeItemTypes: ['Movie', 'Series'],
+      );
+      expect(requests, 3);
+    },
+  );
+
+  test('failed genres request can be retried', () async {
+    var requests = 0;
+    final dio = Dio()
+      ..interceptors.add(
+        _FakeServer((options, handler) {
+          requests++;
+          if (requests == 1) {
+            handler.reject(
+              DioException(
+                requestOptions: options,
+                type: DioExceptionType.receiveTimeout,
+              ),
+            );
+          } else {
+            handler.resolve(
+              Response(
+                requestOptions: options,
+                data: <String, dynamic>{'Items': []},
+              ),
+            );
+          }
+        }),
+      );
+    final api = JellyfinItemsApi(dio, () => 'one');
+    await expectLater(api.getGenres(), throwsA(isA<DioException>()));
+    await api.getGenres();
+    expect(requests, 2);
+  });
+
+  test('concurrent genres requests share one fetch', () async {
+    var requests = 0;
+    final dio = Dio()
+      ..interceptors.add(
+        _FakeServer((options, handler) async {
+          requests++;
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+          handler.resolve(
+            Response(
+              requestOptions: options,
+              data: <String, dynamic>{'Items': []},
+            ),
+          );
+        }),
+      );
+    final api = JellyfinItemsApi(dio, () => 'one');
+    final first = api.getGenres();
+    final second = api.getGenres();
+    await first;
+    await second;
+    expect(requests, 1);
+  });
   test('item details request UserData', () async {
     RequestOptions? request;
     final dio = Dio()
@@ -31,6 +127,39 @@ void main() {
     expect(request?.method, 'GET');
     expect(request?.path, '/Users/user-1/Items/movie-1');
     expect(request?.queryParameters['Fields'], contains('UserData'));
+    for (final field in [
+      'ProviderIds',
+      'Studios',
+      'Taglines',
+      'OriginalTitle',
+      'RemoteTrailers',
+    ]) {
+      expect(request?.queryParameters['Fields'], contains(field));
+    }
+  });
+
+  test('episodes include the current user and requested metadata', () async {
+    RequestOptions? request;
+    final dio = Dio()
+      ..interceptors.add(
+        _FakeServer((options, handler) {
+          request = options;
+          handler.resolve(
+            Response(
+              requestOptions: options,
+              data: <String, dynamic>{'Items': []},
+            ),
+          );
+        }),
+      );
+    await JellyfinItemsApi(
+      dio,
+      () => 'user-1',
+    ).getEpisodes('series-1', seasonId: 'season-1', fields: 'Overview,People');
+    expect(request?.path, '/Shows/series-1/Episodes');
+    expect(request?.queryParameters['UserId'], 'user-1');
+    expect(request?.queryParameters['SeasonId'], 'season-1');
+    expect(request?.queryParameters['Fields'], 'Overview,People');
   });
 
   test('resume items page through StartIndex', () async {
@@ -174,46 +303,52 @@ void main() {
     expect(request?.queryParameters['Ids'], 'a,b');
   });
 
-  test('getLatestItems requests /Users/\$userId/Items/Latest when userId is present', () async {
-    RequestOptions? request;
-    final dio = Dio()
-      ..interceptors.add(
-        _FakeServer((options, handler) {
-          request = options;
-          handler.resolve(
-            Response(requestOptions: options, data: <dynamic>[]),
-          );
-        }),
-      );
+  test(
+    'getLatestItems requests /Users/\$userId/Items/Latest when userId is present',
+    () async {
+      RequestOptions? request;
+      final dio = Dio()
+        ..interceptors.add(
+          _FakeServer((options, handler) {
+            request = options;
+            handler.resolve(
+              Response(requestOptions: options, data: <dynamic>[]),
+            );
+          }),
+        );
 
-    await JellyfinItemsApi(
-      dio,
-      () => 'user-1',
-    ).getLatestItems(includeItemTypes: ['Movie']);
+      await JellyfinItemsApi(
+        dio,
+        () => 'user-1',
+      ).getLatestItems(includeItemTypes: ['Movie']);
 
-    expect(request?.method, 'GET');
-    expect(request?.path, '/Users/user-1/Items/Latest');
-    expect(request?.queryParameters['IncludeItemTypes'], 'Movie');
-  });
+      expect(request?.method, 'GET');
+      expect(request?.path, '/Users/user-1/Items/Latest');
+      expect(request?.queryParameters['IncludeItemTypes'], 'Movie');
+    },
+  );
 
-  test('getLatestItems falls back to /Items/Latest when userId is empty', () async {
-    RequestOptions? request;
-    final dio = Dio()
-      ..interceptors.add(
-        _FakeServer((options, handler) {
-          request = options;
-          handler.resolve(
-            Response(requestOptions: options, data: <dynamic>[]),
-          );
-        }),
-      );
+  test(
+    'getLatestItems falls back to /Items/Latest when userId is empty',
+    () async {
+      RequestOptions? request;
+      final dio = Dio()
+        ..interceptors.add(
+          _FakeServer((options, handler) {
+            request = options;
+            handler.resolve(
+              Response(requestOptions: options, data: <dynamic>[]),
+            );
+          }),
+        );
 
-    await JellyfinItemsApi(
-      dio,
-      () => '',
-    ).getLatestItems(includeItemTypes: ['Movie']);
+      await JellyfinItemsApi(
+        dio,
+        () => '',
+      ).getLatestItems(includeItemTypes: ['Movie']);
 
-    expect(request?.method, 'GET');
-    expect(request?.path, '/Items/Latest');
-  });
+      expect(request?.method, 'GET');
+      expect(request?.path, '/Items/Latest');
+    },
+  );
 }

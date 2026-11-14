@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
+import 'package:get_it/get_it.dart';
 import 'package:server_core/server_core.dart';
 
 import '../../preference/user_preferences.dart';
@@ -11,6 +12,7 @@ import '../models/media_bar_slide_item.dart';
 import '../models/media_bar_state.dart';
 import '../repositories/mdblist_repository.dart';
 import '../repositories/media_bar_repository.dart';
+import '../services/plugin_sync_service.dart';
 
 class MediaBarViewModel extends ChangeNotifier {
   final MediaBarRepository _repository;
@@ -29,6 +31,9 @@ class MediaBarViewModel extends ChangeNotifier {
   final _ratingsInFlight = <String>{};
   bool _isLoading = false;
   bool _disposed = false;
+  bool _reloadAfterLoad = false;
+  PluginSyncService? _sync;
+  bool _lastPluginAvailable = false;
   int _loadGeneration = 0;
 
   String get baseUrl => _client.baseUrl;
@@ -43,6 +48,7 @@ class MediaBarViewModel extends ChangeNotifier {
     _prefs.get(UserPreferences.mediaBarExcludedGenres),
     _prefs.get(UserPreferences.mediaBarSourceType),
     _prefs.get(UserPreferences.pluginSyncEnabled),
+    _prefs.get(UserPreferences.mediaBarExternalLists),
   ]);
 
   List<MediaBarSlideItem> get items =>
@@ -50,9 +56,13 @@ class MediaBarViewModel extends ChangeNotifier {
 
   Map<String, double> ratingsFor(String itemId) => _ratings[itemId] ?? const {};
 
+  // Outside titles aren't on the server, so there is no item to read.
+  bool _isExternal(String itemId) =>
+      items.any((item) => item.itemId == itemId && item.isExternal);
+
   Future<void> ensureRatings(String itemId) async {
     if (itemId.isEmpty) return;
-    if (!_prefs.get(UserPreferences.enableAdditionalRatings)) return;
+    if (!_prefs.get(UserPreferences.mediaBarEnableAdditionalRatings)) return;
     if (_ratings.containsKey(itemId)) return;
     if (!_ratingsInFlight.add(itemId)) return;
     try {
@@ -73,6 +83,7 @@ class MediaBarViewModel extends ChangeNotifier {
   Future<void> ensureBookshelfDetail(String itemId) async {
     if (itemId.isEmpty) return;
     if (_bookshelfDetails.containsKey(itemId)) return;
+    if (_isExternal(itemId)) return;
     if (!_bookshelfDetailInFlight.add(itemId)) return;
 
     try {
@@ -97,6 +108,7 @@ class MediaBarViewModel extends ChangeNotifier {
   Future<void> ensureGalleryDetail(String itemId) async {
     if (itemId.isEmpty) return;
     if (_galleryDetails.containsKey(itemId)) return;
+    if (_isExternal(itemId)) return;
     if (!_galleryDetailInFlight.add(itemId)) return;
 
     try {
@@ -128,6 +140,23 @@ class MediaBarViewModel extends ChangeNotifier {
     _lastItemCount = _prefs.get(UserPreferences.mediaBarItemCount);
     _lastSources = _sources;
     _prefs.addListener(_onPrefsChanged);
+    if (GetIt.instance.isRegistered<PluginSyncService>()) {
+      _sync = GetIt.instance<PluginSyncService>();
+      _lastPluginAvailable = _sync!.pluginAvailable;
+      _sync!.addListener(_onPluginChanged);
+    }
+  }
+
+  // The bar can load before Moonbase answers its ping, and picked outside
+  // lists need Moonbase, so they get another go once it does.
+  void _onPluginChanged() {
+    final available = _sync!.pluginAvailable;
+    if (available == _lastPluginAvailable) return;
+    _lastPluginAvailable = available;
+    if (available &&
+        _prefs.get(UserPreferences.mediaBarExternalLists).isNotEmpty) {
+      load(force: true);
+    }
   }
 
   void _onPrefsChanged() {
@@ -154,6 +183,7 @@ class MediaBarViewModel extends ChangeNotifier {
     _disposed = true;
     _loadGeneration++;
     _prefs.removeListener(_onPrefsChanged);
+    _sync?.removeListener(_onPluginChanged);
     super.dispose();
   }
 
@@ -163,7 +193,11 @@ class MediaBarViewModel extends ChangeNotifier {
     bool force = false,
   }) async {
     if (_state is! MediaBarLoading && !force) return;
-    if (_disposed || (_isLoading && !(force && !preserveCurrent))) return;
+    if (_disposed) return;
+    if (_isLoading) {
+      _reloadAfterLoad = _reloadAfterLoad || force;
+      return;
+    }
     _isLoading = true;
     final loadGeneration = ++_loadGeneration;
     var previousReady = preserveCurrent && _state is MediaBarReady
@@ -210,12 +244,18 @@ class MediaBarViewModel extends ChangeNotifier {
         _loadRatings((_state as MediaBarReady).items);
       }
     } finally {
-      if (loadGeneration == _loadGeneration) _isLoading = false;
+      if (loadGeneration == _loadGeneration) {
+        _isLoading = false;
+        if (_reloadAfterLoad && !_disposed) {
+          _reloadAfterLoad = false;
+          load(force: true);
+        }
+      }
     }
   }
 
   Future<void> _loadRatings(List<MediaBarSlideItem> items) async {
-    if (!_prefs.get(UserPreferences.enableAdditionalRatings)) return;
+    if (!_prefs.get(UserPreferences.mediaBarEnableAdditionalRatings)) return;
 
     await Future.wait(
       items.map((item) async {

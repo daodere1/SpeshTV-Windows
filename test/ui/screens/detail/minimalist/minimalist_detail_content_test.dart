@@ -12,6 +12,7 @@ import 'package:moonfin/data/services/plugin_sync_service.dart';
 import 'package:moonfin/data/viewmodels/item_detail_view_model.dart';
 import 'package:moonfin/auth/repositories/user_repository.dart';
 import 'package:moonfin/l10n/app_localizations.dart';
+import 'package:moonfin/preference/detail_section_layout.dart';
 import 'package:moonfin/preference/seerr_preferences.dart';
 import 'package:moonfin/preference/preference_constants.dart'
     show DesktopUiScale;
@@ -21,6 +22,7 @@ import 'package:moonfin/ui/screens/detail/minimalist/minimalist_detail_content.d
 import 'package:moonfin/ui/screens/detail/modern/modern_detail_content.dart';
 import 'package:moonfin/data/models/aggregated_item.dart';
 import 'package:moonfin/ui/widgets/focus/locked_focus_row.dart';
+import 'package:moonfin/ui/widgets/logo_view.dart';
 import 'package:moonfin/ui/widgets/rating_display.dart';
 import 'package:moonfin/ui/widgets/sliding_pill_tabs.dart';
 import 'package:moonfin/ui/theme/app_theme.dart';
@@ -188,14 +190,18 @@ void main() {
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           home: Scaffold(
-            body: MinimalistDetailContent(
-              viewModel: vm,
-              prefs: prefs,
-              backdropUrl: ValueNotifier<String?>(null),
-              selectedMediaSourceId: null,
-              onSelectedMediaSourceChanged: (_) {},
-              actionsExpanded: false,
-              onActionsExpandedChanged: (_) {},
+            // The detail screen rebuilds this whenever either one changes.
+            body: ListenableBuilder(
+              listenable: Listenable.merge([vm, prefs]),
+              builder: (context, _) => MinimalistDetailContent(
+                viewModel: vm,
+                prefs: prefs,
+                backdropUrl: ValueNotifier<String?>(null),
+                selectedMediaSourceId: null,
+                onSelectedMediaSourceChanged: (_) {},
+                actionsExpanded: false,
+                onActionsExpandedChanged: (_) {},
+              ),
             ),
           ),
         ),
@@ -264,11 +270,109 @@ void main() {
     expect(find.byKey(const ValueKey('minimalist-actions')), findsOneWidget);
   });
 
-  testWidgets('a movie gets no episode rail and no season tabs', (tester) async {
-    await pumpContent(tester, viewModel('Movie'));
+  testWidgets('a movie gets no episode rail and no season tabs, even with extras', (tester) async {
+    when(() => itemsApi.getSpecialFeatures('item-1')).thenAnswer(
+      (_) async => [
+        {'Id': 'bts-1', 'Type': 'Video', 'ExtraType': 'BehindTheScenes', 'Name': 'Making of'},
+      ],
+    );
+    final vm = viewModel('Movie');
+    await pumpContent(tester, vm);
+    await tester.pump(const Duration(milliseconds: 500));
 
     expect(find.byKey(const ValueKey('minimalist-episode-rail')), findsNothing);
     expect(find.byType(SlidingPillTabs), findsNothing);
+  });
+
+  testWidgets('a movie with extras shows the Extras action button which opens the modal', (tester) async {
+    when(() => itemsApi.getSpecialFeatures('item-1')).thenAnswer(
+      (_) async => [
+        {'Id': 'bts-1', 'Type': 'Video', 'ExtraType': 'BehindTheScenes', 'Name': 'Making of'},
+      ],
+    );
+    final vm = viewModel('Movie');
+    await pumpContent(tester, vm);
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.byIcon(Icons.video_library_outlined), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.video_library_outlined));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Behind the Scenes'), findsOneWidget);
+    expect(find.text('Making of'), findsOneWidget);
+  });
+
+  testWidgets('hiding DetailSection.extras removes the Extras action button', (tester) async {
+    when(() => itemsApi.getSpecialFeatures('item-1')).thenAnswer(
+      (_) async => [
+        {'Id': 'bts-1', 'Type': 'Video', 'ExtraType': 'BehindTheScenes', 'Name': 'Making of'},
+      ],
+    );
+    prefs.set(detailSectionLayout.hiddenPreference, 'extras');
+    final vm = viewModel('Movie');
+    await pumpContent(tester, vm);
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.byIcon(Icons.video_library_outlined), findsNothing);
+  });
+
+  testWidgets('Kids Mode leaves the Extras action button out', (tester) async {
+    when(() => itemsApi.getSpecialFeatures('item-1')).thenAnswer(
+      (_) async => [
+        {'Id': 'bts-1', 'Type': 'Video', 'ExtraType': 'BehindTheScenes', 'Name': 'Making of'},
+      ],
+    );
+    await prefs.set(UserPreferences.kidsModeEnabled, true);
+    final vm = viewModel('Movie');
+    await pumpContent(tester, vm);
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.byIcon(Icons.video_library_outlined), findsNothing);
+  });
+
+  void stubCollection() {
+    when(() => itemsApi.getAncestors('item-1')).thenAnswer(
+      (_) async => [
+        {'Id': 'boxset-1', 'Type': 'BoxSet', 'Name': 'The Saga'},
+      ],
+    );
+    final members = {
+      'Items': [
+        {'Id': 'item-1', 'Type': 'Movie', 'Name': 'Movie title'},
+        {'Id': 'sequel-1', 'Type': 'Movie', 'Name': 'The Sequel'},
+      ],
+    };
+    when(
+      () => itemsApi.getItems(
+        parentId: 'boxset-1',
+        sortBy: any(named: 'sortBy'),
+        sortOrder: any(named: 'sortOrder'),
+        fields: any(named: 'fields'),
+      ),
+    ).thenAnswer((_) async => members);
+  }
+
+  testWidgets('a movie in a collection shows the Collections button which '
+      'opens it', (tester) async {
+    stubCollection();
+    await pumpContent(tester, viewModel('Movie'));
+
+    expect(find.byIcon(Icons.collections_bookmark_outlined), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.collections_bookmark_outlined));
+    await tester.pumpAndSettle();
+
+    expect(find.text('The Saga'), findsWidgets);
+    expect(find.text('The Sequel'), findsOneWidget);
+  });
+
+  testWidgets('Kids Mode leaves the Collections button out', (tester) async {
+    stubCollection();
+    await prefs.set(UserPreferences.kidsModeEnabled, true);
+    await pumpContent(tester, viewModel('Movie'));
+
+    expect(find.byIcon(Icons.collections_bookmark_outlined), findsNothing);
   });
 
   testWidgets('what it leaves out, it leaves out for good', (tester) async {
@@ -320,6 +424,67 @@ void main() {
     expect(find.text('The Backyardigans'), findsOneWidget);
   });
 
+  testWidgets('a hidden logo leaves the title in its place', (tester) async {
+    final data = itemData('Movie')..['ImageTags'] = {'Logo': 'logo-tag'};
+    final branding = find.byKey(const ValueKey('minimalist-branding'));
+    final title = find.descendant(
+      of: branding,
+      matching: find.text('Movie title'),
+    );
+
+    await pumpContent(tester, viewModel('Movie', data: data));
+    expect(find.descendant(of: branding, matching: find.byType(LogoView)),
+        findsOneWidget);
+    expect(title, findsNothing);
+
+    await prefs.set(detailSectionLayout.hiddenPreference, 'logo');
+    await pumpContent(tester, viewModel('Movie', data: data));
+    expect(find.byType(LogoView), findsNothing);
+    expect(title, findsOneWidget);
+  });
+
+  testWidgets('a hidden logo names the show above an episode', (tester) async {
+    final data = itemData('Episode')
+      ..['Name'] = 'Robot Rampage'
+      ..['SeriesName'] = 'The Backyardigans'
+      ..['SeriesId'] = 'series-1'
+      ..['ParentLogoImageTag'] = 'logo-tag';
+    await prefs.set(detailSectionLayout.hiddenPreference, 'logo');
+    await pumpContent(tester, viewModel('Episode', data: data));
+
+    expect(find.byType(LogoView), findsNothing);
+    expect(find.text('The Backyardigans'), findsOneWidget);
+  });
+
+  // Minimalist hands a BoxSet to Spotlight, so these reach Spotlight's hero.
+  testWidgets('Spotlight swaps a hidden logo for the title and drops the '
+      'tagline', (tester) async {
+    final data = {
+      ...itemData('BoxSet'),
+      'ImageTags': {'Logo': 'logo-tag'},
+      'Taglines': ['Every one of them'],
+    };
+
+    await pumpContent(tester, viewModel('BoxSet', data: data));
+    expect(find.byType(LogoView), findsOneWidget);
+    expect(find.text('EVERY ONE OF THEM'), findsOneWidget);
+
+    await prefs.set(detailSectionLayout.hiddenPreference, 'logo,tagline');
+    await pumpContent(tester, viewModel('BoxSet', data: data));
+    expect(find.byType(LogoView), findsNothing);
+    expect(find.text('BoxSet title'), findsOneWidget);
+    expect(find.text('EVERY ONE OF THEM'), findsNothing);
+  });
+
+  testWidgets('Spotlight leaves out a hidden biography', (tester) async {
+    await pumpContent(tester, viewModel('Person'));
+    expect(find.textContaining('A useful detail overview'), findsOneWidget);
+
+    await prefs.set(detailSectionLayout.hiddenPreference, 'biography');
+    await pumpContent(tester, viewModel('Person'));
+    expect(find.textContaining('A useful detail overview'), findsNothing);
+  });
+
   testWidgets('a movie gets no second line under its title', (tester) async {
     await pumpContent(tester, viewModel('Movie'));
     expect(find.byKey(const ValueKey('minimalist-episode-name')), findsNothing);
@@ -349,6 +514,44 @@ void main() {
     ).thenAnswer((_) async => {'Items': episodes});
     return vm;
   }
+
+  testWidgets('the Specials tab puts specials in number order', (
+    tester,
+  ) async {
+    // The server's order, with each special where it aired.
+    final vm = viewModel('Series');
+    Map<String, dynamic> episode(int season, int number) => {
+      'Id': 's${season}e$number',
+      'Name': 'Episode $number',
+      'Type': 'Episode',
+      'IndexNumber': number,
+      'ParentIndexNumber': season,
+      'SeriesId': 'item-1',
+    };
+    when(
+      () => itemsApi.getEpisodes(
+        any(),
+        seasonId: any(named: 'seasonId'),
+        fields: any(named: 'fields'),
+      ),
+    ).thenAnswer(
+      (_) async => {
+        'Items': [episode(1, 1), episode(0, 2), episode(1, 2), episode(0, 1)],
+      },
+    );
+
+    await pumpContent(tester, vm);
+    await tester.pump(const Duration(milliseconds: 500));
+
+    final rail = tester.widget<LockedFocusRow<AggregatedItem>>(
+      find.byType(LockedFocusRow<AggregatedItem>),
+    );
+    expect(rail.items.map((e) => e.id), ['s0e1', 's0e2']);
+    expect(
+      vm.seriesEpisodes.map((e) => e.id),
+      ['s1e1', 's0e2', 's1e2', 's0e1'],
+    );
+  });
 
   testWidgets('one season hides the tabs and still shows the episodes', (
     tester,

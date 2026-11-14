@@ -1,10 +1,12 @@
 import '../../../data/services/seerr/seerr_api_models.dart';
 import '../../../data/viewmodels/seerr_media_detail_view_model.dart';
+
 import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../../util/detail_trailer.dart';
+import '../../../util/seerr_trailer_candidates.dart';
 import '../../navigation/destinations.dart';
 
 /// What the request control does for one quality track right now.
@@ -45,13 +47,15 @@ SeerrRequestAction seerrRequestActionFor(
 }) {
   final continuingFullyAvailable = isTv && isContinuing && q.isFullyAvailable;
   final seasonsLeftToAsk = isTv && hasUnrequestedSeasons;
-  final canShowRequest = allowed &&
+  final canShowRequest =
+      allowed &&
       (!q.isFullyAvailable || continuingFullyAvailable) &&
       (!q.hasExistingRequest ||
           q.isPartiallyAvailable ||
           continuingFullyAvailable ||
           seasonsLeftToAsk);
-  final hasOpenRequest = q.activeRequests.isNotEmpty &&
+  final hasOpenRequest =
+      q.activeRequests.isNotEmpty &&
       (!q.isFullyAvailable || continuingFullyAvailable);
 
   if (canShowRequest) {
@@ -89,10 +93,7 @@ String? seerrCancelLabelFor(SeerrQualityStatus q, AppLocalizations l10n) {
 /// own season numbers, so counting off from one would offer seasons that
 /// aren't there and request the wrong ones. The count is only a fallback for a
 /// server that sends no season list.
-List<int> seerrSeasonNumbersOf(
-  List<SeerrSeason> seasons,
-  int fallbackCount,
-) {
+List<int> seerrSeasonNumbersOf(List<SeerrSeason> seasons, int fallbackCount) {
   final reported = seasons
       .where((s) => s.seasonNumber > 0)
       .map((s) => s.seasonNumber)
@@ -117,21 +118,24 @@ List<SeerrRequest> seerrPendingRequests(SeerrMediaDetailState state) => state
 
 /// Opens a Seerr trailer, in the built-in player for YouTube and by url for
 /// anything else.
-Future<void> openSeerrTrailer(BuildContext context, SeerrVideo video) async {
-  final key = video.key;
-  final isYouTube = (video.site ?? '').toLowerCase() == 'youtube';
-  var url = video.url;
-  if ((url == null || url.isEmpty) && key != null && key.isNotEmpty) {
-    url = 'https://www.youtube.com/watch?v=$key';
-  }
-  if (url != null && url.isNotEmpty && opensTrailersExternally()) {
-    if (await launchTrailerExternally(url)) return;
+Future<void> openSeerrTrailer(
+  BuildContext context,
+  SeerrVideo video, {
+  List<SeerrVideo> alternatives = const [],
+}) async {
+  final candidates = seerrTrailerCandidates(video, alternatives);
+  for (var i = 0; i < candidates.length; i++) {
+    final url = candidates[i];
+    if (opensTrailersExternally(url: url)) {
+      if (await launchTrailerExternally(url)) return;
+      if (!context.mounted) return;
+    }
     if (!context.mounted) return;
+    final result = await context.push<bool>(
+      Destinations.trailer(url: url),
+      extra: i + 1 < candidates.length,
+    );
+    // Back/dismiss is not a failure and must never launch another trailer.
+    if (result != false || !context.mounted) return;
   }
-  if (isYouTube && key != null && key.isNotEmpty) {
-    await context.push(Destinations.trailer(videoId: key));
-    return;
-  }
-  if (url == null || url.isEmpty) return;
-  await context.push(Destinations.trailer(url: url));
 }

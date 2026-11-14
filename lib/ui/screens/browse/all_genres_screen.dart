@@ -30,7 +30,7 @@ Color get _navyBackground => AppColorScheme.background;
 const _horizontalPadding = 60.0;
 const _kCompactBreakpoint = 600.0;
 const _genresPageSize = 200;
-const _initialArtworkBatch = 12;
+const _initialArtworkBatch = 4;
 const _backgroundArtworkConcurrency = 4;
 
 /// Only movies and series can be opened from this screen, so counting anything
@@ -60,10 +60,12 @@ class _AllGenresScreenState extends State<AllGenresScreen> {
 
   ImageType get _imageType => _prefs.get(UserPreferences.allGenresImageType);
 
-  PosterSize get _posterSize => _prefs.resolveLibraryPosterSize();
+  PosterSize get _posterSize =>
+      _prefs.resolveScreenPosterSize(UserPreferences.allGenresPosterSize);
 
   List<GenreCardData> _genres = [];
   bool _isLoading = true;
+  bool _loadFailed = false;
   bool _lastGroupCollections = false;
   final Set<String> _usedArtworkIds = {};
 
@@ -106,6 +108,7 @@ class _AllGenresScreenState extends State<AllGenresScreen> {
 
   Future<void> _load() async {
     final token = ++_loadToken;
+    if (mounted) setState(() { _isLoading = true; _loadFailed = false; });
     try {
       _usedArtworkIds.clear();
       final items = <dynamic>[];
@@ -119,7 +122,7 @@ class _AllGenresScreenState extends State<AllGenresScreen> {
           recursive: true,
           startIndex: startIndex,
           limit: _genresPageSize,
-          fields: 'ItemCounts,PrimaryImageTag,ImageTags,BackdropImageTags,PrimaryImageAspectRatio',
+          fields: 'ItemCounts,PrimaryImageAspectRatio',
           includeItemTypes: _videoGenreItemTypes,
         );
 
@@ -133,6 +136,8 @@ class _AllGenresScreenState extends State<AllGenresScreen> {
         if (total != null && startIndex >= total) break;
       }
 
+      // Genre DTO counts can be zero even when its item query has matches.
+      // Verify those tiles in _loadGenreItems instead of hiding them here.
       final temp = items
           .map((g) {
             final data = g as Map<String, dynamic>;
@@ -145,46 +150,15 @@ class _AllGenresScreenState extends State<AllGenresScreen> {
               itemCount: itemCount,
             );
           })
-          .where((x) => x.itemCount > 0)
           .toList();
 
       _genres = temp.map((x) {
         final data = x.data;
-        final primaryTag = data['PrimaryImageTag'] as String?;
-        final imageTags = data['ImageTags'] as Map?;
-        final primaryAr = data['PrimaryImageAspectRatio'] as num?;
-        final backdropTags = data['BackdropImageTags'] as List?;
-
-        final customThumb = imageTags?['Thumb'] as String?;
-        final hasCustomArtwork = (primaryTag != null && primaryAr != null && primaryAr < 1.0) ||
-            (customThumb != null && customThumb.isNotEmpty);
-
-        String? imageUrl;
-        String? backdropUrl;
-
-        if (hasCustomArtwork) {
-          if (customThumb != null && customThumb.isNotEmpty) {
-            imageUrl = _client.imageApi.getThumbImageUrl(
-              data['Id']?.toString() ?? '',
-              tag: customThumb,
-              maxWidth: _genreCardRequestMaxWidth(),
-            );
-          } else if (primaryTag != null) {
-            imageUrl = _client.imageApi.getPrimaryImageUrl(
-              data['Id']?.toString() ?? '',
-              tag: primaryTag,
-              maxWidth: _genreCardRequestMaxWidth(),
-            );
-          }
-
-          if (backdropTags != null && backdropTags.isNotEmpty) {
-            backdropUrl = _client.imageApi.getBackdropImageUrl(
-              data['Id']?.toString() ?? '',
-              tag: backdropTags.first.toString(),
-              maxWidth: 960,
-            );
-          }
-        }
+        final (imageUrl, backdropUrl, hasOwnArtwork) = resolveGenreOwnArtwork(
+          genreData: data,
+          imageApi: _client.imageApi,
+          maxWidth: _genreCardRequestMaxWidth(),
+        );
 
         return GenreCardData(
           id: data['Id']?.toString() ?? '',
@@ -192,10 +166,11 @@ class _AllGenresScreenState extends State<AllGenresScreen> {
           itemCount: x.itemCount,
           imageUrl: imageUrl,
           backdropUrl: backdropUrl,
-          isGenreFallback: !hasCustomArtwork,
+          isGenreFallback: !hasOwnArtwork,
         );
       }).toList();
     } catch (e) {
+      if (token == _loadToken) _loadFailed = true;
       // The screen shows the same empty state either way, so without this a
       // server that refuses the request looks like a library with no genres.
       if (GetIt.instance.isRegistered<LogService>()) {
@@ -218,10 +193,15 @@ class _AllGenresScreenState extends State<AllGenresScreen> {
   Future<void> _loadGenreArtwork(int token) async {
     final groupCollections = _lastGroupCollections;
 
-    // A genre with its own artwork already has an exact count from getGenres,
-    // so it only needs a query when grouping changes what that count means.
+    // A genre with its own artwork only needs a query when grouping changes
+    // what its count means, or when the server sent no count at all.
     final needsWork = _genres
-        .where((genre) => genre.isGenreFallback || groupCollections)
+        .where(
+          (genre) =>
+              genre.isGenreFallback ||
+              groupCollections ||
+              genre.itemCount == 0,
+        )
         .toList();
 
     if (needsWork.isEmpty) return;
@@ -305,10 +285,7 @@ class _AllGenresScreenState extends State<AllGenresScreen> {
       );
 
       final items = (response['Items'] as List?) ?? [];
-      final rawTotalCount = response['TotalRecordCount'];
-      final totalCount = rawTotalCount is num
-          ? rawTotalCount.toInt()
-          : items.length;
+      final totalCount = genrePageCount(response);
       if (totalCount <= 0 || items.isEmpty) {
         if (_genres.remove(genre) && !_disposed && mounted) {
           setState(() {});
@@ -376,7 +353,7 @@ class _AllGenresScreenState extends State<AllGenresScreen> {
       builder: (_) => PosterSizeSettingsDialog(
         prefs: _prefs,
         imageTypePreference: UserPreferences.allGenresImageType,
-        posterSizePreference: UserPreferences.libraryPosterSize,
+        posterSizePreference: UserPreferences.allGenresPosterSize,
       ),
     );
 
@@ -479,6 +456,13 @@ class _AllGenresScreenState extends State<AllGenresScreen> {
     }
 
     if (_genres.isEmpty) {
+      if (_loadFailed) {
+        return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('Could not load genres.'),
+          FilledButton.icon(onPressed: _load, icon: const Icon(Icons.refresh),
+            label: Text(AppLocalizations.of(context).retry)),
+        ]));
+      }
       return Center(
         child: Text(
           AppLocalizations.of(context).noGenresFound,

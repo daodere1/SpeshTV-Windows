@@ -73,6 +73,9 @@ class Win32Window {
 
   void SizeChildContent(int width, int height);
 
+  // Run before plugin dispatch: window_manager consumes placement messages.
+  void HandlePlacementMessage(HWND window, UINT message, WPARAM wparam);
+
  private:
   friend class WindowClassRegistrar;
 
@@ -91,6 +94,12 @@ class Win32Window {
 
   // Update the window frame's theme to match the system theme.
   static void UpdateTheme(HWND const window);
+
+  // Uses physical Win32 monitor coordinates, independently of Flutter's saved
+  // logical bounds (which can become stale after a monitor/DPI change).
+  void KeepOnScreen();
+  bool fitting_window_ = false;
+  bool moving_window_ = false;
 
   bool quit_on_close_ = false;
 

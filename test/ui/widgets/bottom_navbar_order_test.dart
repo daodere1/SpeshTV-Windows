@@ -15,7 +15,9 @@ import 'package:moonfin/l10n/app_localizations.dart';
 import 'package:moonfin/preference/preference_constants.dart';
 import 'package:moonfin/preference/seerr_preferences.dart';
 import 'package:moonfin/preference/user_preferences.dart';
-import 'package:moonfin/ui/widgets/mobile_bottom_nav_bar.dart';
+import 'package:moonfin/ui/widgets/bottom_nav/bottom_navbar.dart';
+import 'package:moonfin/ui/widgets/bottom_nav/bottom_mini_player.dart';
+import 'package:moonfin/ui/widgets/bottom_nav/dock_bar.dart';
 import 'package:moonfin/ui/widgets/navigation_layout.dart';
 import 'package:moonfin/util/game_library.dart';
 import 'package:moonfin/util/platform_detection.dart';
@@ -120,7 +122,7 @@ void main() {
           data: MediaQueryData(padding: EdgeInsets.only(bottom: bottom)),
           child: Builder(
             builder: (context) {
-              height = MobileBottomNavBar.heightFor(context);
+              height = BottomNavbar.heightFor(context, style: BottomNavbarStyle.dock);
               return const SizedBox();
             },
           ),
@@ -131,8 +133,8 @@ void main() {
 
     // The bar pads the system inset underneath itself and falls back to its
     // own float gap where there is none.
-    expect(await heightWithInset(48), 54.0 + 48.0);
-    expect(await heightWithInset(0), 54.0 + 14.0);
+    expect(await heightWithInset(48), 64.0 + 48.0);
+    expect(await heightWithInset(0), 64.0 + 12.0);
   });
 
   testWidgets('the navbar keeps the screen edge while music is playing', (
@@ -155,8 +157,8 @@ void main() {
     );
     await tester.pump();
 
-    final navbar = find.byType(MobileBottomNavBar);
-    final musicBar = find.byType(BottomMusicBar);
+    final navbar = find.byType(DockBarView);
+    final musicBar = find.byType(BottomMiniPlayer);
     expect(navbar, findsOneWidget);
     expect(musicBar, findsOneWidget);
 

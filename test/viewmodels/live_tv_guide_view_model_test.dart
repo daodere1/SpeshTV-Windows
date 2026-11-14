@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
@@ -6,6 +7,7 @@ import 'package:server_core/server_core.dart';
 class _MockClient extends Mock implements MediaServerClient {}
 
 class _MockLiveTvApi extends Mock implements LiveTvApi {}
+class _MockUserLibraryApi extends Mock implements UserLibraryApi {}
 
 Map<String, dynamic> _channel(String id) => {'Id': id, 'Name': 'Ch $id'};
 
@@ -18,6 +20,13 @@ void main() {
     liveTv = _MockLiveTvApi();
     when(() => client.liveTvApi).thenReturn(liveTv);
     when(() => client.userId).thenReturn('user');
+    when(() => liveTv.getChannels(
+      startIndex: any(named: 'startIndex'), limit: any(named: 'limit'),
+      sortBy: any(named: 'sortBy'), sortOrder: any(named: 'sortOrder'),
+      fields: any(named: 'fields'),
+      enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+      userId: any(named: 'userId'),
+    )).thenAnswer((_) async => {'Items': [_channel('a')]});
     when(
       () => liveTv.getGuide(
         startDate: any(named: 'startDate'),
@@ -32,13 +41,117 @@ void main() {
     ).thenAnswer((_) async => {'Items': <dynamic>[]});
   });
 
+  test('favorites use current user API and rollback failed removals', () async {
+    final library = _MockUserLibraryApi();
+    when(() => client.userLibraryApi).thenReturn(library);
+    when(() => client.baseUrl).thenReturn('server');
+    when(() => library.markFavorite('a')).thenAnswer((_) async {});
+    when(() => library.unmarkFavorite('a')).thenThrow(StateError('offline'));
+    final vm = LiveTvGuideViewModel(client);
+    await vm.load();
+    await vm.toggleChannelFavorite('a');
+    expect(vm.channelForId('a')!.isFavorite, isTrue);
+    verify(() => library.markFavorite('a')).called(1);
+    await expectLater(vm.toggleChannelFavorite('a'), throwsStateError);
+    expect(vm.channelForId('a')!.isFavorite, isTrue);
+    vm.dispose();
+  });
+
+  test('programme timeout retries once and keeps channels usable', () async {
+    var attempts = 0;
+    var readyBeforeProgrammes = false;
+    final vm = LiveTvGuideViewModel(client);
+    when(() => liveTv.getGuide(
+      startDate: any(named: 'startDate'), endDate: any(named: 'endDate'),
+      channelIds: any(named: 'channelIds'), fields: any(named: 'fields'),
+      enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+      enableImages: any(named: 'enableImages'),
+      enableUserData: any(named: 'enableUserData'), userId: any(named: 'userId'),
+    )).thenAnswer((_) async {
+      readyBeforeProgrammes = vm.state == GuideState.ready && vm.channels.isNotEmpty;
+      attempts++;
+      throw TimeoutException('slow guide');
+    });
+    await vm.load();
+    expect(readyBeforeProgrammes, isTrue);
+    expect(attempts, 2);
+    expect(vm.state, GuideState.ready);
+    expect(vm.channels, hasLength(1));
+    expect(vm.loadStateFor('a'), GuideChannelLoadState.failed);
+    vm.dispose();
+  });
+
+  test('filtered lineup is reused until a browse change invalidates it', () async {
+    final vm = LiveTvGuideViewModel(client);
+    await vm.load();
+    final first = vm.filteredChannels;
+    expect(identical(first, vm.filteredChannels), isTrue);
+    expect(vm.channelForId('a')?.name, 'Ch a');
+    vm.setChannelQuery('not a channel');
+    expect(vm.filteredChannels, isEmpty);
+    vm.setChannelQuery('');
+    expect(vm.filteredChannels, hasLength(1));
+    expect(identical(first, vm.filteredChannels), isFalse);
+    vm.dispose();
+  });
+
+  test('cold lineup becomes usable before remaining channel pages arrive', () async {
+    final remainder = Completer<Map<String, dynamic>>();
+    when(() => liveTv.getChannels(
+      startIndex: any(named: 'startIndex'), limit: any(named: 'limit'),
+      sortBy: any(named: 'sortBy'), sortOrder: any(named: 'sortOrder'),
+      fields: any(named: 'fields'), enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+      userId: any(named: 'userId'),
+    )).thenAnswer((call) async {
+      if (call.namedArguments[#startIndex] == 0) {
+        return {'Items': List.generate(200, (i) => _channel('c$i'))};
+      }
+      return remainder.future;
+    });
+    final vm = LiveTvGuideViewModel(client);
+    await vm.load();
+    expect(vm.state, GuideState.ready);
+    expect(vm.channels, hasLength(200));
+    remainder.complete({'Items': [_channel('last')]});
+    await Future<void>.delayed(Duration.zero);
+    expect(vm.channels, hasLength(201));
+    vm.dispose();
+  });
+
+  test('overlapping guide loads share pending channel work', () async {
+    final response = Completer<Map<String, dynamic>>();
+    final started = Completer<void>();
+    var requests = 0;
+    when(() => liveTv.getGuide(
+      startDate: any(named: 'startDate'), endDate: any(named: 'endDate'),
+      channelIds: any(named: 'channelIds'), fields: any(named: 'fields'),
+      enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+      enableImages: any(named: 'enableImages'),
+      enableUserData: any(named: 'enableUserData'), userId: any(named: 'userId'),
+    )).thenAnswer((_) {
+      requests++;
+      if (!started.isCompleted) started.complete();
+      return response.future;
+    });
+    final vm = LiveTvGuideViewModel(client);
+    final loading = vm.load();
+    await started.future;
+    final overlapping = vm.ensureProgramsForChannels(['a']);
+    response.complete({'Items': <dynamic>[]});
+    await Future.wait([loading, overlapping]);
+    expect(requests, 1);
+    expect(vm.hasProgramsFor('a'), isTrue);
+    vm.dispose();
+  });
+
   test(
     'load() fetches only the first batch; loadMorePrograms() paginates the rest',
     () async {
-      // 120 channels → batches of 50 (never one giant all-channels request).
+      // Visible-row-sized batches avoid one giant all-channels request.
       final channels = List.generate(120, (i) => _channel('c$i'));
       when(
         () => liveTv.getChannels(
+          startIndex: any(named: 'startIndex'), limit: any(named: 'limit'),
           sortBy: any(named: 'sortBy'),
           sortOrder: any(named: 'sortOrder'),
           fields: any(named: 'fields'),
@@ -50,7 +163,7 @@ void main() {
       final vm = LiveTvGuideViewModel(client);
       await vm.load();
 
-      // Initial load requested exactly one batch of 50 channels, not all 120.
+      // Initial load requests just 12 channels, not all 120.
       final captured = verify(
         () => liveTv.getGuide(
           startDate: any(named: 'startDate'),
@@ -64,15 +177,18 @@ void main() {
         ),
       ).captured;
       expect(captured.length, 1);
-      expect((captured.single as List).length, 50);
-      expect(vm.programsHighWater, 50);
+      expect((captured.single as List).length, 12);
+      expect(vm.programsHighWater, 12);
       expect(vm.hasMorePrograms, isTrue);
 
       await vm.loadMorePrograms();
-      expect(vm.programsHighWater, 100);
+      expect(vm.programsHighWater, 24);
       expect(vm.hasMorePrograms, isTrue);
 
       await vm.loadMorePrograms();
+      while (vm.hasMorePrograms) {
+        await vm.loadMorePrograms();
+      }
       expect(vm.programsHighWater, 120);
       expect(vm.hasMorePrograms, isFalse);
 
@@ -85,6 +201,7 @@ void main() {
   test('picker Now Next ignores genre filtering but preserves true schedule', () async {
     final now = DateTime.now();
     when(() => liveTv.getChannels(
+      startIndex: any(named: 'startIndex'), limit: any(named: 'limit'),
       sortBy: any(named: 'sortBy'), sortOrder: any(named: 'sortOrder'),
       fields: any(named: 'fields'), enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
       userId: any(named: 'userId'),
@@ -120,6 +237,7 @@ void main() {
       'UserData': {'IsFavorite': i == 119},
     });
     when(() => liveTv.getChannels(
+      startIndex: any(named: 'startIndex'), limit: any(named: 'limit'),
       sortBy: any(named: 'sortBy'), sortOrder: any(named: 'sortOrder'),
       fields: 'ImageTags,UserData,Tags,Genres', enableTotalRecordCount: false,
       userId: 'user',
@@ -130,7 +248,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(vm.filteredChannels.single.id, 'c119');
     expect(vm.hasProgramsFor('c119'), true);
-    expect(vm.programsHighWater, 50);
+    expect(vm.programsHighWater, 12);
     vm.setFilter(GuideFilter.favorites);
     expect(vm.filteredChannels.single.id, 'c119');
     vm.setChannelFilters(tag: 'Sports');
@@ -167,6 +285,7 @@ void main() {
       'UserData': {'IsFavorite': i == 0},
     });
     when(() => liveTv.getChannels(
+      startIndex: any(named: 'startIndex'), limit: any(named: 'limit'),
       sortBy: any(named: 'sortBy'), sortOrder: any(named: 'sortOrder'),
       fields: any(named: 'fields'), enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
       userId: any(named: 'userId'),
@@ -177,7 +296,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(vm.filteredChannels.single.id, 'c119');
     expect(vm.hasProgramsFor('c119'), true);
-    expect(vm.programsHighWater, 50);
+    expect(vm.programsHighWater, 12);
     vm.setFilter(GuideFilter.favorites);
     expect(vm.filteredChannels, isEmpty);
     expect(vm.channelForNumber(' 4001 ')?.id, 'c119');

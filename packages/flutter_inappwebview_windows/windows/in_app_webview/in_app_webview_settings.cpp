@@ -19,6 +19,7 @@ namespace flutter_inappwebview_plugin
     useOnDownloadStart = get_fl_map_value(encodableMap, "useOnDownloadStart", useOnDownloadStart);
     useShouldInterceptRequest = get_fl_map_value(encodableMap, "useShouldInterceptRequest", useShouldInterceptRequest);
     userAgent = get_fl_map_value(encodableMap, "userAgent", userAgent);
+    applicationNameForUserAgent = get_fl_map_value(encodableMap, "applicationNameForUserAgent", applicationNameForUserAgent);
     javaScriptEnabled = get_fl_map_value(encodableMap, "javaScriptEnabled", javaScriptEnabled);
     transparentBackground = get_fl_map_value(encodableMap, "transparentBackground", transparentBackground);
     supportZoom = get_fl_map_value(encodableMap, "supportZoom", supportZoom);
@@ -35,6 +36,7 @@ namespace flutter_inappwebview_plugin
       {"useOnDownloadStart", useOnDownloadStart},
       {"useShouldInterceptRequest", useShouldInterceptRequest},
       {"userAgent", userAgent},
+      {"applicationNameForUserAgent", applicationNameForUserAgent},
       {"javaScriptEnabled", javaScriptEnabled},
       {"transparentBackground", transparentBackground},
       {"supportZoom", supportZoom},

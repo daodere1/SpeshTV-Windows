@@ -80,9 +80,11 @@ void main() {
     GetIt.instance.registerSingleton<PlaybackManager>(playback);
 
     client = _MockMediaServerClient();
+    when(() => client.baseUrl).thenReturn('http://server');
     liveTvApi = _MockLiveTvApi();
     imageApi = _MockImageApi();
     when(() => client.liveTvApi).thenReturn(liveTvApi);
+    when(() => client.serverType).thenReturn(ServerType.jellyfin);
     when(() => client.imageApi).thenReturn(imageApi);
     when(
       () => imageApi.getPrimaryImageUrl(

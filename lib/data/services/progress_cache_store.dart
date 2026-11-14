@@ -14,7 +14,7 @@ class ProgressSnapshot {
 /// invalidation cannot be undone by a storage write already in flight.
 class ProgressCacheStore {
   static const storageKey = 'speshtv_progress_v1';
-  static const maxAge = Duration(minutes: 30);
+  static const maxAge = Duration(minutes: 2);
   static Future<void> _writes = Future.value();
   final DateTime Function() now;
   ProgressCacheStore({DateTime Function()? now}) : now = now ?? DateTime.now;

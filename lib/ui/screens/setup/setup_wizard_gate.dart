@@ -1,17 +1,34 @@
 import 'package:get_it/get_it.dart';
 import 'package:server_core/server_core.dart';
 
+import '../../../auth/repositories/session_repository.dart';
 import '../../../data/services/connectivity_service.dart';
 import '../../../data/services/media_server_client_factory.dart';
 import '../../../data/services/plugin_sync_service.dart';
+import '../../../preference/preference_constants.dart';
 import '../../../preference/user_preferences.dart';
+import '../../widgets/navigation_layout.dart';
 
 /// Which questions the first-run wizard still has to ask, in the order shown.
 ///
 /// [navbar] leads because it is the frame everything after it sits in.
-/// [tour] is never suppressed, since it asks nothing that could already have
-/// been answered.
-enum SetupStep { navbar, mediaBar, homeRows, detailStyle, tour }
+/// [navbarStyle] follows it and only shows once Bottom has been picked, see
+/// [visibleSetupSteps]. [tour] is never suppressed, since it asks nothing
+/// that could already have been answered.
+enum SetupStep { navbar, navbarStyle, mediaBar, homeRows, detailStyle, tour }
+
+/// [steps] as the user sees them, given the navbar position in effect. The
+/// style question only means something for the bottom navbar.
+List<SetupStep> visibleSetupSteps(
+  List<SetupStep> steps,
+  NavbarPosition effectivePosition,
+) =>
+    [
+      for (final step in steps)
+        if (step != SetupStep.navbarStyle ||
+            effectivePosition == NavbarPosition.bottom)
+          step,
+    ];
 
 /// Decides whether the wizard runs, and for which steps.
 ///
@@ -32,6 +49,24 @@ class SetupWizardGate {
   /// Set while an explicit re-run from settings is in flight, so the router
   /// leaves it alone even though the server is already marked as set up.
   bool _rerunning = false;
+
+  /// The signed-in session's client. The factory's own active client is just
+  /// the last one it created, which with several servers can be one nobody is
+  /// signed in to, whose settings never arrive.
+  static MediaServerClient? activeClient() {
+    if (!GetIt.instance.isRegistered<MediaServerClientFactory>()) return null;
+    final factory = GetIt.instance<MediaServerClientFactory>();
+    final serverId = GetIt.instance.isRegistered<SessionRepository>()
+        ? GetIt.instance<SessionRepository>().activeServerId
+        : null;
+    final client = serverId == null ? null : factory.clients[serverId];
+    if (client != null) return client;
+    try {
+      return factory.getActiveClient();
+    } on StateError {
+      return null;
+    }
+  }
 
   /// The id the client factory filed this client under, which is also the id
   /// the sync service keys its per-server state by.
@@ -83,11 +118,25 @@ class SetupWizardGate {
   /// frame. A deliberate re-run asks everything, because going looking for it
   /// says more than the stored values do.
   List<SetupStep> remainingSteps() {
-    if (_rerunning) return SetupStep.values;
+    final offerStyle = NavigationLayout.allowBottomNavbar;
+    if (_rerunning) {
+      return [
+        for (final step in SetupStep.values)
+          if (step != SetupStep.navbarStyle || offerStyle) step,
+      ];
+    }
 
+    final askNavbar = !_prefs.containsPreference(
+      UserPreferences.navbarPosition,
+    );
     final steps = <SetupStep>[
-      if (!_prefs.containsPreference(UserPreferences.navbarPosition))
-        SetupStep.navbar,
+      if (askNavbar) SetupStep.navbar,
+      // Tied to the navbar question: a user whose other answers came over
+      // from another device would otherwise get a wizard asking only this.
+      if (askNavbar &&
+          offerStyle &&
+          !_prefs.containsPreference(UserPreferences.bottomNavbarStyle))
+        SetupStep.navbarStyle,
       if (!_prefs.containsPreference(UserPreferences.mediaBarMode))
         SetupStep.mediaBar,
       if (!_prefs.containsPreference(UserPreferences.homeRowsStyle))

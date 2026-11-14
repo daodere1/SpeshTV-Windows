@@ -20,7 +20,7 @@
     <uses-feature android:name="android.software.leanback" android:required="false"/>
     <application
         android:label="${appName}"
-        android:name="${applicationName}"
+        android:name=".MoonfinApplication"
         android:icon="@drawable/speshtv_icon"
         android:roundIcon="@drawable/speshtv_icon"
         android:requestLegacyExternalStorage="true"

@@ -1,6 +1,7 @@
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
+#include <appmodel.h>
 
 #include <string>
 
@@ -9,6 +10,21 @@
 #include "utils.h"
 
 namespace {
+
+bool IsPackaged() {
+  UINT32 length = 0;
+  return ::GetCurrentPackageFullName(&length, nullptr) !=
+         APPMODEL_ERROR_NO_PACKAGE;
+}
+
+bool IsDiagnosticExecutable() {
+  wchar_t path[MAX_PATH];
+  if (::GetModuleFileName(nullptr, path, MAX_PATH) == 0) return false;
+  const std::wstring name(path);
+  const std::wstring suffix(L"SpeshTV-YouTube-API-Test.exe");
+  return name.size() >= suffix.size() &&
+         name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
 
 // Registers the moonfin:// scheme for the current user, pointing at this
 // executable. Written on every launch so a moved or updated install keeps
@@ -21,12 +37,12 @@ void RegisterMoonfinScheme() {
   std::wstring command = L"\"" + std::wstring(exe_path) + L"\" \"%1\"";
 
   HKEY scheme_key;
-  if (::RegCreateKeyEx(HKEY_CURRENT_USER, L"Software\\Classes\\moonfin", 0,
+  if (::RegCreateKeyEx(HKEY_CURRENT_USER, L"Software\\Classes\\speshtv", 0,
                        nullptr, 0, KEY_WRITE, nullptr, &scheme_key,
                        nullptr) != ERROR_SUCCESS) {
     return;
   }
-  const wchar_t description[] = L"URL:Moonfin";
+  const wchar_t description[] = L"URL:SpeshTV";
   ::RegSetValueEx(scheme_key, nullptr, 0, REG_SZ,
                   reinterpret_cast<const BYTE *>(description),
                   sizeof(description));
@@ -53,7 +69,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
   // A moonfin:// launch while the app is already open hands the link to the
   // running instance and exits instead of opening a second window.
-  if (SendAppLinkToInstance()) {
+  const bool diagnostic = IsDiagnosticExecutable();
+  if (!diagnostic && SendAppLinkToInstance()) {
     return EXIT_SUCCESS;
   }
   // Attach to console when present (e.g., 'flutter run') or create a
@@ -66,9 +83,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
-  RegisterMoonfinScheme();
+  // Registry writes from a packaged app land in a private per-app hive, so the
+  // Store build gets moonfin:// from protocol_activation in pubspec.yaml.
+  if (!diagnostic && !IsPackaged()) {
+    RegisterMoonfinScheme();
+  }
 
   flutter::DartProject project(L"data");
+  project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
 
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();
@@ -78,7 +100,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"Moonfin", origin, size)) {
+  if (!window.Create(diagnostic ? L"SpeshTV YouTube API Test" : L"SpeshTV", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

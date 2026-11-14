@@ -43,6 +43,21 @@ class ChannelFacets {
       if (upper == 'CHINA') countries.add('CH | China');
     }
     final packages = <String>{};
+    for (final value in [name, ...tags]) {
+      final upper = value.toUpperCase();
+      if (RegExp(r'\b(?:CFB|NCAA\s*F)\b|\bCOLLEGE FOOTBALL\b|\bNCAA FOOTBALL\b').hasMatch(upper)) {
+        packages.add('College football');
+      }
+      if (RegExp(r'\b(?:CBB|NCAA\s*B)\b|\bCOLLEGE BASKETBALL\b|\bNCAA BASKETBALL\b|\bMARCH MADNESS\b').hasMatch(upper)) {
+        packages.add('College basketball');
+      }
+      if (RegExp(r'\bCOLLEGE BASEBALL\b|\bNCAA BASEBALL\b').hasMatch(upper)) {
+        packages.add('College baseball');
+      }
+      if (RegExp(r'\bNCAA\b|\bCOLLEGE SPORTS?\b').hasMatch(upper)) {
+        packages.add('College sports / NCAA');
+      }
+    }
     for (final tag in tags) {
       final upper = tag.toUpperCase();
       for (final league in ['NBA', 'NFL', 'MLB', 'NHL', 'UFC']) {

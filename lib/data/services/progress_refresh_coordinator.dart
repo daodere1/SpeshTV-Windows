@@ -9,12 +9,15 @@ class ProgressRefreshCoordinator {
   final bool Function() enabled;
   final void Function(bool libraryChanged) invalidate;
   final Future<void> Function() refresh;
+  final Future<void> Function()? refreshLibrary;
   final Duration debounce;
   late final StreamSubscription<ServerWebSocketMessage> _events;
   late final StreamSubscription<void> _connections;
   late final Timer _fallback;
   Timer? _scheduled;
   bool _active = false, _disposed = false, _pending = false, _inFlight = false;
+  bool _libraryPending = false;
+  int _fallbackTicks = 0;
 
   ProgressRefreshCoordinator({
     required this.userId,
@@ -23,6 +26,7 @@ class ProgressRefreshCoordinator {
     required this.enabled,
     required this.invalidate,
     required this.refresh,
+    this.refreshLibrary,
     this.debounce = const Duration(seconds: 2),
     Duration fallbackInterval = const Duration(minutes: 1),
   }) {
@@ -32,6 +36,7 @@ class ProgressRefreshCoordinator {
       // A timer is not evidence of changed data. Do not discard a slow cold
       // fetch or erase the last good snapshot just because a minute elapsed.
       if (_active && !_inFlight && !_disposed && enabled()) {
+        if (++_fallbackTicks % 5 == 0) _libraryPending = true;
         _pending = true;
         _schedule();
       }
@@ -51,6 +56,7 @@ class ProgressRefreshCoordinator {
   void changed({bool libraryChanged = false}) {
     if (_disposed || !enabled()) return;
     invalidate(libraryChanged);
+    _libraryPending = _libraryPending || libraryChanged;
     _pending = true;
     _schedule();
   }
@@ -78,9 +84,16 @@ class ProgressRefreshCoordinator {
     if (_disposed || !_active || !enabled()) return;
     _inFlight = true;
     _pending = false;
+    final libraryChanged = _libraryPending;
+    _libraryPending = false;
     try {
-      await refresh();
+      if (libraryChanged && refreshLibrary != null) {
+        await refreshLibrary!();
+      } else {
+        await refresh();
+      }
     } catch (_) {
+      _libraryPending = _libraryPending || libraryChanged;
       /* Next event or fallback will retry. */
     } finally {
       _inFlight = false;

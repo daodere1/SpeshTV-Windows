@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "id": "speshapple",
+  "displayName": "SpeshApple",
+  "description": "",
+  "isGlass": false,
+  "isPixel": false,
+  "transparentNavbarSurface": false,
+  "colors": {
+    "background": "#080808",
+    "onBackground": "#F3F5F6",
+    "surface": "#202020",
+    "onSurface": "#F3F5F6",
+    "surfaceVariant": "#24282C",
+    "card": "#202020",
+    "scrim": "#B3000000",
+    "accent": "#FFFFFF",
+    "onAccent": "#111111",
+    "buttonNormal": "#303438",
+    "buttonFocused": "#FFFFFF",
+    "buttonDisabled": "#24282C",
+    "buttonActive": "#FFFFFF",
+    "onButtonNormal": "#F3F5F6",
+    "onButtonFocused": "#111111",
+    "onButtonDisabled": "#A0A6AD",
+    "inputBackground": "#202020",
+    "inputFocused": "#202020",
+    "inputBorder": "#787F87",
+    "inputBorderFocused": "#FFFFFF",
+    "rangeTrack": "#40474D",
+    "rangeProgress": "#FFFFFF",
+    "rangeThumb": "#F3F5F6",
+    "seekbarBuffered": "#A0A6AD",
+    "badgeBackground": "#F3C564",
+    "onBadge": "#121416",
+    "badgeUnplayed": "#FFFFFF",
+    "badgeWatched": "#8CDDAB",
+    "recordingActive": "#FF8F87",
+    "recordingScheduled": "#F3C564",
+    "error": "#FF8F87"
+  },
+  "semantic": {
+    "statusAvailable": "#8CDDAB",
+    "statusRequested": "#8ABCF4",
+    "statusPending": "#F3C564",
+    "statusDownloading": "#FFFFFF",
+    "statusError": "#FF8F87",
+    "mediaTypeBadgeMovie": "#FFFFFF",
+    "mediaTypeBadgeShow": "#8ABCF4"
+  },
+  "book": {
+    "background": "#080808",
+    "accent": "#FFFFFF",
+    "mutedText": "#A0A6AD",
+    "primaryText": "#F3F5F6",
+    "sectionTitle": "#F3F5F6",
+    "divider": "#303438",
+    "placeholder": "#24282C",
+    "placeholderPalette": [
+      "#213533",
+      "#303438",
+      "#293B4B",
+      "#473D29"
+    ],
+    "shadow": "#66000000",
+    "gradientTop": "#00121416",
+    "gradientBottom": "#FF121416",
+    "inactiveChip": "#303438"
+  },
+  "borders": {
+    "cardBorder": {
+      "color": "#303438",
+      "width": 1
+    },
+    "chipBorder": {
+      "color": "#787F87",
+      "width": 1
+    },
+    "focusBorder": {
+      "color": "#FFFFFF",
+      "width": 3
+    },
+    "cardRadius": 6,
+    "chipRadius": 4,
+    "chipBackground": "#24282C",
+    "navBorder": {
+      "color": "#303438",
+      "width": 1
+    },
+    "focusGlow": []
+  },
+  "textGlow": [],
+  "navColorCycle": []
+}

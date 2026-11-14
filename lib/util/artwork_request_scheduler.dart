@@ -23,11 +23,16 @@ class ArtworkRequestScheduler {
     required this.slots,
     this.batchGap = defaultBatchGap,
     this.maxWait = defaultMaxWait,
-  }) : assert(slots > 0);
+    this.maxLowSlots,
+    this.maxQueuedLow,
+  }) : assert(slots > 0), assert(maxQueuedLow == null || maxQueuedLow > 0);
 
   /// How many requests may be in flight at once. Matched to the connection
   /// budget of the client the requests go through.
   final int slots;
+  final int? maxLowSlots;
+  final int? maxQueuedLow;
+  int _runningLow = 0;
 
   /// Two requests closer together than this belong to the same batch.
   ///
@@ -83,17 +88,21 @@ class ArtworkRequestScheduler {
       depthAtEnqueue: _waiting.length,
       enqueuedAt: now,
     );
-    if (_running < slots && _waiting.isEmpty) {
+    if (_running < slots && _waiting.isEmpty &&
+        (priority != ImageFetchPriority.low || maxLowSlots == null || _runningLow < maxLowSlots!)) {
       _running++;
+      if (priority == ImageFetchPriority.low) _runningLow++;
       waiter.admit();
       return waiter.completer.future;
     }
     _enqueue(waiter);
+    _admit();
     return waiter.completer.future;
   }
 
-  void release() {
+  void release({ImageFetchPriority priority = ImageFetchPriority.normal}) {
     if (_running > 0) _running--;
+    if (priority == ImageFetchPriority.low && _runningLow > 0) _runningLow--;
     _admit();
   }
 
@@ -132,6 +141,14 @@ class ArtworkRequestScheduler {
   }
 
   void _enqueue(_Waiter waiter) {
+    if (waiter.priority == ImageFetchPriority.low && maxQueuedLow != null) {
+      final batches = _lanes[ImageFetchPriority.low]!;
+      while (batches.values.fold<int>(0, (n, q) => n + q.length) >= maxQueuedLow!) {
+        final obsolete = batches[batches.firstKey()]!.first;
+        _dequeue(obsolete);
+        obsolete.completer.completeError(StateError('Artwork prefetch superseded'));
+      }
+    }
     _lanes[waiter.priority]!
         .putIfAbsent(waiter.batch, Queue<_Waiter>.new)
         .add(waiter);
@@ -155,12 +172,14 @@ class ArtworkRequestScheduler {
       if (next == null) return;
       _dequeue(next);
       _running++;
+      if (next.priority == ImageFetchPriority.low) _runningLow++;
       next.admit();
     }
   }
 
   _Waiter? _next(DateTime now) {
     for (final lane in ImageFetchPriority.values) {
+      if (lane == ImageFetchPriority.low && maxLowSlots != null && _runningLow >= maxLowSlots!) continue;
       final batches = _lanes[lane]!;
       if (batches.isEmpty) continue;
       // Batch ids climb with time, so the first key is the oldest request in
@@ -174,7 +193,7 @@ class ArtworkRequestScheduler {
 }
 
 /// What a request learns when it is let through.
-typedef ArtworkAdmission = ({int batch, int queueDepth});
+typedef ArtworkAdmission = ({int batch, int queueDepth, ImageFetchPriority priority});
 
 class _Waiter {
   _Waiter(
@@ -194,5 +213,5 @@ class _Waiter {
   final Completer<ArtworkAdmission> completer;
 
   void admit() =>
-      completer.complete((batch: batch, queueDepth: depthAtEnqueue));
+      completer.complete((batch: batch, queueDepth: depthAtEnqueue, priority: priority));
 }

@@ -1,19 +1,9 @@
 package org.moonfin.nativevideo.subtitle
 
-import kotlin.math.abs
-
 // Kept free of Android and media3 imports so these run under plain JVM tests.
 
 /** The furthest the user can push subtitles either way. */
 internal const val MAX_MANUAL_SUBTITLE_DELAY_MS = 5000L
-
-/**
- * An automatic correction has to move at least this far before the text
- * track is re-selected for it. The adjuster settles to slightly different
- * values across seeks, and re-timing for a few milliseconds would only blink
- * the cue for nothing.
- */
-internal const val MIN_AUTO_RETIME_DELTA_US = 50_000L
 
 private const val MIME_MEDIA3_CUES = "application/x-media3-cues"
 
@@ -38,10 +28,6 @@ private val CLOSED_CAPTION_MIMES = setOf(
 internal fun clampManualDelayMs(delayMs: Long): Long =
     delayMs.coerceIn(-MAX_MANUAL_SUBTITLE_DELAY_MS, MAX_MANUAL_SUBTITLE_DELAY_MS)
 
-/** What a sideloaded track is shifted by: the measured correction plus the user's delay. */
-internal fun effectiveOffsetUs(autoOffsetUs: Long, manualDelayMs: Long): Long =
-    autoOffsetUs + clampManualDelayMs(manualDelayMs) * 1000L
-
 /**
  * Whether a track muxed into the content follows the subtitle delay.
  *
@@ -56,13 +42,12 @@ internal fun shiftsEmbeddedFormat(sampleMimeType: String?, codecs: String?): Boo
     return mime in SHIFTED_TEXT_MIMES
 }
 
-/**
- * Whether the text track has to be re-selected so cues already read take
- * the new offset. The user's own change always is, a measured one only when
- * it moved far enough to see.
- */
-internal fun shouldRetime(previousEffectiveUs: Long, nextEffectiveUs: Long, manualChanged: Boolean): Boolean =
-    manualChanged || abs(nextEffectiveUs - previousEffectiveUs) >= MIN_AUTO_RETIME_DELTA_US
+/** SRT and WebVTT, including MP4 WebVTT, can use the secondary text renderer. */
+internal fun supportsSecondarySubtitleFormat(sampleMimeType: String?, codecs: String?): Boolean =
+    when (if (sampleMimeType == MIME_MEDIA3_CUES) codecs else sampleMimeType) {
+        "application/x-subrip", "text/vtt", "application/x-mp4-vtt" -> true
+        else -> false
+    }
 
 internal enum class SourceTree {
     /** The player builds the source from the media item itself. */
@@ -73,11 +58,8 @@ internal enum class SourceTree {
 }
 
 /**
- * Which way a source is built. Live TV, previews and audio never get the
- * tree, so their playback is untouched by any of this. Video gets it when a
- * sideloaded subtitle exists, when the user has set a delay, or once it is in
- * place for this source, since taking it out again would mean a re-prepare
- * for nothing.
+ * Chooses whether playback needs the custom subtitle source. Once enabled for a video, keep
+ * using it so changing subtitle settings doesn't prepare playback again.
  */
 internal fun sourceTreeFor(
     isLive: Boolean,
@@ -86,7 +68,10 @@ internal fun sourceTreeFor(
     externalCount: Int,
     manualDelayMs: Long,
     hasEmbeddedWrapper: Boolean,
+    hasSecondarySidecar: Boolean = false,
 ): SourceTree {
+    // External secondary tracks need independent timing on every playback path.
+    if (hasSecondarySidecar) return SourceTree.CUSTOM_TREE
     if (isLive || isPreview || mediaType == "audio") return SourceTree.PLAYER_ITEM
     if (externalCount > 0 || manualDelayMs != 0L || hasEmbeddedWrapper) return SourceTree.CUSTOM_TREE
     return SourceTree.PLAYER_ITEM
@@ -100,14 +85,8 @@ internal fun sourceTreeFor(
 internal fun externalFormatIdMatches(formatId: String?, targetId: String): Boolean =
     formatId != null && (formatId == targetId || formatId.endsWith(":$targetId"))
 
-/** The sync delays event. The subtitle delay stays the user's own value, the correction rides beside it. */
-internal fun syncDelaysPayload(
-    audioDelayMs: Long,
-    subtitleDelayMs: Long,
-    subtitleAutoOffsetMs: Long,
-): Map<String, Any> = mapOf(
+internal fun syncDelaysPayload(audioDelayMs: Long, subtitleDelayMs: Long): Map<String, Any> = mapOf(
     "event" to "syncDelays",
     "audioDelayMs" to audioDelayMs,
     "subtitleDelayMs" to subtitleDelayMs,
-    "subtitleAutoOffsetMs" to subtitleAutoOffsetMs,
 )

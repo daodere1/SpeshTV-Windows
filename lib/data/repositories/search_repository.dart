@@ -7,13 +7,14 @@ import '../utils/blocked_ratings.dart';
 
 class SearchRepository {
   final MediaServerClient _client;
+  final String _serverId;
 
   static const _searchFields =
       'Type,UserData,ProductionYear,SeriesName,ParentIndexNumber,IndexNumber,'
       'AlbumArtist,Album,ImageTags,BackdropImageTags,ParentBackdropItemId,'
       'ParentBackdropImageTags,SeriesId,SeriesPrimaryImageTag,ProviderIds,OfficialRating';
 
-  SearchRepository(this._client);
+  SearchRepository(this._client, {String serverId = ''}) : _serverId = serverId;
 
   Future<Map<String, dynamic>>? _views;
   String? _viewsUser;
@@ -174,7 +175,7 @@ class SearchRepository {
       data['Type'] ??= 'Person';
       return AggregatedItem(
         id: data['Id']?.toString() ?? '',
-        serverId: data['ServerId']?.toString() ?? '',
+        serverId: _serverId.isNotEmpty ? _serverId : data['ServerId']?.toString() ?? '',
         rawData: data,
       );
     }).toList();
@@ -194,7 +195,7 @@ class SearchRepository {
       data['Type'] ??= 'TvChannel';
       return AggregatedItem(
         id: data['Id']?.toString() ?? '',
-        serverId: data['ServerId']?.toString() ?? '',
+        serverId: _serverId.isNotEmpty ? _serverId : data['ServerId']?.toString() ?? '',
         rawData: data,
       );
     }).toList();
@@ -228,7 +229,7 @@ class SearchRepository {
         final data = item as Map<String, dynamic>;
         return AggregatedItem(
           id: data['Id']?.toString() ?? '',
-          serverId: data['ServerId']?.toString() ?? '',
+          serverId: _serverId.isNotEmpty ? _serverId : data['ServerId']?.toString() ?? '',
           rawData: data,
         );
       }).toList(),

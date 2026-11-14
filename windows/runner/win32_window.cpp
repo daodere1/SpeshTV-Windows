@@ -2,6 +2,7 @@
 
 #include <dwmapi.h>
 #include <flutter_windows.h>
+#include <algorithm>
 
 #include "resource.h"
 
@@ -150,6 +151,12 @@ bool Win32Window::Create(const std::wstring& title,
 }
 
 bool Win32Window::Show() {
+  KeepOnScreen();
+  // Showing a parent does not restore WS_VISIBLE on a hidden child. Keep the
+  // Flutter view visible before presenting the runner's first frame.
+  if (child_content_ != nullptr) {
+    ShowWindow(child_content_, SW_SHOW);
+  }
   // SW_SHOW keeps the current placement; SW_SHOWNORMAL would un-maximise.
   return ShowWindow(window_handle_, SW_SHOW);
 }
@@ -179,6 +186,7 @@ Win32Window::MessageHandler(HWND hwnd,
                             UINT const message,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
+  HandlePlacementMessage(hwnd, message, wparam);
   switch (message) {
     case WM_DESTROY:
       window_handle_ = nullptr;
@@ -204,7 +212,19 @@ Win32Window::MessageHandler(HWND hwnd,
       return 0;
     }
 
+    case WM_SHOWWINDOW:
+      // window_manager can show the runner directly, bypassing Show(). A
+      // Flutter view with a hidden style otherwise leaves a blank client area.
+      // Do not hide the child when the parent is hidden: Windows already hides
+      // descendants, and preserving its style lets a later show work normally.
+      if (wparam != FALSE) {
+        KeepOnScreen();
+        if (child_content_ != nullptr) ShowWindow(child_content_, SW_SHOW);
+      }
+      break;
+
     case WM_ACTIVATE:
+      if (LOWORD(wparam) != WA_INACTIVE) KeepOnScreen();
       if (child_content_ != nullptr) {
         SetFocus(child_content_);
       }
@@ -230,6 +250,63 @@ void Win32Window::Destroy() {
   }
 }
 
+void Win32Window::KeepOnScreen() {
+  if (fitting_window_ || !window_handle_ || IsIconic(window_handle_) ||
+      IsZoomed(window_handle_)) return;
+  // Borderless/fullscreen playback owns its bounds and may cover the taskbar.
+  const LONG_PTR style = GetWindowLongPtr(window_handle_, GWL_STYLE);
+  // window_manager's fullscreen mode can retain WS_CAPTION while removing
+  // the resize frame, so caption alone does not identify a normal window.
+  if ((style & WS_CAPTION) != WS_CAPTION || (style & WS_THICKFRAME) == 0)
+    return;
+  RECT bounds{};
+  MONITORINFO monitor{};
+  monitor.cbSize = sizeof(monitor);
+  if (!GetWindowRect(window_handle_, &bounds) ||
+      !GetMonitorInfo(MonitorFromWindow(window_handle_, MONITOR_DEFAULTTONEAREST),
+                      &monitor)) return;
+  const RECT& area = monitor.rcWork;
+  if (area.right <= area.left || area.bottom <= area.top) return;
+  const LONG width = (std::min)(bounds.right - bounds.left, area.right - area.left);
+  const LONG height = (std::min)(bounds.bottom - bounds.top, area.bottom - area.top);
+  const LONG x = (std::max)(area.left, (std::min)(bounds.left, area.right - width));
+  const LONG y = (std::max)(area.top, (std::min)(bounds.top, area.bottom - height));
+  if (x == bounds.left && y == bounds.top && width == bounds.right - bounds.left &&
+      height == bounds.bottom - bounds.top) return;
+  fitting_window_ = true;
+  SetWindowPos(window_handle_, nullptr, x, y, width, height,
+               SWP_NOZORDER | SWP_NOACTIVATE);
+  fitting_window_ = false;
+}
+
+void Win32Window::HandlePlacementMessage(HWND window, UINT message, WPARAM wparam) {
+  switch (message) {
+    case WM_ENTERSIZEMOVE:
+      moving_window_ = true;
+      break;
+    case WM_EXITSIZEMOVE:
+      moving_window_ = false;
+      KeepOnScreen();
+      break;
+    case WM_DISPLAYCHANGE:
+      KeepOnScreen();
+      break;
+    case WM_SETTINGCHANGE:
+      if (wparam == SPI_SETWORKAREA) KeepOnScreen();
+      break;
+    case WM_SHOWWINDOW:
+      if (wparam != FALSE) KeepOnScreen();
+      break;
+    case WM_ACTIVATE:
+      if (LOWORD(wparam) != WA_INACTIVE) KeepOnScreen();
+      break;
+    case WM_WINDOWPOSCHANGED:
+      // Catch saved bounds applied after showing, but allow dragging freely.
+      if (!moving_window_ && IsWindowVisible(window)) KeepOnScreen();
+      break;
+  }
+}
+
 Win32Window* Win32Window::GetThisFromHandle(HWND const window) noexcept {
   return reinterpret_cast<Win32Window*>(
       GetWindowLongPtr(window, GWLP_USERDATA));
@@ -240,6 +317,8 @@ void Win32Window::SetChildContent(HWND content) {
   SetParent(content, window_handle_);
   RECT frame = GetClientArea();
   SizeChildContent(frame.right - frame.left, frame.bottom - frame.top);
+  // The content is a child, so this does not reveal the still-hidden runner.
+  ShowWindow(child_content_, SW_SHOW);
   SetFocus(child_content_);
 }
 

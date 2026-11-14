@@ -98,12 +98,19 @@ class ThemeMusicService implements AudioOwnable {
   }
 
   Future<void> playForItem(AggregatedItem item) async {
-    if (!_prefs.get(UserPreferences.themeMusicEnabled)) return;
+    if (!_prefs.get(UserPreferences.themeMusicEnabled)) {
+      debugPrint('SpeshTV theme: disabled');
+      return;
+    }
     final activeItem = _playbackManager.queueService.currentItem;
-    if (activeItem != null) return;
-    if (_playbackManager.state.isPlaying) return;
-    if (_externalAudioActive) return;
-    if (_playSuppressed) return;
+    if (activeItem != null || _playbackManager.state.isPlaying) {
+      debugPrint('SpeshTV theme: main playback active');
+      return;
+    }
+    if (_externalAudioActive || _playSuppressed) {
+      debugPrint('SpeshTV theme: preview or temporary suppression active');
+      return;
+    }
     if (!_validTypes.contains(item.type)) {
       fadeOutAndStop();
       return;
@@ -140,7 +147,10 @@ class ThemeMusicService implements AudioOwnable {
       final songsResult = data['ThemeSongsResult'] as Map<String, dynamic>?;
       final songs =
           (songsResult?['Items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-      if (songs.isEmpty) return;
+      if (songs.isEmpty) {
+        debugPrint('SpeshTV theme: server returned no songs');
+        return;
+      }
 
       final song = songs[Random().nextInt(songs.length)];
       final songId = song['Id']?.toString() ?? '';
@@ -180,9 +190,18 @@ class ThemeMusicService implements AudioOwnable {
       }
 
       _fadeIn(generation);
-    } catch (_) {
-      if (localPlayer != null &&
-          (generation != _playGeneration || _player != localPlayer || _activeDetailScreens.isEmpty)) {
+      debugPrint('SpeshTV theme: opened; volume ${(_targetVolume * 100).round()}');
+    } catch (error) {
+      // Exception messages can contain authenticated media URLs.
+      debugPrint('SpeshTV theme: load failed (${error.runtimeType})');
+      // A failed current player must not prevent retrying this same series.
+      if (generation == _playGeneration) {
+        _fadeTimer?.cancel();
+        _fadeTimer = null;
+        _player = null;
+        _currentThemeSourceId = null;
+      }
+      if (localPlayer != null) {
         await _safeDispose(localPlayer);
       }
     }
@@ -202,6 +221,10 @@ class ThemeMusicService implements AudioOwnable {
 
   String _buildAudioUrl(String songId) {
     final token = _client.accessToken ?? '';
+    // A Plex theme song's id is the path it plays from.
+    if (_client.serverType == ServerType.plex) {
+      return '${_client.baseUrl}$songId?X-Plex-Token=$token';
+    }
     return '${_client.baseUrl}/Audio/$songId/stream?static=true&audioCodec=mp3&audioBitrate=128000&${_client.serverType.tokenQueryParam}=$token';
   }
 

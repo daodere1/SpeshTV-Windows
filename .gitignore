@@ -90,6 +90,7 @@ app.*.map.json
 # Windows installer
 /Moonfin-Setup-x64.exe
 /Moonfin_Windows_v*.exe
+/MoonfinStore_Windows*_v*.msix
 
 # Android APK artifacts
 /Moonfin-android.apk
@@ -144,3 +145,18 @@ web/drift_worker.js.map
 # Tizen build output. Tizen was removed upstream; these are generated
 # NuGet/MSBuild artifacts.
 tizen/obj/
+
+# Private signing/configuration and generated distribution artifacts
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.aab
+*.apk
+.env
+.env.*
+!.env.example
+!*.env.example
+**/local.properties
+**/keystore.properties
+**/key.properties

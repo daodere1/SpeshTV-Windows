@@ -1,9 +1,13 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:server_core/server_core.dart';
 
 class JellyfinItemsApi implements ItemsApi {
   final Dio _dio;
   final String Function() _getUserId;
+  final _genreCache = <String, ({DateTime saved, Map<String, dynamic> data})>{};
+  final _pendingGenres = <String, Future<Map<String, dynamic>>>{};
 
   JellyfinItemsApi(this._dio, this._getUserId);
 
@@ -11,7 +15,9 @@ class JellyfinItemsApi implements ItemsApi {
     String path,
     Map<String, dynamic> queryParameters,
   ) async {
-    if (!const bool.fromEnvironment('SPESHTV_WEB')) {
+    if ((!const bool.fromEnvironment('SPESHTV_WEB') &&
+            !const bool.fromEnvironment('SPESHMEDIA_CLIENT')) ||
+        queryParameters['MediaTypes'] == 'Audio') {
       return _dio.get(path, queryParameters: queryParameters);
     }
     // Match the lightweight SpeshTV feed, not the full catalog-detail DTO.
@@ -28,14 +34,12 @@ class JellyfinItemsApi implements ItemsApi {
     final route = path == '/UserItems/Resume'
         ? '/Users/${Uri.encodeComponent(_getUserId())}/Items/Resume'
         : path;
-    final options = Options(method: 'GET').compose(
-      _dio.options,
-      route,
-      queryParameters: lean,
-    ).copyWith(
-      connectTimeout: const Duration(seconds: 30),
-      receiveTimeout: const Duration(seconds: 30),
-    );
+    final options = Options(method: 'GET')
+        .compose(_dio.options, route, queryParameters: lean)
+        .copyWith(
+          connectTimeout: const Duration(seconds: 30),
+          receiveTimeout: const Duration(seconds: 30),
+        );
     final response = await _dio.fetch<dynamic>(options);
     // No-count responses can report only this page's length, not the total.
     // Let the progress feed detect the end from a short page instead.
@@ -50,15 +54,17 @@ class JellyfinItemsApi implements ItemsApi {
 
   Future<Response<dynamic>> _getSearch(
     String path,
-    Map<String, dynamic> queryParameters,
-  ) {
+    Map<String, dynamic> queryParameters, {
+    Duration? receiveTimeout,
+  }) {
     // Browser connection timeout includes waiting for response headers and
     // a connection slot. Large catalog searches need more than eight seconds.
-    final options = Options(method: 'GET').compose(
-      _dio.options,
-      path,
-      queryParameters: queryParameters,
-    ).copyWith(connectTimeout: const Duration(seconds: 30));
+    final options = Options(method: 'GET')
+        .compose(_dio.options, path, queryParameters: queryParameters)
+        .copyWith(
+          connectTimeout: const Duration(seconds: 30),
+          receiveTimeout: receiveTimeout ?? _dio.options.receiveTimeout,
+        );
     return _dio.fetch<dynamic>(options);
   }
 
@@ -203,13 +209,13 @@ class JellyfinItemsApi implements ItemsApi {
     String? enableImageTypes,
   }) async {
     final response = await _getSearch('/Persons', {
-        'UserId': _getUserId(),
-        'SearchTerm': searchTerm,
-        'Limit': ?limit,
-        'Fields': ?fields,
-        'EnableImageTypes': ?enableImageTypes,
-        'EnableTotalRecordCount': false,
-      });
+      'UserId': _getUserId(),
+      'SearchTerm': searchTerm,
+      'Limit': ?limit,
+      'Fields': ?fields,
+      'EnableImageTypes': ?enableImageTypes,
+      'EnableTotalRecordCount': false,
+    });
     return response.data as Map<String, dynamic>;
   }
 
@@ -245,10 +251,7 @@ class JellyfinItemsApi implements ItemsApi {
     int? limit,
     String? bypass,
   }) async {
-    final params = <String, dynamic>{
-      'Limit': ?limit,
-      'bypass': ?bypass,
-    };
+    final params = <String, dynamic>{'Limit': ?limit, 'bypass': ?bypass};
     final response = await _dio.get(
       '/Items/$itemId/Similar',
       queryParameters: params,
@@ -269,21 +272,18 @@ class JellyfinItemsApi implements ItemsApi {
     int? imageTypeLimit,
   }) async {
     final userId = _getUserId();
-    final response = await _getProgress(
-      '/Shows/NextUp',
-      {
-        'UserId': userId,
-        'SeriesId': ?seriesId,
-        'ParentId': ?parentId,
-        'StartIndex': ?startIndex,
-        'Limit': ?limit,
-        'Fields': ?fields,
-        'EnableResumable': ?enableResumable,
-        'NextUpDateCutoff': ?nextUpDateCutoff?.toUtc().toIso8601String(),
-        'EnableImageTypes': ?enableImageTypes,
-        'ImageTypeLimit': ?imageTypeLimit,
-      },
-    );
+    final response = await _getProgress('/Shows/NextUp', {
+      'UserId': userId,
+      'SeriesId': ?seriesId,
+      'ParentId': ?parentId,
+      'StartIndex': ?startIndex,
+      'Limit': ?limit,
+      'Fields': ?fields,
+      'EnableResumable': ?enableResumable,
+      'NextUpDateCutoff': ?nextUpDateCutoff?.toUtc().toIso8601String(),
+      'EnableImageTypes': ?enableImageTypes,
+      'ImageTypeLimit': ?imageTypeLimit,
+    });
     return response.data as Map<String, dynamic>;
   }
 
@@ -298,21 +298,17 @@ class JellyfinItemsApi implements ItemsApi {
     String? enableImageTypes,
     int? imageTypeLimit,
   }) async {
-    final response = await _getProgress(
-      '/UserItems/Resume',
-      {
-        'ParentId': ?parentId,
-        if (includeItemTypes != null)
-          'IncludeItemTypes': includeItemTypes.join(','),
-        if (mediaTypes != null)
-          'MediaTypes': mediaTypes,
-        'StartIndex': ?startIndex,
-        'Limit': ?limit,
-        'Fields': ?fields,
-        'EnableImageTypes': ?enableImageTypes,
-        'ImageTypeLimit': ?imageTypeLimit,
-      },
-    );
+    final response = await _getProgress('/UserItems/Resume', {
+      'ParentId': ?parentId,
+      if (includeItemTypes != null)
+        'IncludeItemTypes': includeItemTypes.join(','),
+      if (mediaTypes != null) 'MediaTypes': mediaTypes,
+      'StartIndex': ?startIndex,
+      'Limit': ?limit,
+      'Fields': ?fields,
+      'EnableImageTypes': ?enableImageTypes,
+      'ImageTypeLimit': ?imageTypeLimit,
+    });
     return response.data as Map<String, dynamic>;
   }
 
@@ -370,7 +366,7 @@ class JellyfinItemsApi implements ItemsApi {
         'ImageTypeLimit': ?imageTypeLimit,
         'SortBy': 'PremiereDate',
         'SortOrder': 'Descending',
-         'MaxPremiereDate': DateTime.now().toUtc().toIso8601String(),
+        'MaxPremiereDate': DateTime.now().toUtc().toIso8601String(),
       },
     );
     final data = response.data;
@@ -398,7 +394,11 @@ class JellyfinItemsApi implements ItemsApi {
   }) async {
     final response = await _dio.get(
       '/Shows/$seriesId/Episodes',
-      queryParameters: {'SeasonId': ?seasonId, 'Fields': ?fields},
+      queryParameters: {
+        'UserId': _getUserId(),
+        'SeasonId': ?seasonId,
+        'Fields': ?fields,
+      },
     );
     return response.data as Map<String, dynamic>;
   }
@@ -408,6 +408,13 @@ class JellyfinItemsApi implements ItemsApi {
     String itemId, {
     bool inheritFromParent = true,
   }) async {
+    // Discovery IDs belong to TMDB, not the Jellyfin item database.
+    if (itemId.startsWith('tmdb:')) {
+      return <String, dynamic>{
+        'ThemeSongsResult': <String, dynamic>{'Items': <dynamic>[]},
+        'ThemeVideosResult': <String, dynamic>{'Items': <dynamic>[]},
+      };
+    }
     final response = await _dio.get(
       '/Items/$itemId/ThemeMedia',
       queryParameters: {'InheritFromParent': inheritFromParent},
@@ -506,7 +513,7 @@ class JellyfinItemsApi implements ItemsApi {
       '/Playlists/$playlistId/Items',
       queryParameters: {
         'Fields':
-            'BasicSyncInfo,PrimaryImageAspectRatio,RunTimeTicks,Artists,AlbumArtist,IndexNumber,MediaType,PlaylistItemId,BackdropImageTags,ParentBackdropImageTags,ParentBackdropItemId,SeriesName,ParentIndexNumber,Genres,Chapters,Overview,UserData,MediaStreams',
+            'BasicSyncInfo,PrimaryImageAspectRatio,RunTimeTicks,Artists,AlbumArtist,IndexNumber,MediaType,PlaylistItemId,BackdropImageTags,ParentBackdropImageTags,ParentBackdropItemId,SeriesName,ParentIndexNumber,Genres,Chapters,Overview,UserData,MediaStreams,DateCreated,SortName',
         'EnableImageTypes': 'Primary,Backdrop,Logo,Thumb',
         'ImageTypeLimit': 1,
         'StartIndex': ?startIndex,
@@ -516,6 +523,7 @@ class JellyfinItemsApi implements ItemsApi {
     return response.data as Map<String, dynamic>;
   }
 
+  /// Jellyfin makes a new playlist public unless told otherwise.
   @override
   Future<Map<String, dynamic>> createPlaylist({
     required String name,
@@ -523,7 +531,7 @@ class JellyfinItemsApi implements ItemsApi {
   }) async {
     final response = await _dio.post(
       '/Playlists',
-      data: {'Name': name, 'Ids': ?itemIds},
+      data: {'Name': name, 'Ids': ?itemIds, 'IsPublic': false},
     );
     return response.data as Map<String, dynamic>;
   }
@@ -557,10 +565,7 @@ class JellyfinItemsApi implements ItemsApi {
       response = await _dio.post(
         '/Collections',
         queryParameters: queryParameters,
-        data: {
-          'Name': name,
-          if (hasItems) 'Ids': itemIds,
-        },
+        data: {'Name': name, if (hasItems) 'Ids': itemIds},
       );
     }
 
@@ -583,23 +588,18 @@ class JellyfinItemsApi implements ItemsApi {
   }
 
   @override
-  Future<void> addToCollection(String collectionId, List<String> itemIds) async {
+  Future<void> addToCollection(
+    String collectionId,
+    List<String> itemIds,
+  ) async {
     final ids = itemIds.join(',');
     final path = '/Collections/$collectionId/Items';
 
-    Future<void> send({
-      String? queryKey,
-      bool includeBody = false,
-    }) async {
+    Future<void> send({String? queryKey, bool includeBody = false}) async {
       await _dio.post(
         path,
         queryParameters: queryKey == null ? null : {queryKey: ids},
-        data: includeBody
-            ? {
-                'Ids': itemIds,
-                'ids': ids,
-              }
-            : null,
+        data: includeBody ? {'Ids': itemIds, 'ids': ids} : null,
       );
     }
 
@@ -678,24 +678,45 @@ class JellyfinItemsApi implements ItemsApi {
     String? fields,
     List<String>? includeItemTypes,
   }) async {
-    final response = await _dio.get(
-      '/Genres',
-      queryParameters: {
-        'ParentId': ?parentId,
-        // Defaulted rather than left to callers. Without a user the server
-        // answers across every library, including ones this account can't see.
-        'UserId': userId ?? _getUserId(),
-        'SortBy': ?sortBy,
-        'SortOrder': ?sortOrder,
-        'StartIndex': ?startIndex,
-        'Limit': ?limit,
-        'Recursive': ?recursive,
-        'Fields': ?fields,
-        if (includeItemTypes != null && includeItemTypes.isNotEmpty)
-          'IncludeItemTypes': includeItemTypes.join(','),
-      },
-    );
-    return response.data as Map<String, dynamic>;
+    final query = <String, dynamic>{
+      'ParentId': ?parentId,
+      // Defaulted rather than left to callers. Without a user the server
+      // answers across every library, including ones this account can't see.
+      'UserId': userId ?? _getUserId(),
+      'SortBy': ?sortBy,
+      'SortOrder': ?sortOrder,
+      'StartIndex': ?startIndex,
+      'Limit': ?limit,
+      'Recursive': ?recursive,
+      'Fields': ?fields,
+      if (includeItemTypes != null && includeItemTypes.isNotEmpty)
+        'IncludeItemTypes': includeItemTypes.join(','),
+    };
+    final cacheKey = jsonEncode(query);
+    final cached = _genreCache[cacheKey];
+    if (cached != null &&
+        DateTime.now().difference(cached.saved) < const Duration(minutes: 2)) {
+      return cached.data;
+    }
+    Future<Map<String, dynamic>> fetch() async {
+      // A large filtered catalogue can take 35-40 seconds even without counts.
+      final response = await _getSearch(
+        '/Genres',
+        query,
+        receiveTimeout: const Duration(seconds: 60),
+      );
+      final data = response.data as Map<String, dynamic>;
+      _genreCache.remove(cacheKey);
+      _genreCache[cacheKey] = (saved: DateTime.now(), data: data);
+      while (_genreCache.length > 8) {
+        _genreCache.remove(_genreCache.keys.first);
+      }
+      return data;
+    }
+
+    return _pendingGenres[cacheKey] ??= fetch().whenComplete(() {
+      _pendingGenres.remove(cacheKey);
+    });
   }
 
   @override
@@ -771,6 +792,15 @@ class JellyfinItemsApi implements ItemsApi {
       return data.cast<Map<String, dynamic>>();
     }
     return const [];
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> getAdditionalParts(String itemId) async {
+    final response = await _dio.get(
+      '/Videos/$itemId/AdditionalParts',
+      queryParameters: {'UserId': _getUserId()},
+    );
+    return _parseItemListResponse(response.data);
   }
 
   @override

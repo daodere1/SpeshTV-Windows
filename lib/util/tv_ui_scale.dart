@@ -16,16 +16,22 @@ library;
 
 import 'package:flutter/material.dart';
 
-/// The scale a 1920 wide panel is driven at, and with it the canvas width
-/// every TV normalizes to. A 1080p panel lands on 1324x745 at an effective
-/// density of 1.45, which is what the ten foot layouts are written against.
-const double kTvTargetScale = 1.45;
-const double kTvDesignWidth = 1920 / kTvTargetScale;
+/// The canvas width every TV normalizes to. A 1080p panel lands on 1150x647
+/// at an effective density of about 1.67, which is what the ten foot layouts
+/// are sized against.
+const double kTvDesignWidth = 1150;
+
+/// The scale a 1920 wide panel is driven at on [kTvDesignWidth].
+const double kTvTargetScale = 1920 / kTvDesignWidth;
+
+/// A length measured in px on a 1920 wide panel, as a length on the design
+/// canvas.
+double tvPx(double px) => px / kTvTargetScale;
 
 /// How much to magnify the design canvas to fill a panel [realWidth] points
 /// across. One means the panel is already the design canvas.
 double tvUiScaleFor(double realWidth) =>
-    realWidth <= 0 ? 1.0 : realWidth / kTvDesignWidth;
+    !realWidth.isFinite || realWidth <= 0 ? 1.0 : realWidth / kTvDesignWidth;
 
 /// The canvas a panel of [realSize] lays out on. Always [kTvDesignWidth]
 /// across, whatever density the platform reported.
@@ -59,20 +65,38 @@ class TvUiScale extends StatelessWidget {
           insets.right / scale,
           insets.bottom / scale,
         );
-    return FittedBox(
-      fit: BoxFit.fill,
-      child: SizedBox(
-        width: logicalSize.width,
-        height: logicalSize.height,
-        child: MediaQuery(
-          data: mq.copyWith(
-            size: logicalSize,
-            devicePixelRatio: mq.devicePixelRatio * scale,
-            padding: scaleInsets(mq.padding, zeroTop: true),
-            viewPadding: scaleInsets(mq.viewPadding, zeroTop: true),
-            viewInsets: scaleInsets(mq.viewInsets),
+    if (!realSize.width.isFinite ||
+        !realSize.height.isFinite ||
+        realSize.width <= 0 ||
+        realSize.height <= 0) {
+      return const SizedBox.shrink();
+    }
+    // An explicit scale stays finite during route and keyboard transitions;
+    // FittedBox derives a matrix from paint bounds, including empty frames.
+    return ClipRect(
+      child: Transform.scale(
+        scale: scale,
+        alignment: Alignment.topLeft,
+        child: OverflowBox(
+          alignment: Alignment.topLeft,
+          minWidth: logicalSize.width,
+          maxWidth: logicalSize.width,
+          minHeight: logicalSize.height,
+          maxHeight: logicalSize.height,
+          child: SizedBox(
+            width: logicalSize.width,
+            height: logicalSize.height,
+            child: MediaQuery(
+              data: mq.copyWith(
+                size: logicalSize,
+                devicePixelRatio: mq.devicePixelRatio * scale,
+                padding: scaleInsets(mq.padding, zeroTop: true),
+                viewPadding: scaleInsets(mq.viewPadding, zeroTop: true),
+                viewInsets: scaleInsets(mq.viewInsets),
+              ),
+              child: child,
+            ),
           ),
-          child: child,
         ),
       ),
     );

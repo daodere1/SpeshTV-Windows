@@ -2,11 +2,15 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
 import 'package:server_core/server_core.dart';
 
 import '../../preference/preference_constants.dart';
 import '../models/channel_facets.dart';
+import '../models/live_tv_recording_state.dart';
 import '../services/member_list_changes.dart';
+import '../services/session_request_cache.dart';
+import '../../util/spesh_load_metrics.dart';
 
 bool hasGuideTitle(String? title) => title != null &&
     title.trim().isNotEmpty &&
@@ -47,6 +51,13 @@ class GuideChannel {
 }
 
 class GuideProgram {
+  String get episodeLine {
+    final title = episodeTitle?.trim() ?? '';
+    final number = seasonEpisodeLabel ?? '';
+    return [if (title.isNotEmpty && title != name) title, if (number.isNotEmpty) '($number)'].join(' ');
+  }
+
+  String get titleWithEpisode => episodeLine.isEmpty ? name : '$name / $episodeLine';
   final String id;
   final String channelId;
   final String name;
@@ -126,6 +137,14 @@ enum GuideFilter {
 enum GuideState { loading, ready, error }
 
 class LiveTvGuideViewModel extends ChangeNotifier {
+  int _recordingRevision = liveTvRecordingRevision.value;
+  Future<void> reloadIfRecordingsChanged() async {
+    final revision = liveTvRecordingRevision.value;
+    if (_recordingRevision == revision) return;
+    await refreshCarouselPrograms();
+    _recordingRevision = revision;
+  }
+  static final _lineupCaches = Expando<SessionRequestCache<Map<String, dynamic>>>();
   final MediaServerClient _client;
 
   static const _defaultGuideWindowHours = 3;
@@ -135,7 +154,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   // Programs are loaded lazily in batches of this many channels as the guide is
   // scrolled, instead of one giant all-channels request (issue #666 timeout).
-  static const _programBatchSize = 50;
+  static const _programBatchSize = 12;
+  final Set<String> _failedProgramIds = {};
 
   int _guideWindowHours = _defaultGuideWindowHours;
   int get guideWindowHours => _guideWindowHours;
@@ -237,6 +257,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   String get errorMessage => _errorMessage;
 
   List<GuideChannel> _channels = const [];
+  final Map<String, GuideChannel> _channelsById = {};
+  List<GuideChannel>? _filteredChannelCache;
+
+  @override
+  void notifyListeners() {
+    _filteredChannelCache = null;
+    if (!_disposed) super.notifyListeners();
+  }
   List<GuideChannel> get channels => List.unmodifiable(_channels);
   String _channelQuery = '';
   String _country = '', _package = '', _tag = '';
@@ -308,7 +336,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   DateTime _windowEnd = DateTime.now();
   DateTime get windowEnd => _windowEnd;
 
-  List<GuideChannel> get filteredChannels {
+  List<GuideChannel> get filteredChannels => _filteredChannelCache ??=
+      List.unmodifiable(_computeFilteredChannels());
+
+  List<GuideChannel> _computeFilteredChannels() {
     final matching = _channels.where((ch) {
       final facets = _channelFacets[ch.id];
       bool includes(Set<String>? values, String selected) => selected.isEmpty ||
@@ -341,10 +372,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   GuideChannel? channelForId(String channelId) {
-    for (final channel in _channels) {
-      if (channel.id == channelId) return channel;
-    }
-    return null;
+    return _channelsById[channelId];
   }
 
   /// The currently-airing program and the next upcoming one for a channel,
@@ -404,6 +432,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final channels = List<GuideChannel>.from(_channels);
     channels[index] = updated;
     _channels = channels;
+    _channelsById[channelId] = updated;
     notifyListeners();
 
     try {
@@ -418,6 +447,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       final currentIndex = reverted.indexWhere((c) => c.id == channelId);
       if (currentIndex >= 0) reverted[currentIndex] = current;
       _channels = reverted;
+      _channelsById[channelId] = current;
       notifyListeners();
       rethrow;
     }
@@ -462,7 +492,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   List<GuideProgram> unfilteredProgramsForChannel(String id) =>
       _programsByChannel[id] ?? const [];
   GuideChannelLoadState loadStateFor(String id) => hasProgramsFor(id)
-      ? GuideChannelLoadState.loaded : GuideChannelLoadState.loading;
+      ? GuideChannelLoadState.loaded : _failedProgramIds.contains(id)
+          ? GuideChannelLoadState.failed : GuideChannelLoadState.loading;
   Future<void> refreshAtQuarterHour() => refreshCarouselPrograms();
   Future<void> refreshCarouselPrograms() {
     if (_disposed) return Future.value();
@@ -501,13 +532,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   Future<void> load({int? windowHours, List<String>? initialChannelIds,
-      DateTime? windowStart, bool livePosition = false}) async {
+      DateTime? windowStart, bool livePosition = false, bool forceRefresh = false}) async {
     if (windowHours != null) _guideWindowHours = windowHours;
     _state = GuideState.loading;
     notifyListeners();
 
     try {
-      await _fetchChannels();
+      await _fetchChannels(force: forceRefresh);
 
       _windowStart = DateTime(
         _guideDate.year,
@@ -517,6 +548,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       );
       if (windowStart != null) _windowStart = windowStart;
       _windowEnd = _windowStart.add(Duration(hours: _guideWindowHours));
+
+      // Channel selection and playback need not wait for programme requests.
+      _resetPrograms();
+      _loadingMore = true;
+      _state = GuideState.ready;
+      notifyListeners();
 
       if (initialChannelIds == null) {
         await loadInitialPrograms();
@@ -530,8 +567,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       }
       _state = GuideState.ready;
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = 'The guide could not be loaded. Please retry.';
       _state = GuideState.error;
+    } finally {
+      _loadingMore = false;
     }
     notifyListeners();
   }
@@ -571,14 +610,21 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   Future<void> _reloadPrograms() async {
-    _state = GuideState.loading;
+    _state = _channels.isEmpty ? GuideState.loading : GuideState.ready;
     notifyListeners();
 
     try {
       // Re-fetch as many channels as were already loaded (at least the first
       // batch) so the user keeps the rows they had scrolled to.
       final target = max(_programsHighWater, _programBatchSize);
+      final retained = <String, List<GuideProgram>>{
+        for (final entry in _programsByChannel.entries)
+          entry.key: entry.value.where((program) =>
+            program.endDate.isAfter(_windowStart) &&
+            program.startDate.isBefore(_windowEnd)).toList(),
+      };
       _resetPrograms();
+      _programsByChannel.addAll(retained);
       while (_programsHighWater < target && hasMorePrograms) {
         await _loadNextBatch();
       }
@@ -592,35 +638,107 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   Future<void> goToNow() async {
     _guideDate = DateTime.now();
-    await load(windowHours: _guideWindowHours);
+    await load(windowHours: _guideWindowHours, forceRefresh: true);
   }
 
-  Future<void> _fetchChannels() async {
-    final response = await _client.liveTvApi.getChannels(
+  Future<void> _fetchChannels({bool force = false}) async {
+    final user = _client.userId ?? '';
+    final cache = _lineupCaches[_client] ??=
+        SessionRequestCache<Map<String, dynamic>>(capacity: 4);
+    final progressive = _channels.isEmpty;
+    final firstPage = Completer<Map<String, dynamic>>();
+    Future<Map<String, dynamic>> fetch() async {
+      final timer = Stopwatch()..start();
+      final all = <dynamic>[];
+      final seen = <String>{};
+      try {
+      for (var start = 0; ; start += 200) {
+      if (_disposed || (_client.userId ?? '') != user) throw StateError('Lineup load cancelled');
+      final page = await _client.liveTvApi.getChannels(
+      startIndex: start, limit: 200,
       sortBy: 'SortName',
       sortOrder: 'Ascending',
       fields: 'ImageTags,UserData,Tags,Genres',
       enableTotalRecordCount: false,
       userId: _client.userId,
     );
+      final items = (page['Items'] as List?) ?? const [];
+      final fresh = items.where((item) => item is Map &&
+          seen.add(item['Id']?.toString() ?? '')).toList();
+      if (items.isNotEmpty && fresh.isEmpty) break;
+      all.addAll(fresh);
+      final snapshot = <String, dynamic>{'Items': List<dynamic>.of(all)};
+      if (progressive && !firstPage.isCompleted) {
+        firstPage.complete(snapshot);
+        SpeshLoadMetrics.record('lineup-first-page', timer, count: all.length);
+      } else if (progressive && !_disposed) {
+        _applyChannels(snapshot, complete: false);
+        notifyListeners();
+      }
+      if (items.length < 200) break;
+      }
+      SpeshLoadMetrics.record('lineup-complete', timer, count: all.length);
+      return {'Items': all};
+      } catch (error, stack) {
+        if (progressive && !firstPage.isCompleted) firstPage.completeError(error, stack);
+        rethrow;
+      }
+    }
+    final cached = force ? null : cache.peek(user, maxAge: const Duration(minutes: 10));
+    if (cached != null) {
+      _applyChannels(cached);
+      unawaited(cache.load(user, fetch, ttl: const Duration(minutes: 1)).then((fresh) {
+        if (_disposed || (_client.userId ?? '') != user) return;
+        _applyChannels(fresh);
+        notifyListeners();
+      }).catchError((Object _) {}));
+      return;
+    }
+    final task = cache.load(user, fetch, force: force);
+    if (progressive) {
+      unawaited(task.then((complete) {
+        if (!firstPage.isCompleted) firstPage.complete(complete);
+      }, onError: (Object error, StackTrace stack) {
+        if (!firstPage.isCompleted) firstPage.completeError(error, stack);
+      }));
+    }
+    final response = progressive ? await firstPage.future : await task;
+    if (progressive) {
+      unawaited(task.then((complete) {
+        if (_disposed || (_client.userId ?? '') != user) return;
+        _applyChannels(complete);
+        notifyListeners();
+      }).catchError((Object _) {}));
+    }
+    if (!_disposed && (_client.userId ?? '') == user) _applyChannels(response, complete: !progressive);
+  }
+
+  void _applyChannels(Map<String, dynamic> response, {bool complete = true}) {
     final items = (response['Items'] as List?) ?? [];
     _channels = items
         .cast<Map<String, dynamic>>()
         .map(GuideChannel.fromRawItem)
         .toList()
       ..sort(comparatorFor(_sortBy));
+    _channelsById
+      ..clear()
+      ..addEntries(_channels.map((channel) => MapEntry(channel.id, channel)));
     _channelFacets
       ..clear()
       ..addEntries(_channels.map((c) => MapEntry(c.id, ChannelFacets.fromChannel(c.name, c.rawData))));
     countryOptions = channelFilterOptions(_channelFacets.values.map((f) => f.countries));
     packageOptions = channelFilterOptions(_channelFacets.values.map((f) => f.packages));
     tagOptions = channelFilterOptions(_channelFacets.values.map((f) => f.tags));
-    if (!countryOptions.any((o) => o.value == _country)) _country = '';
-    if (!packageOptions.any((o) => o.value == _package)) _package = '';
-    if (!tagOptions.any((o) => o.value == _tag)) _tag = '';
+    if (complete) {
+      if (!countryOptions.any((o) => o.value == _country)) _country = '';
+      if (!packageOptions.any((o) => o.value == _package)) _package = '';
+      if (!tagOptions.any((o) => o.value == _tag)) _tag = '';
+    }
   }
 
   void _resetPrograms() {
+    _pendingProgramLoads.clear();
+    _failedProgramIds.clear();
     _programsByChannel.clear();
     _programsLoadedIds.clear();
     _programsHighWater = 0;
@@ -682,11 +800,64 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// Fetches programs for one batch of channels and merges them into the cache
   /// (with images/user-data disabled to keep the payload small).
   Future<void> _loadProgramsBatch(List<GuideChannel> batch) async {
+    final waits = <Future<void>>{};
+    final fresh = <GuideChannel>[];
+    for (final channel in batch) {
+      final pending = _pendingProgramLoads[channel.id];
+      if (pending != null) { waits.add(pending); }
+      else if (!_programsLoadedIds.contains(channel.id)) { fresh.add(channel); }
+    }
+    if (fresh.isNotEmpty) {
+      final task = _loadProgramsWithRetry(fresh);
+      for (final channel in fresh) { _pendingProgramLoads[channel.id] = task; }
+      waits.add(task);
+      try {
+        await Future.wait(waits);
+      } finally {
+        for (final channel in fresh) {
+          if (identical(_pendingProgramLoads[channel.id], task)) {
+            _pendingProgramLoads.remove(channel.id);
+          }
+        }
+      }
+    } else {
+      await Future.wait(waits);
+    }
+  }
+
+  final _pendingProgramLoads = <String, Future<void>>{};
+
+  Future<void> _loadProgramsWithRetry(List<GuideChannel> batch) async {
+    try {
+      await _fetchProgramsBatch(batch);
+    } catch (error) {
+      if (!_isTransientGuideError(error)) rethrow;
+      // One bounded retry; do not turn a programme timeout into an empty lineup.
+      try {
+        await _fetchProgramsBatch(batch);
+      } catch (retryError) {
+        if (!_isTransientGuideError(retryError)) rethrow;
+        _failedProgramIds.addAll(batch.map((channel) => channel.id));
+      }
+    }
+  }
+
+  bool _isTransientGuideError(Object error) => error is TimeoutException ||
+      (error is DioException && (
+        error.type == DioExceptionType.receiveTimeout ||
+        error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.connectionError ||
+        (error.response?.statusCode ?? 0) >= 500));
+
+  Future<void> _fetchProgramsBatch(List<GuideChannel> batch) async {
     if (batch.isEmpty) return;
+    final timer = Stopwatch()..start();
+    final requestedStart = _windowStart;
+    final requestedEnd = _windowEnd;
     final ids = batch.map((c) => c.id).toList();
     final response = await _client.liveTvApi.getGuide(
-      startDate: _windowStart,
-      endDate: _windowEnd,
+      startDate: requestedStart,
+      endDate: requestedEnd,
       channelIds: ids,
       fields: _fields,
       enableTotalRecordCount: false,
@@ -695,7 +866,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       userId: _client.userId,
     );
 
+    if (_disposed || requestedStart != _windowStart || requestedEnd != _windowEnd) return;
     final items = (response['Items'] as List?) ?? [];
+    for (final id in ids) {
+      _programsByChannel.remove(id);
+    }
     final touched = <String>{};
     for (final raw in items.cast<Map<String, dynamic>>()) {
       final channelId = raw['ChannelId']?.toString();
@@ -736,5 +911,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // Mark every requested channel as loaded, even those with no programs, so
     // their rows stop showing the placeholder.
     _programsLoadedIds.addAll(ids);
+    _failedProgramIds.removeAll(ids);
+    SpeshLoadMetrics.record('guide-batch', timer, count: ids.length);
   }
 }

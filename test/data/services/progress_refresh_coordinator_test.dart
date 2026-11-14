@@ -16,6 +16,7 @@ void main() {
     )
     run, {
     Future<void> Function()? refresh,
+    Future<void> Function()? refreshLibrary,
     List<bool>? identityInvalidations,
   }) {
     fakeAsync((clock) {
@@ -37,6 +38,7 @@ void main() {
           calls.add('refresh');
           await refresh?.call();
         },
+        refreshLibrary: refreshLibrary,
       );
       coordinator.setActive(true);
       run(clock, events, connections, coordinator, calls);
@@ -46,6 +48,19 @@ void main() {
       clock.flushMicrotasks();
     });
   }
+
+  test('local playback changes refresh membership when Home returns', () {
+    scenario((clock, events, connections, coordinator, calls) {
+      coordinator.setActive(false);
+      coordinator.changed();
+      coordinator.changed();
+      clock.elapse(const Duration(seconds: 3));
+      expect(calls, ['invalidate', 'invalidate']);
+      coordinator.setActive(true);
+      clock.elapse(const Duration(seconds: 2));
+      expect(calls, ['invalidate', 'invalidate', 'refresh']);
+    });
+  });
 
   test(
     'current-user events invalidate immediately and bursts refresh once',
@@ -112,6 +127,43 @@ void main() {
       clock.elapse(const Duration(seconds: 2));
       expect(calls.where((c) => c == 'refresh').length, 2);
     }, refresh: () => request.future);
+  });
+  test('library bursts refresh all rows; watch changes refresh progress', () {
+    var libraries = 0;
+    scenario((clock, events, connections, coordinator, calls) {
+      events.add(const LibraryChangedMessage(itemsAdded: ['episode']));
+      events.add(UserDataChangedMessage(userId: 'aabb'));
+      clock.elapse(const Duration(seconds: 2));
+      expect(libraries, 1);
+      expect(calls.where((c) => c == 'refresh'), isEmpty);
+      events.add(UserDataChangedMessage(userId: 'aabb'));
+      clock.elapse(const Duration(seconds: 2));
+      expect(calls.where((c) => c == 'refresh').length, 1);
+      connections.add(null);
+      clock.elapse(const Duration(seconds: 2));
+      expect(libraries, 2);
+    }, refreshLibrary: () async { libraries++; });
+  });
+  test('fifth visible fallback catches missed library events', () {
+    var libraries = 0;
+    scenario((clock, events, connections, coordinator, calls) {
+      coordinator.setActive(false);
+      clock.elapse(const Duration(minutes: 5));
+      expect(libraries, 0);
+      coordinator.setActive(true);
+      clock.elapse(const Duration(minutes: 5, seconds: 2));
+      expect(libraries, 1);
+      expect(calls.where((c) => c == 'refresh').length, 4);
+    }, refreshLibrary: () async { libraries++; });
+  });
+  test('failed library refresh is retried as a library refresh', () {
+    var libraries = 0;
+    scenario((clock, events, connections, coordinator, calls) {
+      connections.add(null);
+      clock.elapse(const Duration(seconds: 62));
+      expect(libraries, 2);
+      expect(calls.where((c) => c == 'refresh'), isEmpty);
+    }, refreshLibrary: () async { libraries++; throw StateError('offline'); });
   });
   test('a failed request does not prevent the next fallback', () {
     scenario((clock, events, connections, coordinator, calls) {

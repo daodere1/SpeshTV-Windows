@@ -2,6 +2,18 @@ import 'letterbox_crop.dart';
 
 enum SubtitleRendererMode { native, assOverlay }
 
+/// The part of a live stream that can be sought back into, on the same clock
+/// as the player's position: from the oldest moment the stream still keeps to
+/// its live edge.
+class LiveSeekWindow {
+  const LiveSeekWindow({required this.start, required this.edge});
+
+  final Duration start;
+  final Duration edge;
+
+  Duration get length => edge - start;
+}
+
 /// A caption track the player found inside the video itself, like the CEA-608
 /// captions broadcasters carry in H.264 SEI data.
 ///
@@ -49,6 +61,50 @@ class EmbeddedCaptionTrack {
   }
 }
 
+/// Whether the chosen external subtitle is still being prepared, retries
+/// included. False also covers a canceled or failed load, so it doesn't mean
+/// the subtitle arrived, and it never waits for a cue to show. Backends opt in
+/// by implementing this interface.
+abstract interface class SubtitleLoadingBackend {
+  bool get isSubtitleLoading;
+  Stream<bool> get subtitleLoadingStream;
+}
+
+/// Optional actual-video progress, independent of the audio/playback clock.
+/// Null means unavailable or not applicable (e.g. audio-only playback).
+abstract interface class VideoFrameProgressBackend {
+  bool? get videoFramesAdvancing;
+}
+
+/// Reports which secondary subtitle controls a backend supports.
+abstract interface class SecondarySubtitleBackend {
+  bool get supportsSecondarySubtitleDelay;
+  bool get supportsSecondarySubtitlePosition;
+  bool get supportsSecondarySubtitleStyle;
+}
+
+/// Lets a backend expose secondary size and color support independently.
+/// Backends that don't implement this keep the all-or-nothing
+/// [SecondarySubtitleBackend.supportsSecondarySubtitleStyle] behavior.
+abstract interface class SecondarySubtitleAppearanceBackend {
+  bool get supportsSecondarySubtitleSize;
+  bool get supportsSecondarySubtitleColor;
+}
+
+/// Keeps subtitle timing through source reloads within a viewing session.
+mixin SubtitleDelayState {
+  double subtitleDelaySeconds = 0;
+  int? _subtitleDelaySessionId;
+
+  void updateSubtitleDelaySession(int? sessionId) {
+    // A source without a session ID is a fresh playback request.
+    if (sessionId == null || sessionId != _subtitleDelaySessionId) {
+      subtitleDelaySeconds = 0;
+    }
+    _subtitleDelaySessionId = sessionId;
+  }
+}
+
 abstract class PlayerBackend {
   Future<void> play(
     dynamic mediaItem, {
@@ -74,12 +130,13 @@ abstract class PlayerBackend {
   Stream<bool> get completedStream;
   Stream<Map<String, dynamic>>? get errorStream => null;
 
-  /// A correction the backend applies to sideloaded subtitles on its own,
-  /// in seconds, positive meaning later. It sits on top of the delay the
-  /// user set and is shown next to it, never added into it. Only a backend
-  /// that measures one provides it.
-  double get subtitleAutoOffsetSeconds => 0.0;
-  Stream<double>? get subtitleAutoOffsetStream => null;
+  /// Whether the player has been told to play. Null on engines that don't
+  /// expose their own intent, and callers then fall back to "not playing".
+  ///
+  /// This exists because `isPlaying` is derived: a viewer pause, a starved
+  /// stream and a transient audio focus loss all read as not playing. Only a
+  /// starved stream leaves this true.
+  bool? get playWhenReady => null;
 
   Map<String, dynamic> getDeviceProfile({bool useProgressiveTranscode = false});
 
@@ -93,10 +150,33 @@ abstract class PlayerBackend {
     String? externalSubtitleUrl,
   });
   Future<void> disableSubtitleTrack();
+
+  /// Selects a secondary subtitle by a 1-based embedded track number or an external
+  /// URL. Omit both to turn it off. Backends advertise support through
+  /// [SecondarySubtitleBackend].
+  Future<void> setSecondarySubtitle({
+    String? url,
+    String? codec,
+    String? language,
+    int? embeddedTrackId,
+  }) async {}
+  /// Additional delay, in seconds, on top of the primary subtitle delay.
+  Future<void> setSecondarySubtitleDelay(double seconds) async {}
+
+  /// Null fontSize or textColor follows the primary style. verticalOffset adds spacing
+  /// between the tracks as a fraction of player height. Positive values increase the
+  /// gap. Top-aligned secondary text moves down, and centered layouts may move both
+  /// tracks.
+  Future<void> configureSecondarySubtitleStyle({
+    double? fontSize,
+    double? verticalOffset,
+    int? textColor,
+  }) async {}
   Future<void> waitForTracksReady();
   Future<void> waitForEmbeddedSubtitleCount(int count);
   Future<void> setVolume(double volume);
   Future<void> setAudioDelay(double seconds);
+  double get subtitleDelaySeconds => 0;
   Future<void> setSubtitleDelay(double seconds);
   Future<void> addExternalSubtitle(
     String url, {
@@ -145,6 +225,10 @@ abstract class PlayerBackend {
   /// even when nothing stripped them from the stream.
   bool get demuxesEmbeddedSubtitles => true;
 
+  /// Whether HEVC only plays from the original file. The device decodes it in
+  /// software, and its native player can't take a server HLS copy of it.
+  bool get decodesHevcOnlyFromOriginalFile => false;
+
   /// Caption tracks the player found inside the video, which no server stream
   /// list can describe. Empty on engines that don't decode them.
   List<EmbeddedCaptionTrack> get embeddedCaptionTracks => const [];
@@ -152,6 +236,18 @@ abstract class PlayerBackend {
   /// Turns on one of [embeddedCaptionTracks]. Turning captions back off goes
   /// through [disableSubtitleTrack], the same as any other subtitle.
   Future<void> setEmbeddedCaptionTrack(int id) async {}
+
+  /// Picks a live stream back up after the player ran out of media, returning
+  /// whether it could. A live source has no end, so reaching one means the
+  /// source starved, and the cheapest answer is to re-open it where the stream
+  /// is now rather than tear the server session down. False means the engine
+  /// did nothing, and the caller must escalate rather than wait for a recovery
+  /// that is never coming.
+  Future<bool> resumeLiveEdge() async => false;
+
+  /// Where a live stream can be sought within, or null when it keeps nothing
+  /// to go back to, as a tuner's raw transport stream doesn't.
+  LiveSeekWindow? get liveSeekWindow => null;
 
   /// Fires when the player's own track list changes. Captions carried inside
   /// the video turn up part way through playback, so a menu built when the
@@ -180,8 +276,8 @@ abstract class PlayerBackend {
 
   /// Detect encoded letterbox and crop it. Cover-zoom is not this.
   ///
-  /// Desktop libmpv ships a cropper. Media3 / Aether / Tizen / HTML return
-  /// [UnsupportedLetterboxCropper] until they implement [LetterboxCropper].
+  /// Desktop libmpv and Android Media3 ship a cropper. Aether / Tizen / HTML
+  /// return [UnsupportedLetterboxCropper] until they implement [LetterboxCropper].
   LetterboxCropper get letterboxCropper => const UnsupportedLetterboxCropper();
 
   bool get supportsLetterboxCrop => letterboxCropper.isSupported;

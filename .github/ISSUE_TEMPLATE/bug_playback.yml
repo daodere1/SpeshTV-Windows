@@ -11,7 +11,7 @@ body:
   - type: input
     id: app_version
     attributes:
-      label: Moonfin version
+      label: SpeshTV version
       description: The app version / release tag (e.g., 1.0.0)
       placeholder: 1.0.0
     validations:

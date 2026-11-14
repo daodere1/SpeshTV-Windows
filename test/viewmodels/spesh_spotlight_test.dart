@@ -77,6 +77,7 @@ void main() {
     await vm.load(force: true, preserveCurrent: false);
     old.complete(ready('old settings'));
     await first;
+    await pumpEventQueue();
     expect(vm.items.single.itemId, 'new settings');
     vm.dispose();
   });

@@ -26,6 +26,7 @@ ImageProvider offlineAwareImageProvider(
   String? cacheKey,
   Map<String, String>? headers,
   BaseCacheManager? cacheManager,
+  ImageFetchPriority? priority,
 }) {
   if (isLocalImagePath(url)) {
     final file = FileImage(File(url));
@@ -40,7 +41,11 @@ ImageProvider offlineAwareImageProvider(
   final provider = CachedNetworkImageProvider(
     url,
     cacheKey: cacheKey,
-    headers: headers,
+    headers: artworkFetchHeaders(
+      url,
+      priority ?? takeImageFetchPriority(Map<String, String>.of(headers ?? {})),
+      headers: headers,
+    ),
     cacheManager: cacheManager,
   );
   if (maxWidth != null || maxHeight != null) {

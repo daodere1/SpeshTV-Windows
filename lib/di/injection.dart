@@ -7,10 +7,12 @@ import 'package:server_core/server_core.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth/store/authentication_store.dart';
+import '../auth/store/client_certificate_store.dart';
 import '../data/database/database_connection.dart';
 import '../data/database/offline_database.dart';
 import '../data/offline/offline_catalog.dart';
 import '../data/repositories/offline_repository.dart';
+import '../data/services/client_certificate_service.dart';
 import '../data/services/connectivity_service.dart';
 import '../data/services/crash_report_service.dart';
 import '../data/services/log_service.dart';
@@ -22,7 +24,10 @@ import '../platform/web_runtime_config.dart';
 import '../preference/preference_constants.dart';
 import '../preference/user_preferences.dart';
 import '../util/app_beta.dart';
+import '../util/http_overrides_stub.dart'
+    if (dart.library.io) '../util/http_overrides_io.dart';
 import '../util/platform_detection.dart';
+import '../util/windows_video_watch_diagnostics.dart';
 import 'modules/app_module.dart';
 import 'modules/auth_module.dart';
 import 'modules/server_module.dart';
@@ -43,21 +48,27 @@ bool _legacyStereoAacFallbackDefaultForPlatform() {
 }
 
 String _clientName() {
-  if (PlatformDetection.isAppleTV) return 'Moonfin for tvOS';
+  if (const bool.fromEnvironment('SPESHMEDIA_CLIENT', defaultValue: true)) {
+    if (PlatformDetection.isAndroid && PlatformDetection.isTV) return 'SpeshTV for Android TV';
+    if (PlatformDetection.isAndroid) return 'SpeshTV for Android';
+    if (PlatformDetection.isWindows) return 'SpeshTV for Windows';
+    return 'SpeshTV';
+  }
+  if (PlatformDetection.isAppleTV) return 'SpeshTV for tvOS';
   if (PlatformDetection.isAndroid && PlatformDetection.isTV) {
-    return 'Moonfin for Android TV';
+    return 'SpeshTV for Android TV';
   }
   if (PlatformDetection.isWeb) {
     return webRuntimeConfig.pluginMode
-        ? 'Moonfin for Web'
-        : 'Moonfin on Github';
+        ? 'SpeshTV for Web'
+        : 'SpeshTV on GitHub';
   }
-  if (PlatformDetection.isAndroid) return 'Moonfin for Android';
-  if (PlatformDetection.isIOS) return 'Moonfin for iOS';
-  if (PlatformDetection.isMacOS) return 'Moonfin for macOS';
-  if (PlatformDetection.isWindows) return 'Moonfin for Windows';
-  if (PlatformDetection.isLinux) return 'Moonfin for Linux';
-  return 'Moonfin';
+  if (PlatformDetection.isAndroid) return 'SpeshTV for Android';
+  if (PlatformDetection.isIOS) return 'SpeshTV for iOS';
+  if (PlatformDetection.isMacOS) return 'SpeshTV for macOS';
+  if (PlatformDetection.isWindows) return 'SpeshTV for Windows';
+  if (PlatformDetection.isLinux) return 'SpeshTV for Linux';
+  return 'SpeshTV';
 }
 
 String _joinNonEmpty(List<String?> parts, String separator) {
@@ -160,6 +171,8 @@ Future<String> _resolveAppVersion() async {
   }
   try {
     final info = await pkg.PackageInfo.fromPlatform();
+    WindowsVideoWatchDiagnostics.packageVersion = info.version;
+    WindowsVideoWatchDiagnostics.packageBuild = info.buildNumber;
     return info.version.trim().isNotEmpty ? info.version.trim() : '0.1.0';
   } catch (_) {
     return '0.1.0';
@@ -414,6 +427,7 @@ void registerOfflineStorage() {
 Future<void> configureBackgroundDependencies({bool offline = false}) async {
   if (getIt.isRegistered<DeviceInfo>()) return;
 
+  configureHttpOverrides();
   final preferenceStore = PreferenceStore();
   await preferenceStore.init();
 
@@ -434,6 +448,10 @@ Future<void> configureBackgroundDependencies({bool offline = false}) async {
   registerServerModule();
   registerAuthModule();
   await getIt<AuthenticationStore>().init();
+  await installClientCertificates(
+    getIt<ClientCertificateStore>(),
+    syncNative: false,
+  );
 }
 
 Future<void> configureDependencies() async {
@@ -484,6 +502,9 @@ Future<void> configureDependencies() async {
   await getIt<AuthenticationStore>().init();
   registerPlaybackModule();
   registerAppModule();
+  // Waits on the native player, so it goes after the modules a boot-time
+  // connectivity check may already be reaching for.
+  await installClientCertificates(getIt<ClientCertificateStore>());
 
   getIt.registerSingleton<LogService>(
     LogService(

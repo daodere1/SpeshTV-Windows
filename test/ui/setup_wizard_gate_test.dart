@@ -1,8 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:get_it/get_it.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
+import 'package:moonfin/auth/repositories/session_repository.dart';
+import 'package:moonfin/data/services/media_server_client_factory.dart';
 import 'package:moonfin/preference/preference_constants.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:moonfin/ui/screens/setup/setup_wizard_gate.dart';
+import 'package:moonfin/util/platform_detection.dart';
 import 'package:server_core/server_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -22,6 +26,23 @@ class _FakeClient implements MediaServerClient {
 class _AnonymousClient extends _FakeClient {
   @override
   String? get userId => null;
+}
+
+class _FakeClientFactory extends Fake implements MediaServerClientFactory {
+  _FakeClientFactory(this.clients);
+
+  @override
+  final Map<String, MediaServerClient> clients;
+
+  @override
+  MediaServerClient getActiveClient() => clients.values.last;
+}
+
+class _FakeSessions extends Fake implements SessionRepository {
+  _FakeSessions(this.activeServerId);
+
+  @override
+  final String? activeServerId;
 }
 
 void main() {
@@ -45,7 +66,14 @@ void main() {
     await store.init();
     prefs = UserPreferences(store);
     gate = SetupWizardGate(prefs);
+    // Tests run as Android, which would offer the bottom navbar. Most of these
+    // are about the gate itself, so they run as a device without one.
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.desktop);
   });
+
+  tearDown(
+    () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+  );
 
   group('what the wizard still has to ask', () {
     test('a fresh sign-in is asked everything, and ends on the tour', () {
@@ -145,7 +173,12 @@ void main() {
       gate.beginRerun();
 
       expect(gate.shouldRun(client), isTrue);
-      expect(gate.remainingSteps(), SetupStep.values);
+      // Everything this device can show. There is no bottom bar here, so no
+      // question about its style.
+      expect(
+        gate.remainingSteps(),
+        SetupStep.values.where((s) => s != SetupStep.navbarStyle),
+      );
     });
 
     test('finishing a re-run puts it away again', () async {
@@ -153,6 +186,56 @@ void main() {
       await gate.markComplete(client);
 
       expect(gate.shouldRun(client), isFalse);
+    });
+  });
+
+  group('the bottom navbar style question', () {
+    setUp(() => PlatformDetection.setInterfaceLayout(InterfaceLayout.phone));
+
+    test('a phone asks it right after where navigation goes', () {
+      expect(gate.remainingSteps(), [
+        SetupStep.navbar,
+        SetupStep.navbarStyle,
+        SetupStep.mediaBar,
+        SetupStep.homeRows,
+        SetupStep.detailStyle,
+        SetupStep.tour,
+      ]);
+    });
+
+    test('isn\'t asked on its own when the navbar came from elsewhere',
+        () async {
+      await prefs.set(UserPreferences.navbarPosition, NavbarPosition.bottom);
+
+      expect(gate.remainingSteps(), isNot(contains(SetupStep.navbarStyle)));
+    });
+
+    test('isn\'t asked again once answered', () async {
+      await prefs.set(
+        UserPreferences.bottomNavbarStyle,
+        BottomNavbarStyle.split,
+      );
+
+      expect(gate.remainingSteps(), isNot(contains(SetupStep.navbarStyle)));
+    });
+
+    test('a re-run on a phone includes it', () {
+      gate.beginRerun();
+
+      expect(gate.remainingSteps(), SetupStep.values);
+    });
+
+    test('only shows once Bottom is picked', () {
+      final steps = gate.remainingSteps();
+
+      expect(
+        visibleSetupSteps(steps, NavbarPosition.top),
+        isNot(contains(SetupStep.navbarStyle)),
+      );
+      expect(
+        visibleSetupSteps(steps, NavbarPosition.bottom),
+        contains(SetupStep.navbarStyle),
+      );
     });
   });
 
@@ -186,6 +269,32 @@ void main() {
 
     test('a client with nobody signed in is left alone', () {
       expect(gate.shouldRun(_AnonymousClient()), isFalse);
+    });
+  });
+
+  group('which server the wizard asks about', () {
+    tearDown(() => GetIt.instance.reset());
+
+    test('the signed-in one, not whichever client was made last', () {
+      final signedIn = _FakeClient();
+      final other = _FakeClient();
+      GetIt.instance
+        ..registerSingleton<MediaServerClientFactory>(
+          _FakeClientFactory({'home': signedIn, 'other': other}),
+        )
+        ..registerSingleton<SessionRepository>(_FakeSessions('home'));
+
+      expect(SetupWizardGate.activeClient(), same(signedIn));
+    });
+
+    test('the factory decides when there is no session to go by', () {
+      final first = _FakeClient();
+      final last = _FakeClient();
+      GetIt.instance.registerSingleton<MediaServerClientFactory>(
+        _FakeClientFactory({'a': first, 'b': last}),
+      );
+
+      expect(SetupWizardGate.activeClient(), same(last));
     });
   });
 }

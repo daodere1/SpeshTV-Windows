@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../util/spesh_load_metrics.dart';
 import '../services/spesh_browse_dedupe.dart';
 import '../services/spesh_progress_resolver.dart';
 import '../../ui/widgets/spesh_brand.dart';
@@ -26,6 +27,20 @@ import '../utils/genre_browse_utils.dart';
 import '../utils/playlist_utils.dart';
 
 enum LibraryBrowseState { loading, ready, error }
+
+/// The filters that hold several values at once, each of which the Sort &
+/// Filter panel can clear on its own.
+enum LibraryFilterGroup {
+  features,
+  quality,
+  source,
+  genres,
+  ratings,
+  tags,
+  years,
+  audioLanguages,
+  subtitleLanguages,
+}
 
 class LibraryBrowseViewModel extends ChangeNotifier {
   final MediaServerClient _client;
@@ -110,6 +125,7 @@ class LibraryBrowseViewModel extends ChangeNotifier {
   int get totalCount => _totalCount;
 
   int _filteredOutCount = 0;
+  int _directoryCount = 0;
 
   /// Rows the server has handed back so far, which is where the next page
   /// starts. The rendered count drifts below this whenever a row is dropped,
@@ -462,6 +478,10 @@ class LibraryBrowseViewModel extends ChangeNotifier {
     _groupBy = _prefs.get(
       UserPreferences.libraryGroupBy(_imagePrefKey),
     );
+    final folderViewPref = UserPreferences.libraryFolderView(_prefKey);
+    _folderViewChoice = _prefs.containsPreference(folderViewPref)
+        ? _prefs.get(folderViewPref)
+        : null;
     _prefs.addListener(_onPrefsChanged);
     userDataSync.addListener(_onUserDataChanged);
   }
@@ -597,16 +617,14 @@ class LibraryBrowseViewModel extends ChangeNotifier {
         }
       }
 
-      if (isHomeVideosLibrary || isMixedContentLibrary) {
-        if (_sortBy != LibrarySortBy.name &&
-            _sortBy != LibrarySortBy.dateAdded &&
-            _sortBy != LibrarySortBy.random) {
-          _sortBy = LibrarySortBy.name;
-          await _prefs.set(
-            UserPreferences.librarySortBy(_prefKey),
-            LibrarySortBy.name,
-          );
-        }
+      // Folders come first until something else is picked, and a saved sort
+      // these libraries don't offer goes back to that too.
+      if (folderView &&
+          (!_prefs.containsPreference(UserPreferences.librarySortBy(_prefKey)) ||
+              !sortOptions.contains(_sortBy))) {
+        _sortBy = LibrarySortBy.foldersFirst;
+      } else if (!sortOptions.contains(_sortBy)) {
+        _sortBy = LibrarySortBy.name;
       }
 
       _refreshPosterSizeFromScope();
@@ -699,6 +717,8 @@ class LibraryBrowseViewModel extends ChangeNotifier {
   }
 
   Future<void> _fetchPage(int startIndex, {int? pageSizeOverride}) async {
+    final generation = _pageWalkGeneration;
+    final pageTimer = Stopwatch()..start();
     final pageSize = pageSizeOverride ?? (startIndex == 0 ? _firstPageSize : _pageSize);
     final filters = <String>[];
     if (_playedFilter == PlayedStatusFilter.watched) {
@@ -749,6 +769,8 @@ class LibraryBrowseViewModel extends ChangeNotifier {
           includeTypes.add('BoxSet');
         }
       }
+    } else if (folderView) {
+      collapseBoxSets = false;
     } else {
       switch (_collectionType) {
         case 'movies':
@@ -788,9 +810,11 @@ class LibraryBrowseViewModel extends ChangeNotifier {
       recursive = true;
       includeTypes = ['Book', 'Audio', 'AudioBook'];
       sortBy = 'SortName';
-    } else if (isHomeVideosLibrary || isMixedContentLibrary) {
+    } else if (folderView) {
       recursive = false;
-      sortBy = 'IsFolder,$sortBy';
+    } else if (isHomeVideosLibrary || isMixedContentLibrary) {
+      // A flat list leaves out the folders the files sit in.
+      excludeTypes = {...?excludeTypes, ...kDirectoryItemTypes}.toList();
     }
 
     // A genre tag sits on anything the tree holds, so an unscoped browse comes
@@ -840,6 +864,17 @@ class LibraryBrowseViewModel extends ChangeNotifier {
       sortBy = 'SortName';
     }
 
+    // Plain directories come in full with the first page and everything else
+    // follows by name.
+    final directoriesFirst =
+        folderView && _sortBy == LibrarySortBy.foldersFirst;
+    if (directoriesFirst) {
+      sortBy = 'SortName';
+      excludeTypes = {...?excludeTypes, ...kDirectoryItemTypes}.toList();
+    }
+    final fetchDirectories =
+        directoriesFirst && startIndex == 0 && includeTypes == null;
+
     // Everything the user rated loads as one page, since the plugin serves
     // ids and scores rather than a paged, sorted stream. With the endpoint
     // unreachable this stays null and the browse falls back to the normal
@@ -862,6 +897,7 @@ class LibraryBrowseViewModel extends ChangeNotifier {
     }
 
     final Map<String, dynamic> response;
+    List<dynamic> directories = const [];
     if (myRatingResponse != null) {
       response = myRatingResponse;
     } else if (isAlbumArtistBrowse) {
@@ -893,7 +929,10 @@ class LibraryBrowseViewModel extends ChangeNotifier {
         isFavorite: _favoriteFilter ? true : null,
       );
     } else {
-      response = await _fetchItemsWithFallback(
+        final sortOrder = _sortDirection == SortDirection.ascending
+            ? 'Ascending' : 'Descending';
+        final results = await Future.wait([
+          _fetchItemsWithFallback(
         parentId: _effectiveParentId,
         genreIds: genreId != null ? [genreId!] : null,
         studios: studioName != null ? [studioName!] : null,
@@ -901,9 +940,7 @@ class LibraryBrowseViewModel extends ChangeNotifier {
         excludeItemTypes: excludeTypes,
         collapseBoxSetItems: collapseBoxSets,
         sortBy: sortBy,
-        sortOrder: _sortDirection == SortDirection.ascending
-            ? 'Ascending'
-            : 'Descending',
+          sortOrder: sortOrder,
         startIndex: startIndex,
         limit: pageSize,
         recursive: recursive,
@@ -911,11 +948,28 @@ class LibraryBrowseViewModel extends ChangeNotifier {
         filters: filters.isEmpty ? null : filters,
         seriesStatus: seriesStatus.isEmpty ? null : seriesStatus,
         isFavorite: _favoriteFilter ? true : null,
-      );
+          ),
+          if (fetchDirectories)
+            _getFilteredItems(
+              parentId: _effectiveParentId,
+              genreIds: genreId != null ? [genreId!] : null,
+              studios: studioName != null ? [studioName!] : null,
+              includeItemTypes: kDirectoryItemTypes,
+              sortBy: 'SortName', sortOrder: sortOrder, recursive: recursive,
+              fields: _browseFields, enableImageTypes: _imageTypes,
+              imageTypeLimit: _imageTypeLimit,
+              filters: filters.isEmpty ? null : filters,
+              isFavorite: _favoriteFilter ? true : null,
+              enableTotalRecordCount: false,
+            ),
+        ]);
+        response = results.first;
+        if (fetchDirectories) directories = (results.last['Items'] as List?) ?? const [];
     }
+    if (startIndex == 0) _directoryCount = directories.length;
 
     final rawItems = (response['Items'] as List?) ?? [];
-    var mapped = rawItems
+    var mapped = [...directories, ...rawItems]
         .whereType<Map>()
         .map((raw) => raw.cast<String, dynamic>())
         .map((raw) {
@@ -931,6 +985,7 @@ class LibraryBrowseViewModel extends ChangeNotifier {
         .toList();
 
     var filtered = await _filterLibraryItems(mapped);
+    if (_disposed || generation != _pageWalkGeneration) return;
 
     // Counted for every browse, not just playlists. A dropped item is gone for
     // good, so the total has to shrink with it or the grid keeps asking for
@@ -953,7 +1008,7 @@ class LibraryBrowseViewModel extends ChangeNotifier {
     final totalFromServer = response['TotalRecordCount'] as int?;
     _totalCountKnown = totalFromServer != null;
     if (_totalCountKnown) {
-      _totalCount = totalFromServer! - _filteredOutCount;
+      _totalCount = totalFromServer! + _directoryCount - _filteredOutCount;
       _hasMoreFromPageSize = _items.length + filtered.length < _totalCount;
     } else {
       _hasMoreFromPageSize = rawItems.length == pageSize;
@@ -978,6 +1033,7 @@ class LibraryBrowseViewModel extends ChangeNotifier {
             ? totalFromServer - _filteredOutCount : _items.length;
       }
     }
+    SpeshLoadMetrics.record('library-page', pageTimer, count: rawItems.length);
   }
 
   /// Loads every item the user rated, ordered by their score, through the
@@ -1283,6 +1339,61 @@ class LibraryBrowseViewModel extends ChangeNotifier {
     UserPreferences.librarySubtitleLanguageFilters(_prefKey),
   );
 
+  /// The selections a group holds and where they are saved.
+  (Set<Object>, Preference<List<String>>) _filterGroup(
+    LibraryFilterGroup group,
+  ) => switch (group) {
+    LibraryFilterGroup.features => (
+      _featureFilters,
+      UserPreferences.libraryFeatureFilters(_prefKey),
+    ),
+    LibraryFilterGroup.quality => (
+      _videoQualityFilters,
+      UserPreferences.libraryVideoQualityFilters(_prefKey),
+    ),
+    LibraryFilterGroup.source => (
+      _videoSourceFilters,
+      UserPreferences.libraryVideoSourceFilters(_prefKey),
+    ),
+    LibraryFilterGroup.genres => (
+      _genreFilters,
+      UserPreferences.libraryGenreFilters(_prefKey),
+    ),
+    LibraryFilterGroup.ratings => (
+      _officialRatingFilters,
+      UserPreferences.libraryOfficialRatingFilters(_prefKey),
+    ),
+    LibraryFilterGroup.tags => (
+      _tagFilters,
+      UserPreferences.libraryTagFilters(_prefKey),
+    ),
+    LibraryFilterGroup.years => (
+      _yearFilters,
+      UserPreferences.libraryYearFilters(_prefKey),
+    ),
+    LibraryFilterGroup.audioLanguages => (
+      _audioLanguageFilters,
+      UserPreferences.libraryAudioLanguageFilters(_prefKey),
+    ),
+    LibraryFilterGroup.subtitleLanguages => (
+      _subtitleLanguageFilters,
+      UserPreferences.librarySubtitleLanguageFilters(_prefKey),
+    ),
+  };
+
+  Future<void> _resetFilterGroup(LibraryFilterGroup group) {
+    final (values, preference) = _filterGroup(group);
+    values.clear();
+    return _prefs.set(preference, const <String>[]);
+  }
+
+  /// Clears one group and leaves the rest as they are.
+  Future<void> clearFilterGroup(LibraryFilterGroup group) async {
+    if (_filterGroup(group).$1.isEmpty) return;
+    await _resetFilterGroup(group);
+    await load();
+  }
+
   /// Clears every filter at once, which is the only way out of a combination
   /// that matches nothing.
   Future<void> clearFilters() async {
@@ -1290,15 +1401,6 @@ class LibraryBrowseViewModel extends ChangeNotifier {
     _likedFilter = LikedStatusFilter.all;
     _seriesFilter = SeriesStatusFilter.all;
     if (!favoritesOnly) _favoriteFilter = false;
-    _featureFilters.clear();
-    _videoQualityFilters.clear();
-    _videoSourceFilters.clear();
-    _genreFilters.clear();
-    _officialRatingFilters.clear();
-    _tagFilters.clear();
-    _yearFilters.clear();
-    _audioLanguageFilters.clear();
-    _subtitleLanguageFilters.clear();
 
     await Future.wait([
       _prefs.set(
@@ -1315,39 +1417,7 @@ class LibraryBrowseViewModel extends ChangeNotifier {
       ),
       if (!favoritesOnly)
         _prefs.set(UserPreferences.libraryFavoriteFilter(_prefKey), false),
-      _prefs.set(
-        UserPreferences.libraryFeatureFilters(_prefKey),
-        const <String>[],
-      ),
-      _prefs.set(
-        UserPreferences.libraryVideoQualityFilters(_prefKey),
-        const <String>[],
-      ),
-      _prefs.set(
-        UserPreferences.libraryVideoSourceFilters(_prefKey),
-        const <String>[],
-      ),
-      _prefs.set(
-        UserPreferences.libraryGenreFilters(_prefKey),
-        const <String>[],
-      ),
-      _prefs.set(
-        UserPreferences.libraryOfficialRatingFilters(_prefKey),
-        const <String>[],
-      ),
-      _prefs.set(UserPreferences.libraryTagFilters(_prefKey), const <String>[]),
-      _prefs.set(
-        UserPreferences.libraryYearFilters(_prefKey),
-        const <String>[],
-      ),
-      _prefs.set(
-        UserPreferences.libraryAudioLanguageFilters(_prefKey),
-        const <String>[],
-      ),
-      _prefs.set(
-        UserPreferences.librarySubtitleLanguageFilters(_prefKey),
-        const <String>[],
-      ),
+      for (final group in LibraryFilterGroup.values) _resetFilterGroup(group),
     ]);
     await load();
   }
@@ -1604,16 +1674,32 @@ class LibraryBrowseViewModel extends ChangeNotifier {
       (includeItemTypes != null &&
           includeItemTypes!.any((t) => t == 'Movie' || t == 'Series'));
 
-  /// Only movies and series carry the metadata the groupings read.
-  bool get isGrouping =>
-      _groupBy != LibraryGroupBy.none && isMovieOrSeriesLibrary;
+  /// Only movies and series carry the metadata the groupings read, and folders
+  /// carry none of it.
+  bool get canGroup => isMovieOrSeriesLibrary && !folderView;
+
+  bool get isGrouping => _groupBy != LibraryGroupBy.none && canGroup;
 
   bool get isSongsBrowse =>
       includeItemTypes != null && includeItemTypes!.contains('Audio');
 
-  /// Libraries that list folders beside their items, where the metadata the
-  /// richer sorts read is mostly absent.
-  bool get isFolderyLibrary => isHomeVideosLibrary || isMixedContentLibrary;
+  bool get canFolderView => !isFilterBrowse && includeItemTypes == null;
+
+  bool? _folderViewChoice;
+
+  /// One level of the library's own folders at a time. Home videos and untyped
+  /// libraries start in it, everything else starts flat.
+  bool get folderView =>
+      canFolderView &&
+      (_folderViewChoice ?? (isHomeVideosLibrary || isMixedContentLibrary));
+
+  Future<void> setFolderView(bool value) async {
+    if (value == folderView) return;
+    _folderViewChoice = value;
+    await _prefs.set(UserPreferences.libraryFolderView(_prefKey), value);
+    _sortBy = _prefs.get(UserPreferences.librarySortBy(_prefKey));
+    await load();
+  }
 
   /// Only video holds a picture quality or a disc source worth filtering on.
   bool get supportsVideoFilters =>
@@ -1622,7 +1708,11 @@ class LibraryBrowseViewModel extends ChangeNotifier {
   /// Emby's items query takes no 4K flag and its series status holds only
   /// continuing and ended, so those two options stay out of the picker rather
   /// than sitting there doing nothing.
-  bool get supportsUhdFilter => _client.serverType == ServerType.jellyfin;
+  bool get supportsUhdFilter => _client.serverType != ServerType.emby;
+
+  /// Plex keeps no series status, likes, 3D, extras or disc source to filter
+  /// on, so those stay out of the picker for the same reason.
+  bool get supportsExtraFilters => _client.serverType != ServerType.plex;
 
   bool get supportsUnreleasedSeriesFilter =>
       _client.serverType == ServerType.jellyfin;
@@ -1632,7 +1722,7 @@ class LibraryBrowseViewModel extends ChangeNotifier {
     isMusicBrowse: isMusicBrowse,
     isSeriesLibrary: isSeriesLibrary,
     isBookLibrary: isBookLibrary,
-    isFolderyLibrary: isFolderyLibrary,
+    isFolderyLibrary: folderView,
     isMovieOrSeriesLibrary: isMovieOrSeriesLibrary,
     supportsMyRating: supportsMyRatingSort,
   );

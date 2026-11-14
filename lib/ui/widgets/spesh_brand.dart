@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 const speshWeb = (kIsWeb && bool.fromEnvironment('SPESHTV_WEB')) ||
-    bool.fromEnvironment('SPESHMEDIA_CLIENT');
+    bool.fromEnvironment('SPESHMEDIA_CLIENT', defaultValue: true);
 
 class SpeshBrand extends StatelessWidget {
   const SpeshBrand({super.key, this.height = 40});

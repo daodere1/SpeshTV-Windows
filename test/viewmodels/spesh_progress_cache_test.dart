@@ -68,7 +68,7 @@ void main() {
       multiServerRepo: Multi(),
     );
     key = jsonEncode([
-      'local-first-v1',
+      'local-first-activity-v2',
       'server',
       'user',
       prefs.get(UserPreferences.homeSectionsJson),
@@ -78,6 +78,17 @@ void main() {
     ]);
   });
   tearDown(() => vm.dispose());
+  test('known activity precedes Next Up without activity dates', () async {
+    final old = card('old-resume', 90);
+    old.rawData['UserData']['LastPlayedDate'] = '2026-09-01T00:00:00Z';
+    when(() => source.loadResume('server', startIndex: any(named: 'startIndex')))
+        .thenAnswer((_) async => row([old]));
+    when(() => source.loadNextUp('server', startIndex: any(named: 'startIndex')))
+        .thenAnswer((_) async => row([card('Black Clover', 0), card('second-next', 0)]));
+    await vm.refreshResumeAndNextUp();
+    expect(vm.rows.single.items.map((i) => i.id),
+          ['old-resume', 'Black Clover', 'second-next']);
+  });
   test('cold Home displays resume while Next Up is still pending', () async {
     final slow = Completer<HomeRow>();
     final visible = Completer<void>();
@@ -98,7 +109,7 @@ void main() {
     expect(vm.rows.single.items.map((i) => i.id), containsAll(['fast', 'later']));
   });
   test(
-    'cached cards appear before the server and then receive fresh progress',
+    'cold Home never displays disk progress before a fresh server response',
     () async {
       await cache.write(key, ProgressSnapshot([card('movie', 20)], false));
       final response = Completer<HomeRow>();
@@ -111,7 +122,7 @@ void main() {
       });
       final loading = vm.refreshResumeAndNextUp();
       await requested.future;
-      expect(vm.rows.single.items.single.playbackPositionTicks, 20);
+      expect(vm.rows.expand((r) => r.items), isEmpty);
       response.complete(row([card('movie', 90)]));
       await loading;
       expect(vm.rows.single.items.single.playbackPositionTicks, 90);
@@ -119,14 +130,14 @@ void main() {
     },
   );
   test(
-    'failure preserves snapshot; successful empty clears it; new progress reappears',
+    'cold failure does not display disk history; new progress appears after recovery',
     () async {
       await cache.write(key, ProgressSnapshot([card('movie', 20)], false));
       when(
         () => source.loadResume('server', startIndex: any(named: 'startIndex')),
       ).thenAnswer((_) async => throw StateError('offline'));
       await vm.refreshResumeAndNextUp();
-      expect(vm.rows.single.items.single.id, 'movie');
+      expect(vm.rows, isEmpty);
       when(
         () => source.loadResume('server', startIndex: any(named: 'startIndex')),
       ).thenAnswer((_) async => row([]));
@@ -141,7 +152,7 @@ void main() {
     },
   );
   test(
-    'server invalidation discards an old request and saves its queued replacement',
+    'invalidation automatically retries an old request without another refresh call',
     () async {
       final response = Completer<HomeRow>();
       final requested = Completer<void>();
@@ -158,9 +169,8 @@ void main() {
       final loading = vm.refreshResumeAndNextUp();
       await requested.future;
       vm.invalidateProgressCache();
-      final queued = vm.refreshResumeAndNextUp();
       response.complete(row([card('old', 20)]));
-      await Future.wait([loading, queued]);
+      await loading;
       expect(vm.rows.single.items.single.id, 'new');
       expect((await cache.read(key))!.items.single.id, 'new');
       expect(requests, 2);

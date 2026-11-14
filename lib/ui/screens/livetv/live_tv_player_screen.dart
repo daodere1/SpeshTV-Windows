@@ -13,6 +13,7 @@ import 'package:screen_brightness_platform_interface/screen_brightness_platform_
 import 'package:volume_controller/volume_controller.dart';
 
 import '../../../playback/subtitle_style.dart';
+import '../../../playback/subtitle_view_config.dart' show subtitleStrokeShadows;
 import '../../../playback/live_stall_watchdog.dart';
 import '../../../playback/spesh_now_next.dart';
 import '../../widgets/spesh_picker_now_next.dart';
@@ -32,6 +33,7 @@ import '../../../util/clock_format.dart';
 import '../../../util/subtitle_track_logic.dart';
 import '../../../util/play_method_label.dart';
 import '../../../util/platform_detection.dart';
+import '../../../util/remote_activation.dart';
 import '../../../util/playback_time_label.dart';
 import '../../widgets/adaptive/sf_symbol.dart';
 import '../../widgets/aether_video_view.dart';
@@ -39,6 +41,8 @@ import '../../widgets/playback/stream_info_dialog.dart';
 import '../../widgets/subtitle_preview.dart';
 import '../../widgets/track_selector_dialog.dart';
 import 'live_tv_guide_screen.dart';
+import 'channel_tune_observer.dart';
+import '../../widgets/live_tv/channel_carousel_overlay.dart';
 import '../../screensaver/screensaver_controller.dart';
 import '../../widgets/spesh_brand.dart';
 import '../../navigation/destinations.dart';
@@ -157,6 +161,9 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
 
   final _overlayFocus = FocusNode();
   final _tvPlayPauseFocus = FocusNode(debugLabel: 'LiveTvPlayPause');
+  final _tvPreviousFocus = FocusNode(debugLabel: 'LiveTvPrevious');
+  final _tvNextFocus = FocusNode(debugLabel: 'LiveTvNext');
+  final _tvLastFocus = FocusNode(debugLabel: 'LiveTvLast');
   final _tvChannelsFocus = FocusNode(debugLabel: 'LiveTvChannels');
   final _tvAudioFocus = FocusNode(debugLabel: 'LiveTvAudio');
   final _tvSubtitleFocus = FocusNode(debugLabel: 'LiveTvSubtitle');
@@ -167,6 +174,46 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   // matching one of these exact nodes.
   int _focusedControlIndex = 0;
   PlayerState get _state => _manager.state;
+  StreamSubscription<PlaybackBringupState>? _nativeFailureSub;
+  StreamSubscription<LiveRecoveryStatus?>? _nativeRecoverySub;
+  LiveRecoveryStatus? _nativeRecovery;
+  bool _nativeLiveFailed = false;
+  final _retryFocus = FocusNode(debugLabel: 'LiveTvRetry');
+  bool _isCarouselOpen = false;
+  int _carouselSelectionRevision = 0;
+  ChannelCarouselPrewarm? _carouselPrewarm;
+
+  void _showChannelCarousel() {
+    if (!PlatformDetection.isTV || _isCarouselOpen || _isGuidePickerOpen) return;
+    _hideTimer?.cancel();
+    setState(() { _isCarouselOpen = true; _infoVisible = false; });
+  }
+
+  void _dismissChannelCarousel({bool showControls = false}) {
+    if (!_isCarouselOpen) return;
+    setState(() { _isCarouselOpen = false; _infoVisible = showControls; });
+    _suppressBackNavigation();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _isOverlayInteractionActive) return;
+      _overlayFocus.requestFocus();
+      if (showControls) _showInfo();
+    });
+  }
+
+  Future<void> _onCarouselChannelSelected(String channelId) async {
+    final index = _channels.indexWhere((channel) => channel.id == channelId);
+    if (index < 0 || _isSwitching) return;
+    if (index == _currentIndex) { _dismissChannelCarousel(); return; }
+    final previous = _currentIndex;
+    await _switchChannel(index);
+    if (!mounted) return;
+    if (!_nativeLiveFailed) {
+      _dismissChannelCarousel();
+    } else {
+      setState(() => _carouselSelectionRevision++);
+      await _switchChannel(previous);
+    }
+  }
 
   @override
   void initState() {
@@ -182,6 +229,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
       _screensaverController.setPlaybackActive,
     );
     _currentIndex = widget.startIndex;
+    _channels = List.of(widget.channels);
     _isGuidePickerOpen = widget.startInGuide;
     _applyPlayerDisplayMode();
     _applySubtitleStyle();
@@ -191,7 +239,28 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
       setState(() {});
     });
     _listenForPlayerTrackChanges();
+    if (!PlatformDetection.isWeb) {
+      _nativeRecoverySub = _manager.liveRecoveryStatusStream.listen((status) {
+        if (mounted) setState(() => _nativeRecovery = status);
+      });
+      _nativeFailureSub = _manager.bringupStateStream.listen((state) {
+        if (!mounted || _isStopping || _openingChannel || state.itemId != _currentChannel.id) return;
+        if (state.phase == PlaybackBringupPhase.failed) {
+          setState(() => _nativeLiveFailed = true);
+          if (PlatformDetection.isTV) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _nativeLiveFailed) _retryFocus.requestFocus();
+            });
+          }
+        } else if (state.phase == PlaybackBringupPhase.ready) {
+          setState(() => _nativeLiveFailed = false);
+        }
+      });
+    }
     _tvPlayPauseFocus.addListener(_onControlFocusChanged);
+    _tvPreviousFocus.addListener(_onControlFocusChanged);
+    _tvNextFocus.addListener(_onControlFocusChanged);
+    _tvLastFocus.addListener(_onControlFocusChanged);
     _tvChannelsFocus.addListener(_onControlFocusChanged);
     _tvAudioFocus.addListener(_onControlFocusChanged);
     _tvSubtitleFocus.addListener(_onControlFocusChanged);
@@ -223,6 +292,10 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
 
   @override
   void dispose() {
+    _nativeFailureSub?.cancel();
+    _nativeRecoverySub?.cancel();
+    _retryFocus.dispose();
+    _carouselPrewarm?.dispose();
     _prefs.removeListener(_readRecentHistory);
     _channelGeneration++;
     _stallTimer?.cancel();
@@ -259,6 +332,12 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
       });
     }
     _tvPlayPauseFocus.removeListener(_onControlFocusChanged);
+    _tvPreviousFocus.removeListener(_onControlFocusChanged);
+    _tvNextFocus.removeListener(_onControlFocusChanged);
+    _tvLastFocus.removeListener(_onControlFocusChanged);
+    _tvPreviousFocus.dispose();
+    _tvNextFocus.dispose();
+    _tvLastFocus.dispose();
     _tvChannelsFocus.removeListener(_onControlFocusChanged);
     _tvAudioFocus.removeListener(_onControlFocusChanged);
     _tvSubtitleFocus.removeListener(_onControlFocusChanged);
@@ -656,7 +735,8 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     );
   }
 
-  GuideChannel get _currentChannel => widget.channels[_currentIndex];
+  late List<GuideChannel> _channels;
+  GuideChannel get _currentChannel => _channels[_currentIndex];
 
   void _readRecentHistory() {
     if (!mounted || _client.userId != _historyOwner || _client.baseUrl != _historyServer) return;
@@ -667,9 +747,9 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   int? get _previousChannelIndex {
     if (_client.userId != _historyOwner || _client.baseUrl != _historyServer) return null;
     final id = previousRecentChannel(decodeRecentChannels(_recentHistory), _currentChannel.id,
-        widget.channels.map((channel) => channel.id).toSet());
+        _channels.map((channel) => channel.id).toSet());
     if (id == null) return null;
-    final index = widget.channels.indexWhere((channel) => channel.id == id);
+    final index = _channels.indexWhere((channel) => channel.id == id);
     return index < 0 ? null : index;
   }
 
@@ -682,7 +762,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   void _stepChannel(int direction) {
     if (_isStopping || _openingChannel || _recoveringChannel || _isSwitching) return;
     final index = _currentIndex + direction;
-    if (index < 0 || index >= widget.channels.length) return;
+    if (index < 0 || index >= _channels.length) return;
     _showInfo();
     unawaited(_switchChannel(index));
   }
@@ -716,6 +796,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   }
 
   Future<void> _openChannel(GuideChannel channel, int generation) async {
+    _nativeLiveFailed = false;
     // A channel change starts a new stream, so whatever caption choice is
     // remembered has to be put back once this one reports its own captions.
     _captionTrackApplied = false;
@@ -726,17 +807,35 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     );
     final allowDirect = _prefs.get(UserPreferences.liveTvDirectPlayEnabled);
     try {
-      await _manager.playItems(
+      final terminal = await observeChannelTune(
+        channelId: channel.id,
+        states: _manager.bringupStateStream,
+        timeout: const Duration(seconds: 35),
+        start: () => _manager.playItems(
         [item],
         enableDirectPlay: allowDirect,
-        enableDirectStream: allowDirect,
+        enableDirectStream: true,
         // Keep transcoding available as a fallback so a failed direct-play of
         // the upstream URL recovers to the server transcode instead of erroring.
         enableTranscoding: true,
+        ),
       );
+      if (terminal?.phase != PlaybackBringupPhase.ready) {
+        throw StateError('Channel playback did not become ready.');
+      }
     } catch (e) {
       if (!mounted || generation != _channelGeneration) return;
       _stallMonitoring = false;
+      if (!PlatformDetection.isWeb) {
+        setState(() => _nativeLiveFailed = true);
+        if (PlatformDetection.isTV) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _nativeLiveFailed && !_isCarouselOpen && !_isOverlayInteractionActive) {
+              _retryFocus.requestFocus();
+            }
+          });
+        }
+      }
       if (speshWeb) {
         _stallWatchdog.exhausted = true;
         setState(() => _recoveryMessage = _recoveringChannel
@@ -763,6 +862,10 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
       if (!mounted || generation != _channelGeneration) return;
     }
     _stallWatchdog.reconnected(_stallClock.elapsed);
+    if (PlatformDetection.isTV) {
+      final prewarm = _carouselPrewarm ??= ChannelCarouselPrewarm(_client);
+      prewarm.tuned(_channels, channel.id);
+    }
     _fetchCurrentProgram();
   }
 
@@ -778,6 +881,8 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
       unawaited(_prefs.set(preference, rememberRecentChannel(_prefs.get(preference), _currentChannel.id))
           .catchError((Object _) {}));
     }
+    // Native recovery is owned by PlaybackManager; don't race it with a second retune.
+    if (!PlatformDetection.isWeb) return;
     final action = _stallWatchdog.sample(_stallClock.elapsed, _state.position, active: active);
     if (action == LiveStallAction.reconnect) {
       unawaited(_recoverLiveChannel());
@@ -933,12 +1038,21 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   /// OSD controls in visual order. Audio/subtitle only participate when their
   /// buttons are shown, so arrow navigation never lands on a hidden control.
   List<FocusNode> get _osdFocusOrder => [
+        ..._channelFocusOrder,
         _tvPlayPauseFocus,
         _tvChannelsFocus,
         if (_streamsOfType('Audio').length > 1) _tvAudioFocus,
         if (_hasSubtitleChoices) _tvSubtitleFocus,
         _tvBitrateFocus,
         _tvPlaybackInfoFocus,
+      ];
+
+  List<FocusNode> get _channelFocusOrder => [
+        if (speshWeb && !_isStopping && !_openingChannel && !_recoveringChannel && !_isSwitching) ...[
+          if (_currentIndex > 0) _tvPreviousFocus,
+          if (_currentIndex < _channels.length - 1) _tvNextFocus,
+          if (_previousChannelIndex != null) _tvLastFocus,
+        ],
       ];
 
   bool get _isOverlayInteractionActive {
@@ -977,7 +1091,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     setState(() => _infoVisible = true);
     if (PlatformDetection.isTV) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_infoVisible) return;
+        if (!mounted || !_infoVisible || _isOverlayInteractionActive) return;
         _tvPlayPauseFocus.requestFocus();
       });
     }
@@ -991,7 +1105,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     }
     // Move focus off the OSD controls so it doesn't immediately re-pin itself
     // (a focused control keeps the OSD visible via _onControlFocusChanged).
-    if (PlatformDetection.isTV) {
+    if (PlatformDetection.isTV && !_isOverlayInteractionActive) {
       _overlayFocus.requestFocus();
     }
   }
@@ -1456,17 +1570,24 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
       _scheduleHide();
       if (PlatformDetection.isTV) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted || !_infoVisible) return;
-          _tvChannelsFocus.requestFocus();
+          if (!mounted || !_infoVisible || _isOverlayInteractionActive) return;
+          _tvPlayPauseFocus.requestFocus();
         });
       }
     }
   }
 
-  Future<void> _onGuideChannelSelected(String channelId) async {
-    if (!widget.startInGuide) _closeGuideOverlay();
+  Future<void> _onGuideChannelSelected(String channelId, [List<GuideChannel>? lineup]) async {
+    if (_isStopping || _isSwitching) return;
+    if (lineup != null) {
+      final current = _currentChannel;
+      _channels = List.of(lineup);
+      if (!_channels.any((channel) => channel.id == current.id)) _channels.insert(0, current);
+      _currentIndex = _channels.indexWhere((channel) => channel.id == current.id);
+    }
+    if (!speshWeb && !widget.startInGuide) _closeGuideOverlay();
     if (channelId == _currentChannel.id) return;
-    final selectedIndex = widget.channels.indexWhere(
+    final selectedIndex = _channels.indexWhere(
       (channel) => channel.id == channelId,
     );
     if (selectedIndex >= 0) {
@@ -1568,13 +1689,16 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyRepeatEvent && isRemoteActivation(event)) {
+      return KeyEventResult.handled;
+    }
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
 
     // While the in-player guide overlay is open it owns all navigation keys;
     // let them flow to the embedded guide's focus subtree.
-    if (_isGuidePickerOpen) {
+    if (_isGuidePickerOpen || _isCarouselOpen) {
       return KeyEventResult.ignored;
     }
 
@@ -1596,10 +1720,22 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
       case LogicalKeyboardKey.arrowUp:
       case LogicalKeyboardKey.arrowDown:
         if (!_infoVisible) {
+          if (PlatformDetection.isTV && event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            _showChannelCarousel();
+            return KeyEventResult.handled;
+          }
           _showInfo();
           return KeyEventResult.handled;
         }
         if (PlatformDetection.isTV) {
+          final top = _channelFocusOrder;
+          if (top.isNotEmpty) {
+            if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+              top.first.requestFocus();
+            } else {
+              _tvPlayPauseFocus.requestFocus();
+            }
+          }
           _scheduleHide();
           return KeyEventResult.handled;
         }
@@ -1648,6 +1784,8 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
 
   void _moveControlFocus(int delta) {
     final order = _osdFocusOrder;
+    final focused = order.indexWhere((node) => node.hasFocus);
+    if (focused >= 0) _focusedControlIndex = focused;
     _focusedControlIndex =
         (_focusedControlIndex + delta).clamp(0, order.length - 1);
     order[_focusedControlIndex].requestFocus();
@@ -1661,6 +1799,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
+        if (_isCarouselOpen) { _dismissChannelCarousel(); return; }
         if (_isGuidePickerOpen) {
           if (speshWeb && widget.startInGuide) {
             _returnToSpeshTv();
@@ -1710,6 +1849,17 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
                 children: [
                   _buildVideoSurface(),
                   _buildBufferingIndicator(),
+                  if (_isCarouselOpen)
+                    Positioned.fill(child: ChannelCarouselOverlay(
+                      client: _client,
+                      channels: _channels,
+                      currentChannelId: _currentChannel.id,
+                      selectionRevision: _carouselSelectionRevision,
+                      onChannelSelected: _onCarouselChannelSelected,
+                      onDismiss: () => _dismissChannelCarousel(),
+                      onShowControls: () => _dismissChannelCarousel(showControls: true),
+                      prewarm: _carouselPrewarm,
+                    )),
                   if (PlatformDetection.isMobile) _buildBrightnessOverlay(),
                   if (PlatformDetection.isMobile) _buildVolumeOverlay(),
                   if (_isGuidePickerOpen) _buildGuideOverlay(),
@@ -1803,7 +1953,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
         embedded: true,
         miniPlayerMode: true,
         currentChannel: _currentChannel,
-        onChannelSelected: _onGuideChannelSelected,
+        onChannelSelectedWithLineup: _onGuideChannelSelected,
         onClose: _closeGuideOverlay,
         onReturnHome: speshWeb ? _returnToSpeshTv : null,
         onStopPreview: speshWeb ? _exitPlayback : null,
@@ -1820,6 +1970,22 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
         stream: _state.bufferingStream,
         initialData: _state.isBuffering,
         builder: (context, snap) {
+          if (_nativeLiveFailed) {
+            return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text(AppLocalizations.of(context).failedToPlayChannel(_currentChannel.name)),
+              TextButton.icon(focusNode: _retryFocus,
+                onPressed: () => unawaited(_playCurrentChannel()),
+                icon: const Icon(Icons.refresh), label: const Text('Retry')),
+            ]));
+          }
+          if (_nativeRecovery != null) {
+            final status = _nativeRecovery!;
+            return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 12),
+              Text(AppLocalizations.of(context).liveReconnecting(status.attempt, status.maxAttempts)),
+            ]));
+          }
           if (_recoveryMessage != null) {
             return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
               Padding(padding: const EdgeInsets.all(16), child: Text(_recoveryMessage!, textAlign: TextAlign.center,
@@ -1925,6 +2091,20 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
               ),
             ),
             if (speshWeb) ...[
+              if (PlatformDetection.isTV) ...[
+                if (_channelFocusOrder.contains(_tvPreviousFocus))
+                  _buildOverlayControlButton(focusNode: _tvPreviousFocus,
+                    icon: Icons.keyboard_arrow_up, tooltip: 'Previous channel',
+                    onPressed: () => _stepChannel(-1)),
+                if (_channelFocusOrder.contains(_tvNextFocus))
+                  _buildOverlayControlButton(focusNode: _tvNextFocus,
+                    icon: Icons.keyboard_arrow_down, tooltip: 'Next channel',
+                    onPressed: () => _stepChannel(1)),
+                if (_channelFocusOrder.contains(_tvLastFocus))
+                  _buildOverlayControlButton(focusNode: _tvLastFocus,
+                    icon: Icons.undo, tooltip: 'Return to previous channel',
+                    onPressed: _watchPreviousChannel),
+              ] else ...[
               IconButton(
                 tooltip: 'Previous channel',
                 onPressed: _currentIndex == 0 || _isStopping || _openingChannel || _recoveringChannel || _isSwitching
@@ -1933,13 +2113,14 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
               ),
               IconButton(
                 tooltip: 'Next channel',
-                onPressed: _currentIndex >= widget.channels.length - 1 || _isStopping || _openingChannel || _recoveringChannel || _isSwitching
+                onPressed: _currentIndex >= _channels.length - 1 || _isStopping || _openingChannel || _recoveringChannel || _isSwitching
                     ? null : () => _stepChannel(1),
                 icon: const Icon(Icons.keyboard_arrow_down),
               ),
+              ],
             ],
-            if (speshWeb) SpeshPreviousChannelButton(
-              channelName: previousIndex == null ? null : widget.channels[previousIndex].name,
+            if (speshWeb && !PlatformDetection.isTV) SpeshPreviousChannelButton(
+              channelName: previousIndex == null ? null : _channels[previousIndex].name,
               onPressed: previousIndex == null || _isStopping || _openingChannel || _recoveringChannel || _isSwitching
                   ? null : _watchPreviousChannel,
             ),

@@ -67,6 +67,32 @@ void main() {
 
   tearDown(() => GetIt.instance.reset());
 
+  test('SpeshTV detail does not scan all collection memberships', () async {
+    if (!const bool.fromEnvironment('SPESHMEDIA_CLIENT')) return;
+    when(() => itemsApi.getItem('movie-1',
+        mediaSourceId: any(named: 'mediaSourceId'))).thenAnswer(
+      (_) async => {'Id': 'movie-1', 'Type': 'Movie', 'Name': 'Movie'},
+    );
+    when(() => itemsApi.getAncestors('movie-1'))
+        .thenAnswer((_) async => []);
+    final tmdb = TmdbRepository(client);
+    final vm = ItemDetailViewModel(
+      itemId: 'movie-1', client: client,
+      mutations: ItemMutationRepository(client),
+      mdbListRepository: MdbListRepository(client, tmdb),
+      tmdbRepository: tmdb,
+    );
+    await vm.load();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    verify(() => itemsApi.getAncestors('movie-1')).called(1);
+    verifyNever(() => itemsApi.getItems(
+      includeItemTypes: ['BoxSet'], recursive: true, sortBy: 'SortName',
+      fields: 'BasicSyncInfo,PrimaryImageAspectRatio,ImageTags,ProviderIds',
+      startIndex: 0, limit: 200, enableTotalRecordCount: true,
+    ));
+    vm.dispose();
+  });
+
   test('collection grid asks for the members themselves, episodes included',
       () async {
     final tmdb = TmdbRepository(client);
@@ -88,5 +114,68 @@ void main() {
     expect(vm.collectionItems, hasLength(2));
     expect(vm.collectionItems.map((i) => i.type), everyElement('Episode'));
     expect(vm.collectionItems.first.name, 'Flash vs. Arrow');
+  });
+
+  test('the playlist keeps the server order until another sort is picked',
+      () async {
+    when(() => GetIt.instance<PluginSyncService>().pluginAvailable)
+        .thenReturn(false);
+    when(
+      () => itemsApi.getItems(
+        parentId: 'boxset-1',
+        limit: any(named: 'limit'),
+        fields: 'BasicSyncInfo',
+      ),
+    ).thenAnswer(
+      (_) async => {
+        'Items': [
+          {'Id': 'late', 'Type': 'Movie', 'Name': 'Late', 'ProductionYear': 2010},
+          {'Id': 'show', 'Type': 'Series', 'Name': 'Show'},
+          {'Id': 'early', 'Type': 'Movie', 'Name': 'Early', 'ProductionYear': 1990},
+        ],
+      },
+    );
+    when(() => itemsApi.getEpisodes('show')).thenAnswer(
+      (_) async => {
+        'Items': [
+          {'Id': 'ep', 'Type': 'Episode', 'Name': 'Pilot', 'ProductionYear': 2000},
+        ],
+      },
+    );
+    when(
+      () => itemsApi.getItems(
+        ids: any(named: 'ids'),
+        fields: 'PrimaryImageAspectRatio,BasicSyncInfo,People,Overview',
+      ),
+    ).thenAnswer((invocation) async {
+      final ids = invocation.namedArguments[#ids] as List<String>;
+      return {
+        'Items': [for (final id in ids) {'Id': id, 'Type': 'Movie', 'Name': id}],
+      };
+    });
+
+    final tmdb = TmdbRepository(client);
+    final vm = ItemDetailViewModel(
+      itemId: 'boxset-1',
+      client: client,
+      mutations: ItemMutationRepository(client),
+      mdbListRepository: MdbListRepository(client, tmdb),
+      tmdbRepository: tmdb,
+    );
+
+    await vm.load();
+    for (var i = 0; i < 100 && vm.playlistItems.isEmpty; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+    List<String> order() => vm.playlistItems.map((i) => i.id).toList();
+
+    expect(vm.collectionSort, CollectionSortOption.server);
+    expect(order(), ['late', 'ep', 'early']);
+
+    await vm.setCollectionSort(CollectionSortOption.releaseAscending);
+    expect(order(), ['early', 'ep', 'late']);
+
+    await vm.setCollectionSort(CollectionSortOption.server);
+    expect(order(), ['late', 'ep', 'early']);
   });
 }

@@ -4,6 +4,9 @@ class MediaBarSlideItem {
   final String title;
   final String? overview;
   final String? backdropUrl;
+
+  /// The wide banner art, which usually has the title painted into it.
+  final String? bannerUrl;
   final String? logoUrl;
   final String? posterUrl;
   final String? officialRating;
@@ -17,12 +20,16 @@ class MediaBarSlideItem {
   final String itemType;
   final List<Map<String, dynamic>> remoteTrailers;
 
+  /// The id outside titles carry in place of a server, as on Home.
+  static const externalServerId = 'seerr';
+
   const MediaBarSlideItem({
     required this.itemId,
     required this.serverId,
     required this.title,
     this.overview,
     this.backdropUrl,
+    this.bannerUrl,
     this.logoUrl,
     this.posterUrl,
     this.officialRating,
@@ -36,4 +43,8 @@ class MediaBarSlideItem {
     this.itemType = 'Movie',
     this.remoteTrailers = const [],
   });
+
+  /// Whether this title came from an outside list rather than the server, so it
+  /// opens in Seerr and has nothing to play.
+  bool get isExternal => serverId == externalServerId;
 }

@@ -40,12 +40,21 @@ class DeepLinkService {
   ///  - `moonfin://item?id=<itemId>[&serverId=<serverId>][&userId=<userId>]`
   ///  - `moonfin://play?id=<itemId>[&serverId=<serverId>][&userId=<userId>]`
   ///    (starts playback)
+  ///  - `moonfin://search?query=<text>` (opens search with the query text)
   ///
-  /// `userId` optionally pins a stored user for cold starts, skipping the
-  /// profile picker. It is only honored for users already signed in on this
-  /// device, and never bypasses a PIN or an always-authenticate setting.
+  /// `userId` optionally pins a stored user, skipping the profile picker on a
+  /// cold start and switching to that user when another one is signed in. It
+  /// is only honored for users already signed in on this device, and never
+  /// bypasses a PIN, an always-authenticate setting or Kids Mode.
   static String? routeForDeepLink(Uri uri) {
-    if (uri.scheme != 'moonfin') return null;
+    final speshLink = const bool.fromEnvironment('SPESHMEDIA_CLIENT', defaultValue: true) &&
+        uri.scheme == 'speshtv';
+    if (uri.scheme != 'moonfin' && !speshLink) return null;
+    if (uri.host == 'search') {
+      final query = uri.queryParameters['query'];
+      if (query == null || query.isEmpty) return null;
+      return '/search?query=${Uri.encodeComponent(query)}';
+    }
     final id = uri.queryParameters['id'];
     if (id == null || id.isEmpty) return null;
     final serverId = uri.queryParameters['serverId'];

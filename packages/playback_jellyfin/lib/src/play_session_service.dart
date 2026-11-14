@@ -61,9 +61,18 @@ class PlaySessionService implements PlayerService {
   Future<void> onPlaybackStop(
     dynamic mediaItem,
     StreamResolutionResult resolution,
-    Duration position,
-  ) async {
+    Duration position, {
+    bool releaseLiveStream = true,
+  }) async {
     PlaybackExitBeacon.disarm();
+    // Release before reporting: database work can delay the stop report past
+    // a recovery tune, at which point a late close can kill the replacement.
+    final liveStreamId = resolution.liveStreamId;
+    if (releaseLiveStream && liveStreamId != null && liveStreamId.isNotEmpty) {
+      try {
+        await _client.playbackApi.closeLiveStream(liveStreamId);
+      } catch (_) {}
+    }
     final report = _stopReport(
       mediaItem,
       resolution,
@@ -78,13 +87,6 @@ class PlaySessionService implements PlayerService {
     } catch (error, stackTrace) {
       reportError = error;
       reportStackTrace = stackTrace;
-    }
-
-    final liveStreamId = resolution.liveStreamId;
-    if (liveStreamId != null && liveStreamId.isNotEmpty) {
-      try {
-        await _client.playbackApi.closeLiveStream(liveStreamId);
-      } catch (_) {}
     }
 
     if (reportError != null) {

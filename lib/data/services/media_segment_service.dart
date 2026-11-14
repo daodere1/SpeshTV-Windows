@@ -57,7 +57,7 @@ class MediaSegmentService {
   Map<MediaSegmentType, MediaSegmentAction> get actionMap =>
       parseMediaSegmentActions(_prefs.get(UserPreferences.mediaSegmentActions));
 
-  SegmentCheckResult checkPosition(Duration position) {
+  SegmentCheckResult checkPosition(Duration position, {bool suppressPrompts = false}) {
     if (_segments.isEmpty) return SegmentCheckResult.none;
 
     // Back at or before the start is a rewind into the segment on purpose,
@@ -67,6 +67,11 @@ class MediaSegmentService {
     for (final segment in _segments) {
       if (position >= segment.start && position < segment.end) {
         final action = actionMap[segment.type] ?? MediaSegmentAction.nothing;
+        // A resume/seek can temporarily hide prompts. Do not consume the
+        // first entry until the player can actually display the prompt.
+        if (suppressPrompts && action == MediaSegmentAction.askToSkip) {
+          return SegmentCheckResult.none;
+        }
         // Seeks travel as whole milliseconds; a truncated end would still be
         // inside the segment.
         final skipTo = Duration(

@@ -15,6 +15,7 @@ import '../aether_video_view.dart';
 import '../../../preference/preference_constants.dart';
 import '../../../preference/user_preferences.dart';
 import '../../../util/platform_detection.dart';
+import '../../../util/remote_activation.dart';
 import '../offline_aware_image.dart';
 
 class LiveTvMiniPlayer extends StatefulWidget {
@@ -128,15 +129,7 @@ class _LiveTvMiniPlayerState extends State<LiveTvMiniPlayer> {
       return override;
     }
 
-    if (event is KeyDownEvent || event is KeyRepeatEvent) {
-      if (event.logicalKey == LogicalKeyboardKey.select ||
-          event.logicalKey == LogicalKeyboardKey.enter) {
-        widget.onActivate();
-        return KeyEventResult.handled;
-      }
-    }
-
-    return KeyEventResult.ignored;
+    return handleRemoteActivation(event, widget.onActivate);
   }
 
   @override
@@ -152,6 +145,7 @@ class _LiveTvMiniPlayerState extends State<LiveTvMiniPlayer> {
       focusNode: _effectiveFocusNode,
       onKeyEvent: _handleKeyEvent,
       child: InkWell(
+        canRequestFocus: false,
         onTap: widget.onActivate,
         borderRadius: AppRadius.circular(12),
         child: AnimatedContainer(
@@ -252,11 +246,10 @@ class _LiveTvMiniPlayerState extends State<LiveTvMiniPlayer> {
   }
 
   Widget? _buildLiveVideoSurface() {
-    if (PlatformDetection.isAppleTV) {
-      final listenable = widget.appleTvTextureId;
-      if (listenable == null) {
-        return null;
-      }
+    // The native Apple player hands its picture over as a texture on iOS as
+    // well, since its engine isn't the one the Aether view shows.
+    final listenable = widget.appleTvTextureId;
+    if (listenable != null) {
       return ValueListenableBuilder<int?>(
         valueListenable: listenable,
         builder: (context, textureId, _) {
@@ -275,6 +268,7 @@ class _LiveTvMiniPlayerState extends State<LiveTvMiniPlayer> {
         },
       );
     }
+    if (PlatformDetection.isAppleTV) return null;
 
     if (PlatformDetection.isIOS || PlatformDetection.isMacOS) {
       return const AetherVideoView();

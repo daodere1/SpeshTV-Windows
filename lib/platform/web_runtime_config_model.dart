@@ -22,7 +22,7 @@ class WebRuntimeConfig {
     defaultServerUrl: null,
     discoveryProxyUrl: null,
     enableWebRtcScan: true,
-    brandingName: 'Moonfin',
+    brandingName: 'SpeshTV',
     pluginMode: false,
     forcedServerUrl: null,
   );

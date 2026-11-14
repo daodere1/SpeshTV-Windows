@@ -8,6 +8,7 @@ import '../../theme/app_theme_controller.dart';
 import '../../widgets/settings/clean_settings_typography.dart';
 import 'settings_app_bar.dart';
 import '../../widgets/focus/request_initial_focus.dart';
+import '../../widgets/spesh_brand.dart';
 
 class AppearanceThemeScreen extends StatefulWidget {
   const AppearanceThemeScreen({super.key});
@@ -46,7 +47,12 @@ class _AppearanceThemeScreenState extends State<AppearanceThemeScreen> {
             final selectedThemeId = selectedCustomId.isNotEmpty
                 ? selectedCustomId
                 : AppThemeController.builtInThemeIdFor(selectedBuiltIn);
-            final themes = ThemeRegistry.availableThemes.values.toList()
+            final themes = ThemeRegistry.availableThemes.values.where((spec) =>
+                !speshWeb || !{
+                  ThemeRegistry.neonPulseId,
+                  ThemeRegistry.glassId,
+                  ThemeRegistry.eightbitHeroId,
+                }.contains(spec.id)).toList()
               ..sort((a, b) {
                 final aRank = _themeSortRank(a.id);
                 final bRank = _themeSortRank(b.id);
@@ -59,7 +65,12 @@ class _AppearanceThemeScreenState extends State<AppearanceThemeScreen> {
             return RequestInitialFocus(
               child: ListView(
                 controller: _scrollController,
-                padding: const EdgeInsets.all(20),
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  20,
+                  20,
+                  20 + MediaQuery.paddingOf(context).bottom,
+                ),
                 children: [
                   _SectionHeader(l10n.customThemeTitle, topPadding: 0),
                   const SizedBox(height: 4),
@@ -97,6 +108,7 @@ class _AppearanceThemeScreenState extends State<AppearanceThemeScreen> {
   }
 
   static String _titleForTheme(AppLocalizations l10n, ThemeSpec spec) {
+    if (speshWeb && spec.id == 'spesha-style') return 'SpeshTV';
     return switch (spec.id) {
       ThemeRegistry.moonfinId => l10n.themeMoonfin,
       ThemeRegistry.neonPulseId => l10n.themeNeonPulse,

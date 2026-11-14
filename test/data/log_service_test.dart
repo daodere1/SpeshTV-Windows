@@ -3,6 +3,8 @@ import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:moonfin/data/services/log_service.dart';
 import 'package:moonfin/data/services/media_server_client_factory.dart';
 import 'package:moonfin/preference/user_preferences.dart';
+import 'package:moonfin/util/platform_detection.dart';
+import 'package:moonfin/util/windows_video_watch_diagnostics.dart';
 import 'package:server_core/server_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -26,6 +28,27 @@ Future<LogService> _service({bool loggingEnabled = false}) async {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('reports retain exact build identity and current watchdog state even with logging off', () async {
+    final previousVersion = WindowsVideoWatchDiagnostics.packageVersion;
+    final previousBuild = WindowsVideoWatchDiagnostics.packageBuild;
+    final previousSnapshot = WindowsVideoWatchDiagnostics.snapshot;
+    final logs = await _service();
+    try {
+      WindowsVideoWatchDiagnostics.packageVersion = '2.8.0';
+      WindowsVideoWatchDiagnostics.packageBuild = '30000200';
+      WindowsVideoWatchDiagnostics.update('gate=watching read=texture nativeSchema=2', 'test');
+      final report = logs.exportText();
+      expect(report, contains('package=2.8.0+30000200'));
+      expect(report, contains('feature=frame-watch-v2'));
+      expect(report, contains('nativeSchema=2'));
+    } finally {
+      logs.dispose();
+      WindowsVideoWatchDiagnostics.packageVersion = previousVersion;
+      WindowsVideoWatchDiagnostics.packageBuild = previousBuild;
+      WindowsVideoWatchDiagnostics.snapshot = previousSnapshot;
+    }
+  });
 
   test('a crash is recorded even while diagnostic logging is off', () async {
     final logs = await _service();
@@ -86,6 +109,24 @@ void main() {
         'POST https://my-server.com/Items/abc/PlaybackInfo?maxStreamingBitrate=4000000',
         'POST https://[REDACTED]/Items/abc/PlaybackInfo?maxStreamingBitrate=4000000',
       );
+    });
+
+    test('keeps the endpoint of a URL given as a labelled value', () {
+      logs.clear();
+      logs.logCrash(
+        'Uncaught: HttpException',
+        'HttpException: Invalid statusCode: 500, uri = '
+            'https://my-server.com/Items/abc/Images/Primary'
+            '?maxWidth=420&api_key=deadbeefcafe',
+      );
+      final error = logs.entries.single.error!;
+      expect(
+        error,
+        contains('uri = https://[REDACTED]/Items/abc/Images/Primary'),
+      );
+      expect(error, contains('api_key=[REDACTED]'));
+      expect(error, isNot(contains('my-server.com')));
+      expect(error, isNot(contains('deadbeefcafe')));
     });
 
     test('redacts a credential left in a query string', () {
@@ -156,7 +197,7 @@ void main() {
     test('handles multiple field replacements and case sensitivity', () {
       assertRedacted(
         'SERVER: 1.1.1.1, ORIGIN: https://moonfin.io',
-        'SERVER: [REDACTED], ORIGIN: [REDACTED]',
+        'SERVER: [REDACTED], ORIGIN: https://[REDACTED]',
       );
       assertRedacted(
         'host: a.com and ip: 1.2.3.4',
@@ -219,12 +260,42 @@ void main() {
       logs.logCrash('Uncaught: boom', 'stack trace');
 
       final text = logs.exportText();
-      expect(text, contains('Moonfin diagnostic report'));
+      expect(text, contains('SpeshTV diagnostic report'));
       expect(text, contains('App: Moonfin 0.0.0'));
       expect(text, contains('Device: Test Device (dev-1)'));
       expect(text, contains('INFO  [general] routine event'));
       expect(text, contains('ERROR [general] Uncaught: boom'));
       expect(text, contains('└─ stack trace'));
+    });
+
+    test('includes the system uptime only once it is known', () async {
+      final logs = await _service(loggingEnabled: true);
+      addTearDown(() => PlatformDetection.setSystemUptime(null));
+
+      PlatformDetection.setSystemUptime(null);
+      expect(logs.exportText(), isNot(contains('System uptime')));
+
+      PlatformDetection.setSystemUptime(
+        const Duration(days: 25, hours: 3, minutes: 7).inMilliseconds,
+      );
+      expect(
+        logs.exportText(),
+        matches(RegExp(r'System uptime: 25d 3h 7m \(21712\d{5} ms\)')),
+      );
+    });
+
+    test('includes the renderer only once it is known', () async {
+      final logs = await _service(loggingEnabled: true);
+      addTearDown(() => PlatformDetection.setRenderer(null));
+
+      PlatformDetection.setRenderer(null);
+      expect(logs.exportText(), isNot(contains('Renderer:')));
+
+      PlatformDetection.setRenderer('Impeller (auto, GPU Mali-G31)');
+      expect(
+        logs.exportText(),
+        contains('Renderer: Impeller (auto, GPU Mali-G31)'),
+      );
     });
 
     test('can be bounded to the newest entries', () async {

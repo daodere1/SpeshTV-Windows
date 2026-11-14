@@ -7,6 +7,8 @@ import 'package:get_it/get_it.dart';
 import 'package:server_core/server_core.dart';
 
 import '../../preference/user_preferences.dart';
+import '../../util/platform_detection.dart';
+import '../../util/windows_video_watch_diagnostics.dart';
 import 'media_server_client_factory.dart';
 import 'plugin_sync_service.dart';
 
@@ -88,9 +90,12 @@ class LogService extends ChangeNotifier {
     caseSensitive: false,
   );
 
+  // A value that is itself a URL is left to the URL rule above, so an error
+  // like "Invalid statusCode: 500, uri = ..." keeps its path.
   static final _genericErrorRedactRegex = RegExp(
     r'''\b(host(?:name)?|address|ip|server|url|uri|domain|origin)'''
-    r'''(\s*"?\s*[:=]\s*"?\s*)([^\s,;()<>"{}\[\]']*[.0-9][^\s,;()<>"{}\[\]']*)("?)''',
+    r'''(\s*"?\s*[:=]\s*"?\s*)(?![a-z][a-z0-9+.-]*://)'''
+    r'''([^\s,;()<>"{}\[\]']*[.0-9][^\s,;()<>"{}\[\]']*)("?)''',
     caseSensitive: false,
   );
 
@@ -136,6 +141,7 @@ class LogService extends ChangeNotifier {
     final enabled = _prefs.get(UserPreferences.diagnosticLoggingEnabled);
     if (enabled == _enabled) return;
     _enabled = enabled;
+    WindowsVideoWatchDiagnostics.log = enabled ? playback : null;
     if (enabled) {
       ServerLog.sink = _onServerLog;
       log(
@@ -178,6 +184,21 @@ class LogService extends ChangeNotifier {
         level: _devLevel(level),
         error: error,
       );
+      // developer.log only reaches the VM service, so a device investigation
+      // over adb never saw any of this. debugPrint is the one sink that lands
+      // in logcat, and a debug build is where those investigations happen.
+      //
+      // Not everything, though. Mirroring every entry put a line in logcat for
+      // each HTTP request and response, which is most of the volume and enough
+      // to make a modest box feel sluggish. Playback and media are the
+      // categories a device investigation actually reads; everything else has
+      // to be worth an operator's attention to earn a line.
+      if (level != LogLevel.debug ||
+          category == LogCategory.playback ||
+          category == LogCategory.media) {
+        debugPrint('[${category.label}] ${level.label} $message');
+        if (error != null) debugPrint('    └─ $error');
+      }
       return true;
     }());
 
@@ -246,13 +267,24 @@ class LogService extends ChangeNotifier {
       start = _entries.length - maxEntries;
     }
     final buffer = StringBuffer()
-      ..writeln('Moonfin diagnostic report')
+      ..writeln('SpeshTV diagnostic report')
       ..writeln('Generated: ${DateTime.now().toIso8601String()}')
       ..writeln('App: ${_deviceInfo.appName} ${_deviceInfo.appVersion}')
+      ..writeln('Build: ${WindowsVideoWatchDiagnostics.identity}')
+      ..writeln('Windows video watch: ${WindowsVideoWatchDiagnostics.snapshot}')
       ..writeln('Device: ${_deviceInfo.name} (${_deviceInfo.id})')
       ..writeln('Entries: ${_entries.length - start}')
-      ..writeln('Platform: ${defaultTargetPlatform.name}')
-      ..writeln('=' * 60);
+      ..writeln('Platform: ${defaultTargetPlatform.name}');
+    final renderer = PlatformDetection.renderer;
+    if (renderer != null) buffer.writeln('Renderer: $renderer');
+    final uptime = PlatformDetection.systemUptime;
+    if (uptime != null) {
+      buffer.writeln(
+        'System uptime: ${uptime.inDays}d ${uptime.inHours.remainder(24)}h '
+        '${uptime.inMinutes.remainder(60)}m (${uptime.inMilliseconds} ms)',
+      );
+    }
+    buffer.writeln('=' * 60);
     for (final entry in _entries.skip(start)) {
       buffer.writeln(entry.format());
     }
@@ -325,6 +357,9 @@ class LogService extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (WindowsVideoWatchDiagnostics.log == playback) {
+      WindowsVideoWatchDiagnostics.log = null;
+    }
     _prefs.removeListener(_onPrefsChanged);
     if (identical(ServerLog.sink, _onServerLog)) {
       ServerLog.sink = null;

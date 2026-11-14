@@ -5,18 +5,17 @@
 # reached via reflection, JNI/FFI, or Gson that R8 cannot see and would
 # otherwise strip, causing release-only crashes.
 
-# --- Flutter embedding -------------------------------------------------------
--keep class io.flutter.** { *; }
--keep class io.flutter.plugins.** { *; }
+# Let Flutter's plugin rules and @Keep annotations protect reflected entrypoints.
+# JNI still requires stable names for FlutterJNI.
+-keep class io.flutter.embedding.engine.FlutterJNI { *; }
 -dontwarn io.flutter.embedding.**
 
 # --- flutter_local_notifications (uses Gson reflection for scheduled payloads)
--keep class com.dexterous.** { *; }
+# Notification models and callbacks carry @Keep in plugin v21.
 -keepattributes Signature
 -keepattributes *Annotation*
 # Gson generic type tokens / serialized model fields.
--keep class com.google.gson.** { *; }
--keep class * extends com.google.gson.reflect.TypeToken
+# Gson ships its own consumer rules for TypeToken and adapters.
 -keepclassmembers class * {
     @com.google.gson.annotations.SerializedName <fields>;
 }
@@ -27,8 +26,13 @@
 -dontwarn com.alexmercerind.**
 
 # --- Google Cast framework (referenced via OPTIONS_PROVIDER class name) ------
--keep class com.google.android.gms.cast.** { *; }
--keep class * implements com.google.android.gms.cast.framework.OptionsProvider { *; }
+# Cast ships consumer rules; this app-specific class is also loaded by name.
+-keep class org.moonfin.androidtv.MoonfinCastOptionsProvider { public <methods>; }
+
+# --- audio_service ready flag (reset by name in AudioServiceState) -----------
+-keepclassmembers class com.ryanheise.audioservice.AudioServicePlugin {
+    boolean flutterReady;
+}
 
 # --- sqlite3 native library (loaded by name; drift uses FFI) -----------------
 -keep class org.sqlite.** { *; }
@@ -39,3 +43,6 @@
     native <methods>;
 }
 -keepattributes EnclosingMethod,InnerClasses
+
+# Keep protected JNI/reflection class names; repackage everything else.
+-repackageclasses ''

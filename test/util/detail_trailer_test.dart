@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
@@ -145,6 +148,43 @@ void main() {
       expect(opensTrailersExternally(), isTrue);
     });
 
+    test('Windows embeds YouTube despite a saved external preference', () async {
+      await prefs.set(UserPreferences.detailTrailersExternal, true);
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      try {
+        expect(opensTrailersExternally(url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'), isFalse);
+        expect(opensTrailersExternally(url: 'https://example.com/trailer.mp4'), isTrue);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    test('kids mode keeps trailers inside the app', () async {
+      await prefs.set(UserPreferences.detailTrailersExternal, true);
+      await prefs.set(UserPreferences.kidsModeEnabled, true);
+      expect(opensTrailersExternally(), isFalse);
+      expect(canAutoFallbackToYouTube(), isFalse);
+    });
+
+    test('Android can fall back without opting into external-first playback', () {
+      expect(opensTrailersExternally(), isFalse);
+      expect(canAutoFallbackToYouTube(), isTrue);
+    });
+
+    test('Windows can fall back when YouTube stream extraction fails', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      try {
+        expect(opensTrailersExternally(), isFalse);
+        expect(canAutoFallbackToYouTube(), isTrue);
+        expect(unresolvedTrailerPlaybackUrl(
+          'https://www.youtube.com/watch?v=dQw4w9WgXcQ'), isNull);
+        expect(unresolvedTrailerPlaybackUrl('https://example.com/trailer.mp4'),
+          'https://example.com/trailer.mp4');
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
     test(
       'a launch nothing can handle reports false instead of throwing',
       () async {
@@ -176,6 +216,27 @@ void main() {
         await launchTrailerExternally('https://youtube.com/watch?v=x'),
         isTrue,
       );
+    });
+
+    testWidgets('an unresponsive desktop launcher stops after five seconds',
+        (tester) async {
+      final messenger = TestDefaultBinaryMessengerBinding.instance
+          .defaultBinaryMessenger;
+      final pending = Completer<bool>();
+      const channel = MethodChannel('plugins.flutter.io/url_launcher');
+      messenger.setMockMethodCallHandler(channel, (_) => pending.future);
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      try {
+        final result = launchTrailerExternally('https://example.com/trailer');
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 5));
+        expect(await result, isFalse);
+        pending.complete(true);
+        await tester.pump();
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+        messenger.setMockMethodCallHandler(channel, null);
+      }
     });
   });
 }

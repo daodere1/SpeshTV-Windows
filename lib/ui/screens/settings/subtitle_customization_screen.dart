@@ -5,6 +5,7 @@ import 'package:get_it/get_it.dart';
 import 'package:moonfin_design/moonfin_design.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 
+import '../../../playback/subtitle_style.dart';
 import '../../../preference/user_preferences.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../util/idiom/app_ui_idiom.dart';
@@ -13,6 +14,7 @@ import '../../widgets/overlay_sheet.dart';
 import '../../widgets/settings/clean_settings_typography.dart';
 import '../../widgets/settings/preference_binding.dart';
 import '../../widgets/settings/preference_tiles.dart';
+import '../../widgets/settings/settings_section_header.dart';
 import '../../widgets/subtitle_preview.dart';
 import 'settings_app_bar.dart';
 import '../../widgets/focus/request_initial_focus.dart';
@@ -95,6 +97,7 @@ class _SubtitleCustomizationScreenState
     required double max,
     required double step,
     bool swallowDown = false,
+    bool normalizeStepGrid = false,
   }) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
@@ -120,7 +123,16 @@ class _SubtitleCustomizationScreenState
     if (key == LogicalKeyboardKey.arrowLeft ||
         key == LogicalKeyboardKey.arrowRight) {
       final delta = key == LogicalKeyboardKey.arrowLeft ? -step : step;
-      final next = (binding.value + delta).clamp(min, max);
+      final proposed = binding.value + delta;
+      final next = normalizeStepGrid
+          ? normalizeSteppedSubtitleOffsetChange(
+              storedValue: binding.value,
+              proposedValue: proposed,
+              min: min,
+              max: max,
+              step: step,
+            )
+          : proposed.clamp(min, max).toDouble();
       if (next != binding.value) binding.value = next;
       return KeyEventResult.handled;
     }
@@ -214,11 +226,13 @@ class _SubtitleCustomizationScreenState
                 }
               },
               min: 0.0,
-              max: 0.5,
-              divisions: 50,
-              step: 0.01,
+              max: primarySubtitleMaxOffset,
+              divisions: 18,
+              step: 0.02,
+              normalizeStepGrid: true,
               labelBuilder: (v) => l10n.percentValue((v * 100).round()),
             ),
+            SettingsSectionHeader(l10n.hdr),
             SwitchPreferenceTile(
               preference: UserPreferences.subtitlesHdrSeparate,
               title: l10n.subtitleHdrSeparate,
@@ -284,10 +298,11 @@ class _SubtitleCustomizationScreenState
                             }
                           },
                           min: 0.0,
-                          max: 0.5,
-                          divisions: 50,
-                          step: 0.01,
+                          max: primarySubtitleMaxOffset,
+                          divisions: 18,
+                          step: 0.02,
                           swallowDown: true,
+                          normalizeStepGrid: true,
                           labelBuilder: (v) =>
                               l10n.percentValue((v * 100).round()),
                         ),
@@ -315,6 +330,7 @@ class _SubtitleCustomizationScreenState
     required int divisions,
     required double step,
     bool swallowDown = false,
+    bool normalizeStepGrid = false,
     required String Function(double) labelBuilder,
   }) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -335,6 +351,7 @@ class _SubtitleCustomizationScreenState
             max: max,
             step: step,
             swallowDown: swallowDown,
+            normalizeStepGrid: normalizeStepGrid,
           ),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 90),
@@ -372,7 +389,15 @@ class _SubtitleCustomizationScreenState
                         min: min,
                         max: max,
                         divisions: divisions,
-                        onChanged: (v) => binding.value = v,
+                        onChanged: (v) => binding.value = normalizeStepGrid
+                            ? normalizeSteppedSubtitleOffsetChange(
+                                storedValue: binding.value,
+                                proposedValue: v,
+                                min: min,
+                                max: max,
+                                step: step,
+                              )
+                            : v,
                       )
                     : Slider(
                         focusNode: innerNode,
@@ -380,8 +405,16 @@ class _SubtitleCustomizationScreenState
                         min: min,
                         max: max,
                         divisions: divisions,
-                        label: labelBuilder(value),
-                        onChanged: (v) => binding.value = v,
+                        label: labelBuilder(value.clamp(min, max).toDouble()),
+                        onChanged: (v) => binding.value = normalizeStepGrid
+                            ? normalizeSteppedSubtitleOffsetChange(
+                                storedValue: binding.value,
+                                proposedValue: v,
+                                min: min,
+                                max: max,
+                                step: step,
+                              )
+                            : v,
                       ),
               ),
             ),

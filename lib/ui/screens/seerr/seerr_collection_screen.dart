@@ -7,12 +7,14 @@ import '../../../data/repositories/seerr_repository.dart';
 import '../../../data/services/seerr/seerr_api_models.dart';
 import '../../../data/services/seerr/seerr_error.dart';
 import '../../../data/viewmodels/seerr_collection_view_model.dart';
+import '../../../preference/preference_constants.dart';
 import '../../../preference/seerr_preferences.dart';
 import '../../../preference/user_preferences.dart';
 import '../../../util/platform_detection.dart';
 import '../../navigation/destinations.dart';
 import '../../widgets/library_row.dart';
 import '../../widgets/media_card.dart';
+import '../../widgets/bottom_nav/bottom_navbar.dart';
 import '../../widgets/navigation_layout.dart';
 import '../../widgets/quick_return_wrapper.dart';
 import '../../widgets/seerr/seerr_advanced_request_options.dart';
@@ -42,6 +44,9 @@ class _SeerrCollectionScreenState extends State<SeerrCollectionScreen> {
   SeerrCollectionViewModel? _vm;
   bool _initializing = true;
   final _scrollController = ScrollController();
+  final _requestFocusNode = FocusNode(debugLabel: 'SeerrCollection.request');
+  final _firstPartFocusNode =
+      FocusNode(debugLabel: 'SeerrCollection.firstPart');
 
   @override
   void initState() {
@@ -73,6 +78,8 @@ class _SeerrCollectionScreenState extends State<SeerrCollectionScreen> {
     _vm?.removeListener(_onChanged);
     _vm?.dispose();
     _scrollController.dispose();
+    _requestFocusNode.dispose();
+    _firstPartFocusNode.dispose();
     super.dispose();
   }
 
@@ -80,9 +87,27 @@ class _SeerrCollectionScreenState extends State<SeerrCollectionScreen> {
     if (mounted) setState(() {});
   }
 
+  // The collection loads after the route takes focus, so naming where focus
+  // belongs once it's here pulls it back from the sidebar.
+  FocusNode? get _initialFocusTarget {
+    final vm = _vm;
+    if (vm == null || vm.state.collection == null) return null;
+    if (_showRequest(vm)) return _requestFocusNode;
+    return vm.state.visibleParts.isEmpty ? null : _firstPartFocusNode;
+  }
+
+  bool _showRequest(SeerrCollectionViewModel vm) {
+    final s = vm.state;
+    final requestable = s.requestableParts(is4k: false).isNotEmpty ||
+        (vm.canRequest4kMovies && s.requestableParts(is4k: true).isNotEmpty);
+    return vm.canRequestMovies && requestable;
+  }
+
   @override
-  Widget build(BuildContext context) =>
-      RequestInitialFocus(child: _buildContent(context));
+  Widget build(BuildContext context) => RequestInitialFocus(
+    targetNode: _initialFocusTarget,
+    child: _buildContent(context),
+  );
 
   Widget _buildContent(BuildContext context) {
     return Scaffold(
@@ -159,19 +184,22 @@ class _SeerrCollectionScreenState extends State<SeerrCollectionScreen> {
             ),
           ),
         ),
-        SingleChildScrollView(
-          controller: _scrollController,
-          padding: EdgeInsets.only(
-            top: MediaQuery.of(context).padding.top + 56,
-            bottom: 48,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildHeader(vm, collection, l10n),
-              const SizedBox(height: 12),
-              _buildPartsRow(vm, l10n),
-            ],
+        BottomNavPadded(
+          fallback: 48,
+          builder: (context, bottom) => SingleChildScrollView(
+            controller: _scrollController,
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top + 56,
+              bottom: bottom,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildHeader(vm, collection, l10n),
+                const SizedBox(height: 12),
+                _buildPartsRow(vm, l10n),
+              ],
+            ),
           ),
         ),
       ],
@@ -234,7 +262,18 @@ class _SeerrCollectionScreenState extends State<SeerrCollectionScreen> {
     );
   }
 
-  double get _leftInset => PlatformDetection.useMobileUi ? 16.0 : 48.0;
+  // The left sidebar draws over the page, so the content starts past it.
+  double get _sidebarInset {
+    final navbarIsLeft =
+        GetIt.instance<UserPreferences>().get(UserPreferences.navbarPosition) ==
+        NavbarPosition.left;
+    return navbarIsLeft && !PlatformDetection.useMobileUi ? 56.0 : 0.0;
+  }
+
+  double get _leftInset {
+    if (_sidebarInset > 0) return 72.0;
+    return PlatformDetection.useMobileUi ? 16.0 : 48.0;
+  }
 
   Widget _buildHeader(
     SeerrCollectionViewModel vm,
@@ -242,9 +281,7 @@ class _SeerrCollectionScreenState extends State<SeerrCollectionScreen> {
     AppLocalizations l10n,
   ) {
     final s = vm.state;
-    final requestable = s.requestableParts(is4k: false).isNotEmpty ||
-        (vm.canRequest4kMovies && s.requestableParts(is4k: true).isNotEmpty);
-    final showRequest = vm.canRequestMovies && requestable;
+    final showRequest = _showRequest(vm);
     final total = s.visibleParts.length;
 
     return Padding(
@@ -301,6 +338,7 @@ class _SeerrCollectionScreenState extends State<SeerrCollectionScreen> {
                 const SizedBox(height: 14),
                 if (showRequest)
                   ElevatedButton.icon(
+                    focusNode: _requestFocusNode,
                     onPressed: s.isRequesting
                         ? null
                         : () => _showRequestSheet(vm),
@@ -345,11 +383,13 @@ class _SeerrCollectionScreenState extends State<SeerrCollectionScreen> {
       UserPreferences.cardFocusExpansion,
     );
 
-    return LibraryRow(
+    final row = LibraryRow(
       title: l10n.movies,
       children: parts
           .map(
             (item) => MediaCard(
+              focusNode:
+                  identical(item, parts.first) ? _firstPartFocusNode : null,
               title: item.displayTitle,
               subtitle: _yearOf(item),
               imageUrl: item.posterPath != null
@@ -372,6 +412,7 @@ class _SeerrCollectionScreenState extends State<SeerrCollectionScreen> {
           )
           .toList(),
     );
+    return Padding(padding: EdgeInsets.only(left: _sidebarInset), child: row);
   }
 
   static String? _yearOf(SeerrDiscoverItem item) {

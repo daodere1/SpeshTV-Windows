@@ -72,7 +72,7 @@ void main() {
     await cache.write('key', ProgressSnapshot([card('one')], false));
     expect(
       await ProgressCacheStore(
-        now: () => now.add(const Duration(minutes: 31)),
+        now: () => now.add(const Duration(minutes: 3)),
       ).read('key'),
       isNull,
     );

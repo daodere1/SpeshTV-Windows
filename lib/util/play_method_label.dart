@@ -1,74 +1,37 @@
-import 'package:playback_core/playback_core.dart';
-
 import '../l10n/app_localizations.dart';
-
-const Set<String> _bitrateOrResolutionReasons = <String>{
-  'videobitratenotsupported',
-  'containerbitrateexceedslimit',
-  'videobitrateexceedslimit',
-  'bitratelimitexceeded',
-  'containerbitratenotsupported',
-  'videoresolutionnotsupported',
-  'audiobitratenotsupported',
-};
-
-const Set<String> _videoCodecReasons = <String>{
-  'videocodecnotsupported',
-  'videoprofilenotsupported',
-  'videolevelnotsupported',
-  'videoframeratenotsupported',
-  'videorangenotsupported',
-  'videorangetypenotsupported',
-  'videobitdepthnotsupported',
-  'anamorphicvideonotsupported',
-  'interlacedvideonotsupported',
-  'refframesnotsupported',
-};
-
-const Set<String> _audioCodecReasons = <String>{
-  'audiocodecnotsupported',
-  'audiochannelsnotsupported',
-  'audioprofilenotsupported',
-  'audiosampleratenotsupported',
-  'audiobitdepthnotsupported',
-};
+import 'package:playback_core/playback_core.dart';
 
 String playbackMethodLabel({
   required AppLocalizations l10n,
   StreamPlayMethod? playMethod,
-  List<String> transcodingReasons = const <String>[],
+  List<String> transcodingReasons = const [],
   String? fallbackPlayMethod,
 }) {
-  final lowerReasons = transcodingReasons
-      .map((e) => e.toLowerCase())
-      .toList(growable: false);
-
-  if (playMethod != null) {
-    if (playMethod == StreamPlayMethod.directPlay) {
-      return l10n.directPlay;
-    }
-    if (playMethod == StreamPlayMethod.directStream) {
-      return l10n.directStreamRemux;
-    }
-    if (playMethod == StreamPlayMethod.transcode) {
-      final isBitrateOrRes = lowerReasons.any(_bitrateOrResolutionReasons.contains);
-      final hasVideoCodec = lowerReasons.any(_videoCodecReasons.contains);
-      final hasAudioCodec = lowerReasons.any(_audioCodecReasons.contains);
-
-      if (isBitrateOrRes) {
-        return l10n.transcodingBitrateOrResolution;
-      } else if (hasVideoCodec && hasAudioCodec) {
-        return l10n.transcodingVideoAndAudio;
-      } else if (hasVideoCodec) {
-        return l10n.transcodingVideo;
-      } else if (hasAudioCodec) {
-        return l10n.transcodingAudio;
-      } else {
-        return l10n.transcoding;
-      }
-    }
+  if (playMethod == StreamPlayMethod.directPlay) return l10n.directPlay;
+  if (playMethod == StreamPlayMethod.directStream) return l10n.directStreamRemux;
+  if (playMethod == StreamPlayMethod.transcode) {
+    final reasons = transcodingReasons.map((r) => r.toLowerCase()).toSet();
+    if (reasons.any(const {
+      'videobitratenotsupported', 'containerbitrateexceedslimit',
+      'videobitrateexceedslimit', 'bitratelimitexceeded',
+      'containerbitratenotsupported', 'videoresolutionnotsupported',
+      'audiobitratenotsupported',
+    }.contains)) return l10n.transcodingBitrateOrResolution;
+    final video = reasons.any(const {
+      'videocodecnotsupported', 'videoprofilenotsupported', 'videolevelnotsupported',
+      'videoframeratenotsupported', 'videorangenotsupported', 'videorangetypenotsupported',
+      'videobitdepthnotsupported', 'anamorphicvideonotsupported',
+      'interlacedvideonotsupported', 'refframesnotsupported',
+    }.contains);
+    final audio = reasons.any(const {
+      'audiocodecnotsupported', 'audiochannelsnotsupported', 'audioprofilenotsupported',
+      'audiosampleratenotsupported', 'audiobitdepthnotsupported',
+    }.contains);
+    if (video && audio) return l10n.transcodingVideoAndAudio;
+    if (video) return l10n.transcodingVideo;
+    if (audio) return l10n.transcodingAudio;
+    return l10n.transcoding;
   }
-
   return switch (fallbackPlayMethod) {
     'directPlay' => l10n.directPlay,
     'directStream' => l10n.directStream,

@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:playback_core/playback_core.dart';
 
 class _TestBackend extends Fake implements PlayerBackend {
+  final completions = StreamController<bool>.broadcast();
   final List<String> playedUrls = <String>[];
   final List<bool> autoPlayValues = <bool>[];
+  final subtitleSessions = <int>[];
   int resumeCalls = 0;
   bool playing = false;
   Duration currentPosition = Duration.zero;
@@ -43,7 +47,7 @@ class _TestBackend extends Fake implements PlayerBackend {
   Stream<bool> get bufferingStream => const Stream<bool>.empty();
 
   @override
-  Stream<bool> get completedStream => const Stream<bool>.empty();
+  Stream<bool> get completedStream => completions.stream;
 
   @override
   Stream<Map<String, dynamic>>? get errorStream => null;
@@ -77,6 +81,7 @@ class _TestBackend extends Fake implements PlayerBackend {
     final autoPlay = payload['autoPlay'] != false;
     playedUrls.add(payload['url'] as String);
     autoPlayValues.add(autoPlay);
+    subtitleSessions.add(payload['subtitleDelaySessionId'] as int);
     currentPosition = startPosition;
     // The real backends load the source and only start it when asked, which
     // is the behaviour under test.
@@ -101,6 +106,9 @@ class _TestBackend extends Fake implements PlayerBackend {
 
   @override
   Future<void> setSubtitleRendererMode(SubtitleRendererMode mode) async {}
+
+  @override
+  Future<void> disableSubtitleTrack() async {}
 
   @override
   Future<void> waitForTracksReady() async {}
@@ -161,8 +169,9 @@ class _TestService extends Fake implements PlayerService {
   Future<void> onPlaybackStop(
     dynamic mediaItem,
     StreamResolutionResult resolution,
-    Duration position,
-  ) async {}
+    Duration position, {
+    bool releaseLiveStream = true,
+  }) async {}
 
   @override
   Future<void> closeLiveStream(String liveStreamId) async {}
@@ -188,7 +197,10 @@ void main() {
       ..setPlayerService(_TestService());
   });
 
-  tearDown(() => manager.dispose());
+  tearDown(() {
+    manager.dispose();
+    backend.completions.close();
+  });
 
   Future<void> startPlayback() async {
     await manager.playItems(<dynamic>[
@@ -196,6 +208,23 @@ void main() {
     ]);
     backend.currentPosition = const Duration(seconds: 90);
   }
+
+  test('natural completion callback excludes pause and manual stop', () async {
+    final completed = <dynamic>[];
+    manager.onItemCompleted = completed.add;
+    manager.autoAdvanceEnabled = false;
+    await startPlayback();
+    await manager.pause();
+    expect(completed, isEmpty);
+    backend.currentPosition = const Duration(minutes: 30);
+    manager.state.setPosition(const Duration(minutes: 30));
+    backend.completions.add(true);
+    await Future<void>.delayed(Duration.zero);
+    expect(completed, hasLength(1));
+    await startPlayback();
+    await manager.stop();
+    expect(completed, hasLength(1));
+  });
 
   test('a paused session stays paused across a re-resolve', () async {
     await startPlayback();
@@ -220,4 +249,31 @@ void main() {
     expect(backend.autoPlayValues, [true, true]);
     expect(backend.isPlaying, isTrue);
   });
+
+  test('repeated server audio commands do not restart the stream', () async {
+    await startPlayback();
+    await manager.changeAudioTrack(1, userInitiated: false);
+    final calls = resolver.calls;
+    for (var i = 0; i < 5; i++) {
+      await manager.changeAudioTrack(1, userInitiated: false);
+    }
+    expect(resolver.calls, calls);
+    expect(backend.isPlaying, isTrue);
+    await manager.changeAudioTrack(2, userInitiated: false);
+    expect(resolver.calls, calls + 1);
+  });
+
+  test(
+    'repeated subtitle-disable commands do not restart the stream',
+    () async {
+      await startPlayback();
+      await manager.disableSubtitles();
+      final calls = resolver.calls;
+      for (var i = 0; i < 5; i++) {
+        await manager.disableSubtitles();
+      }
+      expect(resolver.calls, calls);
+      expect(backend.isPlaying, isTrue);
+    },
+  );
 }

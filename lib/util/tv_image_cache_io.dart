@@ -435,7 +435,9 @@ const _schedulerBypassFetches = 4096;
 BoundedImageFileService buildImageFileService({
   DevicePerformanceTier tier = DevicePerformanceTier.standard,
 }) {
-  final scheduler = ArtworkRequestScheduler(slots: imageRequestSlotsFor(tier));
+  final scheduler = ArtworkRequestScheduler(slots: imageRequestSlotsFor(tier),
+    maxQueuedLow: const bool.fromEnvironment('SPESHMEDIA_CLIENT', defaultValue: true) ? 16 : null,
+    maxLowSlots: const bool.fromEnvironment('SPESHMEDIA_CLIENT', defaultValue: true) ? 1 : null);
   artworkRequestPromoter = scheduler.promote;
   return BoundedImageFileService(
     _ServerUserAgentHttpClient(IOClient(buildImageHttpClient())),

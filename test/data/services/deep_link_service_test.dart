@@ -2,6 +2,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:moonfin/data/services/deep_link_service.dart';
 
 void main() {
+  test('SpeshTV fork accepts its independent desktop link scheme', () {
+    expect(DeepLinkService.routeForDeepLink(Uri.parse('speshtv://play?id=movie')),
+      const bool.fromEnvironment('SPESHMEDIA_CLIENT') ? '/item/movie?autoPlay=true' : null);
+  });
   group('routeForDeepLink', () {
     test('returns null for non-moonfin schemes', () {
       expect(
@@ -66,6 +70,26 @@ void main() {
           Uri.parse('moonfin://play?id=abc123&serverId=&userId='),
         ),
         '/item/abc123?autoPlay=true',
+      );
+    });
+
+    test('routes search host with an encoded query', () {
+      expect(
+        DeepLinkService.routeForDeepLink(
+          Uri.parse('moonfin://search?query=the%20matrix'),
+        ),
+        '/search?query=the%20matrix',
+      );
+    });
+
+    test('returns null for search without a query', () {
+      expect(
+        DeepLinkService.routeForDeepLink(Uri.parse('moonfin://search')),
+        isNull,
+      );
+      expect(
+        DeepLinkService.routeForDeepLink(Uri.parse('moonfin://search?query=')),
+        isNull,
       );
     });
   });

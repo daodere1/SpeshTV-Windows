@@ -9,20 +9,28 @@ import 'package:get_it/get_it.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:server_core/server_core.dart';
 
+import '../../preference/home_section_config.dart';
+import '../../preference/preference_constants.dart';
 import '../../preference/user_preferences.dart';
+import '../../util/tmdb_thumb.dart';
 import '../models/media_bar_slide_item.dart';
 import '../models/media_bar_state.dart';
 import '../services/spotlight_cache_store.dart';
-import '../utils/bounded_concurrency.dart';
+import '../utils/progressive_batches.dart';
+import '../services/custom_external_lists_service.dart';
 import '../services/library_scope_service.dart';
+import '../services/plugin_sync_service.dart';
 import '../utils/blocked_ratings.dart';
+import '../utils/bounded_concurrency.dart';
+import 'tmdb_repository.dart';
+import 'user_views_repository.dart';
 
 class MediaBarRepository {
-
   void precacheImages(BuildContext context, List<MediaBarSlideItem> items) {
     for (final item in items.take(2)) {
       for (final url in [item.backdropUrl, item.logoUrl]) {
-        if (url != null) unawaited(precacheImage(CachedNetworkImageProvider(url), context));
+        if (url != null)
+          unawaited(precacheImage(CachedNetworkImageProvider(url), context));
       }
     }
   }
@@ -53,21 +61,19 @@ class MediaBarRepository {
     }
 
     final contentType = _prefs.get(UserPreferences.mediaBarContentType);
-    final pluginSyncEnabled = _prefs.get(UserPreferences.pluginSyncEnabled);
 
-    final maxItems = pluginSyncEnabled
-        ? (int.tryParse(_prefs.get(UserPreferences.mediaBarItemCount)) ?? 10)
-        : 5;
+    final maxItems =
+        int.tryParse(_prefs.get(UserPreferences.mediaBarItemCount)) ?? 10;
     // The pickers in settings are open to everyone and the filtering below is
     // plain item queries, so a plugin is not needed to honour the choice.
     final libraryIds = _splitCsv(UserPreferences.mediaBarLibraryIds);
     final collectionIds = _splitCsv(UserPreferences.mediaBarCollectionIds);
-    final excludedGenres = _splitCsv(
-      UserPreferences.mediaBarExcludedGenres,
-    ).toSet();
+    final excludedGenres = _splitCsv(UserPreferences.mediaBarExcludedGenres)
+        .toSet();
 
     final cacheKey =
-        const bool.fromEnvironment('SPESHTV_WEB') &&
+        (const bool.fromEnvironment('SPESHTV_WEB') ||
+                const bool.fromEnvironment('SPESHMEDIA_CLIENT', defaultValue: true)) &&
             (_client.userId?.isNotEmpty ?? false)
         ? jsonEncode([
             _client.baseUrl,
@@ -85,7 +91,14 @@ class MediaBarRepository {
       final cached = await _spotlightCache.read(cacheKey);
       if (cached != null) {
         try {
-          onCached(MediaBarReady(cached.map(_toSlideItem).toList()));
+          final allowed = _selectItemsWithBackdrops(
+            cached,
+            maxItems,
+            excludedGenres,
+          );
+          if (allowed.isNotEmpty) {
+            onCached(MediaBarReady(allowed.map(_toSlideItem).toList()));
+          }
         } catch (_) {
           // Invalid or outdated cached metadata must not block fresh results.
         }
@@ -107,15 +120,62 @@ class MediaBarRepository {
       _ => const ['tvshows', 'movies'],
     };
 
+    final externalPool = await _fetchExternalPool(
+      _splitCsv(UserPreferences.mediaBarExternalLists),
+      includeTypes,
+    );
+    // Lists picked on their own fill the bar alone. When they come back empty
+    // the bar falls back to the libraries the same way it does with no picks.
+    if (externalPool.isNotEmpty &&
+        libraryIds.isEmpty &&
+        collectionIds.isEmpty) {
+      final slides = await _mixInExternal(
+        const [],
+        externalPool,
+        maxItems,
+        excludedGenres,
+      );
+      if (slides.isNotEmpty) return MediaBarReady(slides);
+    }
+
     final allParentIds = <String>{};
     final allParentItemTypes = <String, List<String>>{};
+    var librariesResolved = false;
 
     try {
-      final viewsResponse = await _client.userViewsApi.getUserViews().timeout(
-        const Duration(seconds: 4),
-      );
+      final viewsRequest = GetIt.instance.isRegistered<UserViewsRepository>()
+          ? GetIt.instance<UserViewsRepository>().getVisibleViewsResponse()
+          : _client.userViewsApi.getUserViews();
+      Map<String, dynamic> viewsResponse;
+      try {
+        viewsResponse = await viewsRequest.timeout(const Duration(seconds: 4));
+      } catch (_) {
+        // The views endpoint can stall while building virtual/grouped views.
+        // Root folders avoid that work and remain scoped to the signed-in user.
+        final folders = await _client.itemsApi.getItems(
+          includeItemTypes: const ['CollectionFolder'],
+          recursive: false,
+          fields: 'CollectionType',
+          limit: 100,
+          enableTotalRecordCount: false,
+        ).timeout(const Duration(seconds: 8));
+        if ((folders['Items'] as List? ?? []).isEmpty) {
+          // Some Jellyfin roots expose virtual views only. Do not turn a
+          // slow successful views response into an empty/disabled Spotlight.
+          viewsResponse = await viewsRequest.timeout(const Duration(seconds: 20));
+        } else {
+        final hidden = GetIt.instance.isRegistered<UserViewsRepository>()
+            ? await GetIt.instance<UserViewsRepository>().getMyMediaExcludes()
+                .timeout(const Duration(seconds: 4))
+            : const <String>{};
+        viewsResponse = {'Items': (folders['Items'] as List? ?? [])
+            .where((item) => item is Map && !hidden.contains(item['Id']?.toString()))
+            .toList()};
+        }
+      }
       final views = (viewsResponse['Items'] as List? ?? [])
           .cast<Map<String, dynamic>>();
+      librariesResolved = true;
 
       final validLibraryIds = <String>{};
       for (final view in views) {
@@ -151,50 +211,81 @@ class MediaBarRepository {
       // The views lookup failed, so fall back to what the user picked. Those
       // saved ids can name a library access has since been revoked for, so
       // drop what the policy no longer allows before trusting them.
-      allParentIds.addAll(
-        await GetIt.instance<LibraryScopeService>().retainPermitted(libraryIds),
-      );
+      if (libraryIds.isNotEmpty) {
+        try {
+          allParentIds.addAll(await GetIt.instance<LibraryScopeService>()
+              .retainPermitted(libraryIds).timeout(const Duration(seconds: 4)));
+        } catch (_) {
+          // A failed scope lookup is not proof that Spotlight was disabled.
+        }
+      }
       allParentIds.addAll(collectionIds);
     }
 
-    try {
-      final allItems = <Map<String, dynamic>>[];
+    final allItems = <Map<String, dynamic>>[];
+    final catalogClock = Stopwatch()..start();
+    Future<List<Map<String, dynamic>>> withinCatalogBudget(
+      Future<List<Map<String, dynamic>>> Function() fetch,
+    ) async {
+      final remaining = const Duration(seconds: 10) - catalogClock.elapsed;
+      if (remaining <= Duration.zero) return const [];
+      try {
+        return await fetch().timeout(remaining);
+      } catch (_) {
+        return const [];
+      }
+    }
 
+    try {
       if (allParentIds.isEmpty) {
+        if (!librariesResolved) {
+          return const MediaBarError('Spotlight library lookup unavailable');
+        }
         return const MediaBarDisabled();
       } else {
-        final batches = await mapBounded<String, List<Map<String, dynamic>>>(
-          allParentIds.toList(),
-          const bool.fromEnvironment('SPESHTV_WEB') ? 3 : 1,
-          (parentId) async {
-            if (!GetIt.instance.isRegistered<MediaBarRepository>() ||
-                GetIt.instance<MediaBarRepository>() != this) {
-              return const <Map<String, dynamic>>[];
-            }
-            try {
-              final targetTypes = allParentItemTypes[parentId] ?? includeTypes;
-              final batch = await _fetchItems(
-                targetTypes,
-                fetchLimit,
-                parentId: parentId,
-              ).timeout(const Duration(seconds: 8));
-              if (cacheKey != null && !earlySpotlightPublished && onCached != null) {
-                final preview = _selectItemsWithBackdrops(batch, maxItems, excludedGenres);
-                if (preview.isNotEmpty) {
-                  earlySpotlightPublished = true;
-                  onCached(MediaBarReady(preview.map(_toSlideItem).toList()));
+        final collectedIds = <String>{};
+        final collected =
+            await collectProgressiveBatches<String, Map<String, dynamic>>(
+              allParentIds.toList(),
+              (parentId) async {
+                if (collectedIds.length >= maxItems) return const [];
+                if (!GetIt.instance.isRegistered<MediaBarRepository>() ||
+                    GetIt.instance<MediaBarRepository>() != this) {
+                  return const <Map<String, dynamic>>[];
                 }
-              }
-              return batch;
-            } catch (_) {
-              // Keep fetching remaining libraries if one fails
-              return const <Map<String, dynamic>>[];
-            }
-          },
-        );
-        for (final batch in batches) {
-          if (batch != null) allItems.addAll(batch);
-        }
+                try {
+                  final targetTypes =
+                      allParentItemTypes[parentId] ?? includeTypes;
+                  final batch = await _fetchItems(
+                    targetTypes,
+                    fetchLimit,
+                    parentId: parentId,
+                  ).timeout(const Duration(seconds: 8));
+                  return batch;
+                } catch (_) {
+                  // Keep fetching remaining libraries if one fails
+                  return const <Map<String, dynamic>>[];
+                }
+              },
+              concurrency: 6,
+              onBatch: (batch) {
+                collectedIds.addAll(batch.where(_usableFor(excludedGenres))
+                    .map((item) => item['Id']?.toString() ?? '')
+                    .where((id) => id.isNotEmpty));
+                if (!earlySpotlightPublished && onCached != null) {
+                  final preview = _selectItemsWithBackdrops(
+                    batch,
+                    maxItems,
+                    excludedGenres,
+                  );
+                  if (preview.isNotEmpty) {
+                    earlySpotlightPublished = true;
+                    onCached(MediaBarReady(preview.map(_toSlideItem).toList()));
+                  }
+                }
+              },
+            );
+        allItems.addAll(collected);
       }
 
       var selected = _selectItemsWithBackdrops(
@@ -208,10 +299,12 @@ class MediaBarRepository {
         final targetTypes =
             allParentItemTypes[allParentIds.first] ?? includeTypes;
         fallbackItems.addAll(
-          await _fetchItems(
-            targetTypes,
-            fetchLimit,
-            parentId: allParentIds.first,
+          await withinCatalogBudget(
+            () => _fetchItems(
+              targetTypes,
+              fetchLimit,
+              parentId: allParentIds.first,
+            ),
           ),
         );
 
@@ -223,12 +316,13 @@ class MediaBarRepository {
       }
 
       if (selected.isEmpty) {
-        final firstLibraryItems =
-            await _fetchItemsFromFirstSeriesOrMoviesLibrary(
-              includeTypes,
-              fetchLimit,
-              contentType: contentType,
-            );
+        final firstLibraryItems = await withinCatalogBudget(
+          () => _fetchItemsFromFirstSeriesOrMoviesLibrary(
+            includeTypes,
+            fetchLimit,
+            contentType: contentType,
+          ),
+        );
         selected = _selectItemsWithBackdrops(
           firstLibraryItems,
           maxItems,
@@ -236,20 +330,27 @@ class MediaBarRepository {
         );
       }
 
-      if (selected.isEmpty) {
+      final items = await _mixInExternal(
+        selected.map(_toSlideItem).toList(),
+        externalPool,
+        maxItems,
+        excludedGenres,
+      );
+      if (items.isEmpty) {
         return const MediaBarError('No items with backdrop images found');
       }
 
-      final items = selected.map(_toSlideItem).toList();
       if (cacheKey != null) {
         unawaited(_spotlightCache.write(cacheKey, selected));
       }
       return MediaBarReady(items);
     } catch (e) {
-      final firstLibraryItems = await _fetchItemsFromFirstSeriesOrMoviesLibrary(
-        includeTypes,
-        fetchLimit,
-        contentType: contentType,
+      final firstLibraryItems = await withinCatalogBudget(
+        () => _fetchItemsFromFirstSeriesOrMoviesLibrary(
+          includeTypes,
+          fetchLimit,
+          contentType: contentType,
+        ),
       );
       final selected = _selectItemsWithBackdrops(
         firstLibraryItems,
@@ -272,19 +373,22 @@ class MediaBarRepository {
     int maxItems,
     Set<String> excludedGenres,
   ) {
-    final filter = activeParentalFilter;
-    final withBackdrops =
-        source
-            .where(
-              (item) =>
-                  _hasBackdrop(item) &&
-                  !_isBoxSet(item) &&
-                  !_hasExcludedGenre(item, excludedGenres) &&
-                  !filter.isBlockedRaw(item),
-            )
-            .toList()
-          ..shuffle();
+    final seen = <String>{};
+    final withBackdrops = source.where(_usableFor(excludedGenres))
+        .where((item) => seen.add(item['Id']?.toString() ?? ''))
+        .toList()
+      ..shuffle();
     return withBackdrops.take(maxItems).toList();
+  }
+
+  /// The check an item has to pass to go on the bar.
+  bool Function(Map<String, dynamic>) _usableFor(Set<String> excludedGenres) {
+    final filter = activeParentalFilter;
+    return (item) =>
+        _hasBackdrop(item) &&
+        !_isBoxSet(item) &&
+        !_hasExcludedGenre(item, excludedGenres) &&
+        !filter.isBlockedRaw(item);
   }
 
   List<String> _splitCsv(Preference<String> pref) =>
@@ -349,7 +453,7 @@ class MediaBarRepository {
         return const <Map<String, dynamic>>[];
       }
 
-      return _fetchItems(itemTypes, limit, parentId: libraryId);
+      return await _fetchItems(itemTypes, limit, parentId: libraryId);
     } catch (_) {
       return const <Map<String, dynamic>>[];
     }
@@ -363,6 +467,9 @@ class MediaBarRepository {
   /// this many from a random place in the library, and the dated ones read
   /// this many of the newest.
   static const _poolSize = 40;
+
+  /// How many libraries and collections are read at once.
+  static const _sourceConcurrency = 6;
 
   Future<List<Map<String, dynamic>>> _fetchItems(
     List<String>? itemTypes,
@@ -421,7 +528,7 @@ class MediaBarRepository {
             limit: windowSize,
             fields: _fields,
             enableTotalRecordCount: false,
-            enableImageTypes: 'Backdrop,Logo',
+            enableImageTypes: 'Backdrop,Logo,Banner',
           )
           .timeout(const Duration(seconds: 15));
 
@@ -473,7 +580,7 @@ class MediaBarRepository {
                   recursive: true,
                   limit: _poolSize,
                   fields: _fields,
-                  enableImageTypes: 'Backdrop,Logo',
+                  enableImageTypes: 'Backdrop,Logo,Banner',
                 )
                 .timeout(const Duration(seconds: 15))
           : await _client.itemsApi
@@ -482,7 +589,7 @@ class MediaBarRepository {
                   parentId: parentId,
                   limit: _poolSize,
                   fields: _fields,
-                  enableImageTypes: 'Backdrop,Logo',
+                  enableImageTypes: 'Backdrop,Logo,Banner',
                 )
                 .timeout(const Duration(seconds: 15));
 
@@ -534,7 +641,7 @@ class MediaBarRepository {
             limit: reducedLimit,
             fields: _fields,
             enableTotalRecordCount: false,
-            enableImageTypes: 'Backdrop,Logo',
+            enableImageTypes: 'Backdrop,Logo,Banner',
           )
           .timeout(const Duration(seconds: 15));
       final rawItems = fallbackResponse['Items'] as List? ?? [];
@@ -542,6 +649,154 @@ class MediaBarRepository {
     } catch (_) {
       return const <Map<String, dynamic>>[];
     }
+  }
+
+  /// The titles of the picked outside lists that can go on the bar, shuffled
+  /// and without repeats. Empty without Moonbase.
+  Future<List<ImdbExternalListItem>> _fetchExternalPool(
+    List<String> listIds,
+    List<String> itemTypes,
+  ) async {
+    if (listIds.isEmpty) return const [];
+    final sync = GetIt.instance<PluginSyncService>();
+    if (!sync.pluginAvailable) return const [];
+    final lists = mediaBarExternalLists(
+      _prefs.homeSectionsConfig,
+      tmdbAvailable: sync.tmdbAvailable,
+    );
+    final service = GetIt.instance<CustomExternalListsService>();
+    final fetched = await Future.wait([
+      for (final id in listIds)
+        if (lists[id] case final config?)
+          () async {
+            try {
+              final cached = await service.loadCustomRowFromCache(
+                config,
+                maxAge: CustomExternalListsService.cacheMaxAge,
+              );
+              return cached.isNotEmpty
+                  ? cached
+                  : await service.fetchCustomRow(config);
+            } catch (_) {
+              return const <ImdbExternalListItem>[];
+            }
+          }(),
+    ]);
+
+    final filter = activeParentalFilter;
+    final seen = <String>{};
+    final pool = <ImdbExternalListItem>[];
+    for (final item in fetched.expand((items) => items)) {
+      final key = _externalId(item);
+      if (key.isEmpty || !seen.add(key)) continue;
+      if (!itemTypes.contains(item.type)) continue;
+      // A missing rating on an outside title means nobody looked it up, so
+      // it stays out once the viewer blocks anything, as on Home.
+      final rating = item.officialRating?.trim() ?? '';
+      if (filter.isActive &&
+          (rating.isEmpty || filter.isBlockedRating(rating))) {
+        continue;
+      }
+      if ((item.backdropUrl ?? '').isEmpty && !sync.tmdbDetailsAvailable) {
+        continue;
+      }
+      pool.add(item);
+    }
+    return pool..shuffle(_random);
+  }
+
+  /// [library] with titles from [external] shuffled in, [maxItems] in all.
+  /// Only the outside titles that make the cut are looked up on TMDB.
+  Future<List<MediaBarSlideItem>> _mixInExternal(
+    List<MediaBarSlideItem> library,
+    List<ImdbExternalListItem> external,
+    int maxItems,
+    Set<String> excludedGenres,
+  ) async {
+    if (external.isEmpty) return library;
+    final chosen = (<Object>[...library, ...external.take(maxItems)]
+          ..shuffle(_random))
+        .take(maxItems)
+        .toList();
+    final slides = <String, MediaBarSlideItem>{};
+    await mapBounded(
+      chosen.whereType<ImdbExternalListItem>().toList(),
+      _sourceConcurrency,
+      (item) async {
+        final slide = await _toExternalSlide(item);
+        if (slide == null || slide.genres.any(excludedGenres.contains)) {
+          return null;
+        }
+        slides[slide.itemId] = slide;
+        return null;
+      },
+    );
+    return [
+      for (final pick in chosen)
+        if (pick is MediaBarSlideItem)
+          pick
+        else
+          ?slides[_externalId(pick as ImdbExternalListItem)],
+    ];
+  }
+
+  static String _externalId(ImdbExternalListItem item) =>
+      item.tmdbId.isNotEmpty ? item.tmdbId : item.imdbId;
+
+  /// The slide for an outside title, filled in from TMDB through Moonbase
+  /// where it can be. Null when there is still no backdrop to show.
+  Future<MediaBarSlideItem?> _toExternalSlide(ImdbExternalListItem item) async {
+    final mediaType = item.type == 'Series' ? 'tv' : 'movie';
+    final tmdbId = item.tmdbId.isNotEmpty ? item.tmdbId : null;
+    final imdbId = item.imdbId.isNotEmpty ? item.imdbId : null;
+    final details = GetIt.instance<PluginSyncService>().tmdbDetailsAvailable
+        ? await GetIt.instance<TmdbRepository>().titleDetails(
+            type: mediaType,
+            tmdbId: tmdbId,
+            imdbId: imdbId,
+          )
+        : null;
+
+    final backdropUrl =
+        _tmdbImage(details?['backdropPath'] as String?, 1280) ??
+        _tmdbImage(item.backdropUrl, 1280);
+    if (backdropUrl == null) return null;
+    final runTimeTicks = (details?['runTimeTicks'] as num?)?.toInt();
+    final trailerUrl = details?['trailerUrl'] as String?;
+
+    return MediaBarSlideItem(
+      itemId: _externalId(item),
+      serverId: MediaBarSlideItem.externalServerId,
+      title: item.title,
+      overview: details?['overview'] as String?,
+      backdropUrl: backdropUrl,
+      bannerUrl: seerrThumbUrl(type: mediaType, tmdbId: tmdbId, imdbId: imdbId),
+      logoUrl: _tmdbImage(details?['logoPath'] as String?, 500),
+      posterUrl: _tmdbImage(item.posterUrl, 500),
+      officialRating: item.officialRating,
+      year: item.year,
+      genres:
+          (details?['genres'] as List?)?.cast<String>().take(3).toList() ??
+          const [],
+      runtime: runTimeTicks != null
+          ? Duration(microseconds: runTimeTicks ~/ 10)
+          : null,
+      communityRating:
+          (details?['rating'] as num?)?.toDouble() ?? item.rating,
+      tmdbId: tmdbId,
+      imdbId: imdbId,
+      itemType: item.type == 'Series' ? 'Series' : 'Movie',
+      remoteTrailers: [
+        if (trailerUrl != null) {'Url': trailerUrl},
+      ],
+    );
+  }
+
+  /// Outside lists hold either a TMDB image path or a full URL.
+  static String? _tmdbImage(String? path, int width) {
+    if (path == null || path.isEmpty) return null;
+    if (path.startsWith('http')) return path;
+    return 'https://image.tmdb.org/t/p/w$width$path';
   }
 
   bool _hasBackdrop(Map<String, dynamic> item) {
@@ -600,6 +855,15 @@ class MediaBarRepository {
           )
         : null;
 
+    final bannerTag = (data['ImageTags'] as Map?)?['Banner'] as String?;
+    final bannerUrl = bannerTag != null
+        ? _client.imageApi.getBannerImageUrl(
+            itemId,
+            tag: bannerTag,
+            maxWidth: 1280,
+          )
+        : null;
+
     final logoTag = (data['ImageTags'] as Map?)?['Logo'] as String?;
     final logoUrl = logoTag != null
         ? _client.imageApi.getLogoImageUrl(itemId, tag: logoTag, maxWidth: 600)
@@ -620,6 +884,7 @@ class MediaBarRepository {
       title: data['Name'] as String? ?? '',
       overview: data['Overview'] as String?,
       backdropUrl: backdropUrl,
+      bannerUrl: bannerUrl,
       logoUrl: logoUrl,
       posterUrl: posterUrl,
       officialRating: data['OfficialRating'] as String?,
@@ -656,4 +921,34 @@ bool supportsMediaBarLibrary(
   if (type.isEmpty || type == 'mixed' || type == 'unknown') return true;
 
   return preferredTypes.contains(type);
+}
+
+/// The outside lists the bar can draw from, by the id each one's home row has,
+/// in the order the picker shows them: the IMDb charts, the TMDB charts when
+/// the server has a TMDB key, then the user's custom rows.
+Map<String, HomeSectionConfig> mediaBarExternalLists(
+  List<HomeSectionConfig> sections, {
+  required bool tmdbAvailable,
+}) {
+  // Built the way Home builds these rows, so both read the same cached list.
+  HomeSectionConfig chart(HomeSectionType type, String source, String path) =>
+      HomeSectionConfig.pluginDynamic(
+        serverId: MediaBarSlideItem.externalServerId,
+        pluginSection: type.serializedName,
+        pluginDisplayText: type.serializedName,
+        pluginSource: HomeSectionPluginSource.custom,
+        pluginAdditionalData: jsonEncode({'source': source, 'type': path}),
+      );
+  return {
+    for (final type in imdbChartSections)
+      type.serializedName: chart(type, 'imdb', type.serializedName),
+    if (tmdbAvailable)
+      for (final entry in tmdbChartPaths.entries)
+        entry.key.serializedName: chart(entry.key, 'tmdb_chart', entry.value),
+    for (final section in sections)
+      if (section.isPluginDynamic &&
+          section.pluginSource == HomeSectionPluginSource.custom &&
+          (section.pluginSection ?? '').isNotEmpty)
+        section.pluginSection!: section,
+  };
 }

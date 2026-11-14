@@ -7,15 +7,15 @@ import '../models/aggregated_item.dart';
 /// when a user's most-recently-watched episode has an older [DateCreated].
 ///
 /// Strategy:
-///  1. Fetch the 100 most recently played episodes and build a
-///     seriesId → lastPlayedDate map from their UserData.
+///  1. Start from the [recentlyPlayed] map [fetchSeriesLastPlayed] builds.
 ///  2. For any series still missing (i.e. beyond the top 100), batch-query
 ///     the Series items directly by ID.
 ///  3. Set each item's effective LastPlayedDate to
-///     max(seriesLastPlayed, episodeDateCreated).
+///     seriesLastPlayed, falling back to episodeDateCreated when unknown.
 Future<List<AggregatedItem>> enrichNextUpItemsWithSeriesLastPlayed(
   List<AggregatedItem> items,
   MediaServerClient client,
+  Future<Map<String, String>?> recentlyPlayed,
 ) async {
   final seriesIds = items
       .map((item) => item.rawData['SeriesId']?.toString())
@@ -27,28 +27,9 @@ Future<List<AggregatedItem>> enrichNextUpItemsWithSeriesLastPlayed(
   if (seriesIds.isEmpty) return items;
 
   try {
-    // 1. Fetch 100 most recently played episodes
-    final recentPlayedResponse = await client.itemsApi.getItems(
-      includeItemTypes: const ['Episode'],
-      filters: const ['IsPlayed'],
-      recursive: true,
-      sortBy: 'DatePlayed',
-      sortOrder: 'Descending',
-      limit: 100,
-      fields: 'UserData,SeriesId',
-    );
-
-    final recentItems = recentPlayedResponse['Items'] as List? ?? [];
-    final seriesLastPlayedMap = <String, String>{};
-    for (final item in recentItems) {
-      if (item is Map) {
-        final sId = item['SeriesId']?.toString();
-        final lastPlayed = item['UserData']?['LastPlayedDate'] as String?;
-        if (sId != null && lastPlayed != null && lastPlayed.isNotEmpty) {
-          seriesLastPlayedMap.putIfAbsent(sId, () => lastPlayed);
-        }
-      }
-    }
+    final seriesLastPlayedMap = await recentlyPlayed.timeout(
+        const Duration(seconds: 3), onTimeout: () => null);
+    if (seriesLastPlayedMap == null) return items;
 
     // 2. For any series not found in the top 100, batch-query directly.
     //    Note: do NOT pass recursive=true when IDs are supplied — it has no
@@ -62,7 +43,8 @@ Future<List<AggregatedItem>> enrichNextUpItemsWithSeriesLastPlayed(
         ids: missingSeriesIds,
         fields: 'UserData',
         limit: missingSeriesIds.length,
-      );
+      ).timeout(const Duration(seconds: 1),
+          onTimeout: () => <String, dynamic>{'Items': []});
       final seriesItems = seriesResponse['Items'] as List? ?? [];
       for (final s in seriesItems) {
         if (s is Map) {
@@ -81,21 +63,10 @@ Future<List<AggregatedItem>> enrichNextUpItemsWithSeriesLastPlayed(
       final seriesLastPlayed = sId != null ? seriesLastPlayedMap[sId] : null;
       final episodeDateCreated = item.rawData['DateCreated'] as String?;
 
-      final lastPlayedDate = seriesLastPlayed != null
-          ? DateTime.tryParse(seriesLastPlayed)
-          : null;
-      final dateCreated = episodeDateCreated != null
-          ? DateTime.tryParse(episodeDateCreated)
-          : null;
+      final lastPlayedDate = parseServerDate(seriesLastPlayed);
+      final dateCreated = parseServerDate(episodeDateCreated);
 
-      DateTime? effectiveDate;
-      if (lastPlayedDate != null && dateCreated != null) {
-        effectiveDate = lastPlayedDate.isAfter(dateCreated)
-            ? lastPlayedDate
-            : dateCreated;
-      } else {
-        effectiveDate = lastPlayedDate ?? dateCreated;
-      }
+      final effectiveDate = nextUpActivityDate(lastPlayedDate, dateCreated);
 
       if (effectiveDate != null) {
         final updatedRaw = Map<String, dynamic>.from(item.rawData);
@@ -115,4 +86,74 @@ Future<List<AggregatedItem>> enrichNextUpItemsWithSeriesLastPlayed(
   } catch (_) {
     return items;
   }
+}
+
+/// How many recently played episodes one request reads.
+const recentlyPlayedPageSize = 100;
+
+/// The 100 episodes the user played most recently, newest first, as raw
+/// items with their series id and user data. [startIndex] skips that many
+/// to read further back.
+Future<List<dynamic>> fetchRecentlyPlayedEpisodeItems(
+  MediaServerClient client, {
+  int startIndex = 0,
+}) async {
+  final response = await client.itemsApi.getItems(
+    includeItemTypes: const ['Episode'],
+    filters: const ['IsPlayed'],
+    recursive: true,
+    sortBy: 'DatePlayed',
+    sortOrder: 'Descending',
+    startIndex: startIndex > 0 ? startIndex : null,
+    limit: recentlyPlayedPageSize,
+    fields: 'UserData,SeriesId',
+  );
+  return response['Items'] as List? ?? const [];
+}
+
+/// When each series was last played, read from the 100 most recently played
+/// episodes, or null when the lookup failed. It doesn't need Next Up's answer,
+/// so callers send it right after the Next Up request. Next Up goes first so a
+/// timeout on it never counts time spent queued behind this.
+Future<Map<String, String>?> fetchSeriesLastPlayed(
+  MediaServerClient client,
+) async {
+  try {
+    final recentPlayedResponse = await client.itemsApi.getItems(
+      includeItemTypes: const ['Episode'],
+      filters: const ['IsPlayed'],
+      recursive: true,
+      sortBy: 'DatePlayed',
+      sortOrder: 'Descending',
+      limit: 100,
+      fields: 'UserData,SeriesId',
+    ).timeout(const Duration(seconds: 3));
+
+    final recentItems = recentPlayedResponse['Items'] as List? ?? [];
+    final seriesLastPlayedMap = <String, String>{};
+    for (final item in recentItems) {
+      if (item is Map) {
+        final sId = item['SeriesId']?.toString();
+        final lastPlayed = item['UserData']?['LastPlayedDate'] as String?;
+        if (sId != null && lastPlayed != null && lastPlayed.isNotEmpty) {
+          seriesLastPlayedMap.putIfAbsent(sId, () => lastPlayed);
+        }
+      }
+    }
+    return seriesLastPlayedMap;
+  } catch (_) {
+    return null;
+  }
+}
+
+DateTime? nextUpActivityDate(DateTime? lastPlayed, DateTime? dateCreated) =>
+    lastPlayed ?? dateCreated;
+
+int compareProgressActivity(AggregatedItem a, AggregatedItem b) {
+  DateTime? date(AggregatedItem item) => DateTime.tryParse(
+      item.rawData['UserData']?['LastPlayedDate']?.toString() ?? '');
+  final ad = date(a), bd = date(b);
+  if (ad == null) return bd == null ? 0 : 1;
+  if (bd == null) return -1;
+  return bd.compareTo(ad);
 }

@@ -31,6 +31,22 @@ void main() {
   );
 
   group('MediaSegmentService auto-skip', () {
+    test('resumed intro stays new until seek prompt suppression ends', () async {
+      final svc = await service([intro], actions: 'intro:askToSkip');
+      expect(svc.checkPosition(const Duration(seconds: 30),
+          suppressPrompts: true).isNone, isTrue);
+      final result = svc.checkPosition(const Duration(seconds: 31));
+      expect(result.shouldAsk, isTrue);
+      expect(result.isNew, isTrue);
+      expect(svc.checkPosition(const Duration(seconds: 32)).isNew, isFalse);
+      expect(svc.checkPosition(const Duration(seconds: 100)).isNone, isTrue);
+    });
+
+    test('suppression does not disable automatic intro skipping', () async {
+      final svc = await service([intro]);
+      expect(svc.checkPosition(const Duration(seconds: 30),
+          suppressPrompts: true).shouldSkip, isTrue);
+    });
     test('skips to the first whole millisecond past the segment', () async {
       final svc = await service([intro]);
       final result = svc.checkPosition(const Duration(seconds: 5));

@@ -21,6 +21,7 @@ class EpgNowNextCard extends StatelessWidget {
   final bool apple;
   final VoidCallback onTap;
   final FocusNode? focusNode;
+  final bool interactive;
 
   const EpgNowNextCard({
     super.key,
@@ -35,6 +36,7 @@ class EpgNowNextCard extends StatelessWidget {
     required this.apple,
     required this.onTap,
     this.focusNode,
+    this.interactive = true,
   });
 
   @override
@@ -80,7 +82,7 @@ class EpgNowNextCard extends StatelessWidget {
                     Flexible(
                       child: Text(
                         nowTitle!,
-                        maxLines: 1,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: textTheme.bodyMedium,
                       ),
@@ -116,7 +118,7 @@ class EpgNowNextCard extends StatelessWidget {
                 const SizedBox(height: 8),
                 Text(
                   nextLabel!,
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: textTheme.labelMedium?.copyWith(color: muted),
                 ),
@@ -128,6 +130,11 @@ class EpgNowNextCard extends StatelessWidget {
     );
 
     final padded = Padding(padding: const EdgeInsets.all(14), child: content);
+    if (!interactive) {
+      return DecoratedBox(decoration: BoxDecoration(
+        color: AppColorScheme.surface.withValues(alpha: 0.55),
+        borderRadius: AppRadius.circular(radius)), child: padded);
+    }
 
     return FocusableWrapper(
       focusNode: focusNode,

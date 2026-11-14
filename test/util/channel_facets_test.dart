@@ -2,6 +2,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:moonfin/data/models/channel_facets.dart';
 
 void main() {
+  test('college package names and tags are recognized without pro false positives', () {
+    expect(ChannelFacets.fromChannel('CFB 01', {}).packages, {'College football'});
+    expect(ChannelFacets.fromChannel('NcaaF 01', {}).packages, {'College football'});
+    expect(ChannelFacets.fromChannel('NcaaB 01', {}).packages, {'College basketball'});
+    expect(ChannelFacets.fromChannel('Event', {'Tags': ['US | COLLEGE BASKETBALL PACKAGE']}).packages,
+      {'College basketball'});
+    expect(ChannelFacets.fromChannel('NCAA Baseball 02', {}).packages,
+      {'College baseball', 'College sports / NCAA'});
+    expect(ChannelFacets.fromChannel('Event', {'Genres': ['NCAA PACKAGE']}).packages,
+      {'College sports / NCAA'});
+    expect(ChannelFacets.fromChannel('NFL 01', {}).packages, isEmpty);
+  });
   test('country prefixes and group tags resolve PR DR CH without programme data', () {
     expect(ChannelFacets.fromChannel('PR | WAPA', {}).countries, {'PR | Puerto Rico'});
     expect(ChannelFacets.fromChannel('Telemicro', {'Tags': ['DR | Dominican Republic']}).countries, {'DR | Dominican Republic'});

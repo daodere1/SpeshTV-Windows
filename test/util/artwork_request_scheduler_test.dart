@@ -5,6 +5,36 @@ import 'package:moonfin/util/artwork_request_scheduler.dart';
 import 'package:moonfin/util/image_fetch_priority.dart';
 
 void main() {
+  test('obsolete prefetch is discarded without cancelling visible artwork', () async {
+    final scheduler = ArtworkRequestScheduler(slots: 1, maxQueuedLow: 1);
+    await scheduler.acquire('active');
+    final obsolete = scheduler.acquire('old', priority: ImageFetchPriority.low);
+    final discarded = expectLater(obsolete, throwsStateError);
+    final latest = scheduler.acquire('new', priority: ImageFetchPriority.low);
+    final visible = scheduler.acquire('visible');
+    await discarded;
+    expect(scheduler.queueDepth, 2);
+    scheduler.release();
+    await visible;
+    scheduler.release();
+    await latest;
+    scheduler.release(priority: ImageFetchPriority.low);
+    expect(scheduler.running, 0);
+  });
+  test('low priority work leaves slots free for visible artwork', () async {
+    final scheduler = ArtworkRequestScheduler(slots: 3, maxLowSlots: 1);
+    await scheduler.acquire('prefetch-1', priority: ImageFetchPriority.low);
+    var secondStarted = false;
+    final second = scheduler.acquire('prefetch-2', priority: ImageFetchPriority.low)
+        .then((_) { secondStarted = true; });
+    await scheduler.acquire('visible', priority: ImageFetchPriority.normal);
+    expect(secondStarted, isFalse);
+    scheduler.release(priority: ImageFetchPriority.low);
+    await second;
+    expect(secondStarted, isTrue);
+    scheduler.release(priority: ImageFetchPriority.low);
+    scheduler.release();
+  });
   /// Runs [body] under a fake clock so batch gaps are exact.
   void run(
     void Function(FakeAsync async, ArtworkRequestScheduler s) body, {

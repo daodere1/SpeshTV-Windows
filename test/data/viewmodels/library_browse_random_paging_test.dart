@@ -179,7 +179,7 @@ void main() {
     expect(api.requestedStartIndexes, <int>[0, 4, 8]);
   });
 
-  test('a page that repeats everything already shown keeps browsing open', () async {
+  test('a duplicate-only page backfills the next page in the same request', () async {
     final api = _FakeItemsApi(
       [
         [1, 2, 3, 4],
@@ -194,9 +194,8 @@ void main() {
     await vm.load();
     await vm.loadMore();
 
-    expect(vm.hasMore, isTrue, reason: 'the server still has rows left');
-
-    await vm.loadMore();
+    expect(api.requestedStartIndexes, <int>[0, 4, 8]);
+    expect(vm.hasMore, isFalse);
 
     expect(_ids(vm), <String>[
       'item-1',

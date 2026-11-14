@@ -1,4 +1,9 @@
+import 'dart:async';
+
 import 'package:playback_core/playback_core.dart';
+
+import '../data/services/discord_stage_announcer.dart';
+import '../util/platform_detection.dart';
 
 import '../data/repositories/offline_repository.dart';
 
@@ -14,11 +19,17 @@ class LocalAwarePlayerService implements PlayerService {
   final OfflineRepository _offlineRepo;
   final bool Function() _canReachServer;
 
+  /// Told which item stopped once its stop has been reported, so whatever
+  /// reacts to a finished episode reads the server's played state after it.
+  final void Function(dynamic mediaItem)? _onStopped;
+
   LocalAwarePlayerService(
     this._inner,
     this._offlineRepo, {
     required bool Function() canReachServer,
-  }) : _canReachServer = canReachServer;
+    void Function(dynamic mediaItem)? onStopped,
+  }) : _canReachServer = canReachServer,
+       _onStopped = onStopped;
 
   Future<void> _recordLocal(dynamic mediaItem, int positionTicks) async {
     try {
@@ -42,6 +53,9 @@ class LocalAwarePlayerService implements PlayerService {
     int? audioStreamIndex,
     int? subtitleStreamIndex,
   }) async {
+    if (PlatformDetection.isWindows) {
+      unawaited(DiscordStageAnnouncer.instance.playbackStarted(mediaItem));
+    }
     if (!resolution.isLocalMedia) {
       return _inner.onPlaybackStart(
         mediaItem,
@@ -104,15 +118,30 @@ class LocalAwarePlayerService implements PlayerService {
   Future<void> onPlaybackStop(
     dynamic mediaItem,
     StreamResolutionResult resolution,
-    Duration position,
-  ) async {
-    if (!resolution.isLocalMedia) {
-      return _inner.onPlaybackStop(mediaItem, resolution, position);
+    Duration position, {
+    bool releaseLiveStream = true,
+  }) async {
+    try {
+      if (!resolution.isLocalMedia) {
+        return await _inner.onPlaybackStop(
+          mediaItem,
+          resolution,
+          position,
+          releaseLiveStream: releaseLiveStream,
+        );
+      }
+      await _recordLocal(mediaItem, position.inMicroseconds * 10);
+      await _forward(
+        () => _inner.onPlaybackStop(
+          mediaItem,
+          resolution,
+          position,
+          releaseLiveStream: releaseLiveStream,
+        ),
+      );
+    } finally {
+      _onStopped?.call(mediaItem);
     }
-    await _recordLocal(mediaItem, position.inMicroseconds * 10);
-    await _forward(
-      () => _inner.onPlaybackStop(mediaItem, resolution, position),
-    );
   }
 
   @override

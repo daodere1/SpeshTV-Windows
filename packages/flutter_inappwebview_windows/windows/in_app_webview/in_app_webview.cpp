@@ -833,6 +833,20 @@ namespace flutter_inappwebview_plugin
           wil::com_ptr<ICoreWebView2Deferral> deferral;
           wil::com_ptr<ICoreWebView2WebResourceRequest> webResourceRequest;
           if (channelDelegate && succeededOrLog(args->get_Request(&webResourceRequest)) && succeededOrLog(args->GetDeferral(&deferral))) {
+            // Identify only SpeshTV's official YouTube player, not other WebViews.
+            if (settings->applicationNameForUserAgent == "SpeshTV-YouTubePlayer/1.0") {
+              LPWSTR resourceUri = nullptr;
+              if (SUCCEEDED(webResourceRequest->get_Uri(&resourceUri))) {
+                const std::wstring uri(resourceUri ? resourceUri : L"");
+                CoTaskMemFree(resourceUri);
+                if (uri.rfind(L"https://www.youtube.com/embed/", 0) == 0) {
+                  wil::com_ptr<ICoreWebView2HttpRequestHeaders> headers;
+                  if (SUCCEEDED(webResourceRequest->get_Headers(&headers))) {
+                    failedLog(headers->SetHeader(L"Referer", L"https://dev.speshmedia.speshtv/"));
+                  }
+                }
+              }
+            }
             auto request = std::make_shared<WebResourceRequest>(webResourceRequest);
 
             // The add_WebResourceRequested event is by default raised for file, http, and https URI schemes.

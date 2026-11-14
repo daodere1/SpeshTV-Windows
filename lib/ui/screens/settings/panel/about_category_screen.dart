@@ -45,7 +45,7 @@ class _AboutCategoryScreen extends StatelessWidget {
                 subtitle: Text(l10n.sourceCodeUrl),
                 onTap: () => showQrOrLaunch(
                   context,
-                  url: 'https://github.com/Moonfin-Client/Moonfin-Core',
+                  url: 'https://github.com/daodere1/SpeshTV-Windows',
                   title: l10n.sourceCode,
                 ),
               ),
@@ -55,7 +55,7 @@ class _AboutCategoryScreen extends StatelessWidget {
                 subtitle: Text(l10n.settingsReportAnIssueSubtitle),
                 onTap: () => showQrOrLaunch(
                   context,
-                  url: 'https://github.com/Moonfin-Client/Moonfin-Core/issues',
+                  url: 'https://github.com/daodere1/SpeshTV-Windows/issues',
                   title: l10n.settingsReportAnIssue,
                 ),
               ),
@@ -117,7 +117,7 @@ class _AboutCategoryScreen extends StatelessWidget {
                 onTap: () => showQrOrLaunch(
                   context,
                   url:
-                      'https://github.com/Moonfin-Client/Moonfin-Core/blob/main/LICENSE',
+                      'https://github.com/daodere1/SpeshTV-Windows/blob/main/LICENSE',
                   title: l10n.settingsLicenses,
                 ),
               ),
@@ -127,7 +127,7 @@ class _AboutCategoryScreen extends StatelessWidget {
                 subtitle: Text(l10n.settingsPrivacyPolicySubtitle),
                 onTap: () => showQrOrLaunch(
                   context,
-                  url: 'https://moonfin.io/privacy',
+                  url: 'https://github.com/daodere1/SpeshTV-Windows/blob/main/PRIVACY_POLICY.md',
                   title: l10n.settingsPrivacyPolicy,
                 ),
               ),

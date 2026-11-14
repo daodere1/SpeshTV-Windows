@@ -1,5 +1,7 @@
 package org.moonfin.nativevideo.subtitle
 
+import androidx.media3.exoplayer.source.MediaSource
+import java.lang.reflect.Proxy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -8,17 +10,26 @@ import org.junit.Test
 class SubtitleOffsetPolicyTest {
 
     @Test
+    fun `secondary source exposes the last applied offset while the setting changes`() {
+        val unusedChild = Proxy.newProxyInstance(
+            MediaSource::class.java.classLoader,
+            arrayOf(MediaSource::class.java),
+        ) { _, method, _ -> error("Unexpected source call: ${method.name}") } as MediaSource
+        val source = TextStreamOffsetMediaSource(unusedChild, 0L, 1_000_000L)
+
+        // Changing a saved adjustment while Secondary is Off doesn't yet
+        // rewrite the source. Selection must detect the difference and retime.
+        assertEquals(1_000_000L, source.currentSecondaryOffsetUs)
+        assertTrue(source.currentSecondaryOffsetUs != 2_000_000L)
+        source.setTimeOffsetUs(0L, 2_000_000L)
+        assertEquals(2_000_000L, source.currentSecondaryOffsetUs)
+    }
+
+    @Test
     fun `manual delay is clamped to five seconds either way`() {
         assertEquals(5000L, clampManualDelayMs(9000L))
         assertEquals(-5000L, clampManualDelayMs(-9000L))
         assertEquals(1500L, clampManualDelayMs(1500L))
-    }
-
-    @Test
-    fun `effective offset adds the clamped manual delay to the auto one`() {
-        assertEquals(2_000_000L, effectiveOffsetUs(2_000_000L, 0L))
-        assertEquals(1_500_000L, effectiveOffsetUs(2_000_000L, -500L))
-        assertEquals(7_000_000L, effectiveOffsetUs(2_000_000L, 9000L))
     }
 
     @Test
@@ -51,17 +62,16 @@ class SubtitleOffsetPolicyTest {
     }
 
     @Test
-    fun `a manual change always retimes`() {
-        assertTrue(shouldRetime(0L, 0L, manualChanged = true))
-        assertTrue(shouldRetime(100L, 110L, manualChanged = true))
-    }
-
-    @Test
-    fun `an auto change retimes only once it moved far enough to see`() {
-        assertFalse(shouldRetime(2_000_000L, 2_040_000L, manualChanged = false))
-        assertTrue(shouldRetime(2_000_000L, 2_050_000L, manualChanged = false))
-        assertTrue(shouldRetime(2_050_000L, 2_000_000L, manualChanged = false))
-        assertTrue(shouldRetime(0L, 2_000_000L, manualChanged = false))
+    fun `secondary accepts raw and parsed SRT and WebVTT including MP4`() {
+        for (mime in listOf("application/x-subrip", "text/vtt", "application/x-mp4-vtt")) {
+            assertTrue(mime, supportsSecondarySubtitleFormat(mime, null))
+            assertTrue(mime, supportsSecondarySubtitleFormat("application/x-media3-cues", mime))
+        }
+        for (mime in listOf(null, "text/x-ssa", "application/pgs", "application/vobsub",
+                "application/dvbsubs", "application/ttml+xml", "application/cea-608", "video/avc")) {
+            assertFalse(mime, supportsSecondarySubtitleFormat(mime, null))
+            assertFalse(mime, supportsSecondarySubtitleFormat("application/x-media3-cues", mime))
+        }
     }
 
     private fun tree(
@@ -71,6 +81,7 @@ class SubtitleOffsetPolicyTest {
         externalCount: Int = 0,
         manualDelayMs: Long = 0L,
         hasEmbeddedWrapper: Boolean = false,
+        hasSecondarySidecar: Boolean = false,
     ) = sourceTreeFor(
         isLive = isLive,
         isPreview = isPreview,
@@ -78,6 +89,7 @@ class SubtitleOffsetPolicyTest {
         externalCount = externalCount,
         manualDelayMs = manualDelayMs,
         hasEmbeddedWrapper = hasEmbeddedWrapper,
+        hasSecondarySidecar = hasSecondarySidecar,
     )
 
     @Test
@@ -86,10 +98,17 @@ class SubtitleOffsetPolicyTest {
     }
 
     @Test
-    fun `live preview and audio never get the tree`() {
+    fun `live preview and audio without secondary sidecars keep the player item path`() {
         assertEquals(SourceTree.PLAYER_ITEM, tree(isLive = true, externalCount = 2, manualDelayMs = 500L))
         assertEquals(SourceTree.PLAYER_ITEM, tree(isPreview = true, externalCount = 1))
         assertEquals(SourceTree.PLAYER_ITEM, tree(mediaType = "audio", manualDelayMs = 500L))
+    }
+
+    @Test
+    fun `secondary sidecars always get independent timing including live sources`() {
+        assertEquals(SourceTree.CUSTOM_TREE, tree(isLive = true, externalCount = 1, hasSecondarySidecar = true))
+        assertEquals(SourceTree.CUSTOM_TREE, tree(isPreview = true, externalCount = 1, hasSecondarySidecar = true))
+        assertEquals(SourceTree.CUSTOM_TREE, tree(mediaType = "audio", externalCount = 1, hasSecondarySidecar = true))
     }
 
     @Test
@@ -109,12 +128,11 @@ class SubtitleOffsetPolicyTest {
     }
 
     @Test
-    fun `the sync delays payload keeps the manual value apart from the auto one`() {
-        val payload = syncDelaysPayload(audioDelayMs = -200L, subtitleDelayMs = 300L, subtitleAutoOffsetMs = 2000L)
+    fun `the sync delays payload carries both delays`() {
+        val payload = syncDelaysPayload(audioDelayMs = -200L, subtitleDelayMs = 300L)
         assertEquals("syncDelays", payload["event"])
         assertEquals(-200L, payload["audioDelayMs"])
         assertEquals(300L, payload["subtitleDelayMs"])
-        assertEquals(2000L, payload["subtitleAutoOffsetMs"])
-        assertEquals(4, payload.size)
+        assertEquals(3, payload.size)
     }
 }

@@ -116,7 +116,7 @@ class RowDataSource {
   }
 
   // Cap image tags to one per type (server returns all by default)
-  static const _imageTypes = 'Primary,Backdrop,Thumb,Banner';
+  static const _imageTypes = 'Primary,Backdrop,Thumb,Banner,Logo';
   static const _imageTypeLimit = 1;
 
   // ParentIds that returned 401/403 (no library access) this session. They are
@@ -224,9 +224,10 @@ class RowDataSource {
   }
 
   Future<HomeRow> loadNextUp(String serverId, {int? startIndex}) async {
-    final response = (const bool.fromEnvironment('SPESHTV_WEB') ||
-        const bool.fromEnvironment('SPESHMEDIA_CLIENT'))
-        ? await _client.itemsApi.getNextUp(
+    final preserveServerOrder = const bool.fromEnvironment('SPESHTV_WEB') ||
+        const bool.fromEnvironment('SPESHMEDIA_CLIENT', defaultValue: true);
+    final request = preserveServerOrder
+        ? _client.itemsApi.getNextUp(
             startIndex: startIndex,
             limit: _defaultLimit,
             fields: _fields,
@@ -235,11 +236,13 @@ class RowDataSource {
             enableResumable: false,
             nextUpDateCutoff: nextUpDateCutoff,
           )
-        : await _getNextUpWithFallback(
+        : _getNextUpWithFallback(
       startIndex: startIndex,
       limit: _defaultLimit,
       enableResumable: false,
     );
+    final recentlyPlayed = fetchSeriesLastPlayed(_client);
+    final response = await request;
     final row = _buildRow(
       id: 'nextUp',
       title: _l10n.nextUp,
@@ -247,12 +250,9 @@ class RowDataSource {
       serverId: serverId,
       rowType: HomeRowType.nextUp,
     );
-    // Keep the server's Next Up order. Scanning recent history just to sort
-    // these cards adds another expensive catalog query before they can render.
-    if (const bool.fromEnvironment('SPESHTV_WEB') ||
-        const bool.fromEnvironment('SPESHMEDIA_CLIENT')) return row;
     final enrichedItems = await _enrichNextUpItemsWithSeriesLastPlayed(
       row.items,
+      recentlyPlayed,
     );
     return row.copyWith(items: enrichedItems);
   }
@@ -272,7 +272,9 @@ class RowDataSource {
   }
 
   Future<HomeRow> loadNextUpRelaxed(String serverId) async {
-    final response = await getNextUpRelaxed(limit: _defaultLimit);
+    final request = getNextUpRelaxed(limit: _defaultLimit);
+    final recentlyPlayed = fetchSeriesLastPlayed(_client);
+    final response = await request;
     final row = _buildRow(
       id: 'nextUp',
       title: _l10n.nextUp,
@@ -282,6 +284,7 @@ class RowDataSource {
     );
     final enrichedItems = await _enrichNextUpItemsWithSeriesLastPlayed(
       row.items,
+      recentlyPlayed,
     );
     return row.copyWith(items: enrichedItems);
   }
@@ -704,12 +707,10 @@ class RowDataSource {
         .whereType<Map>()
         .map((item) => item.cast<String, dynamic>())
         .where(
-          (genre) =>
-              browsableGenreCount(
-                genre,
-                normalizedItemTypes: includeItemTypes,
-              ) >
-              0,
+          (genre) => mayHaveBrowsableItems(
+            genre,
+            normalizedItemTypes: includeItemTypes,
+          ),
         )
         .toList(growable: false);
 
@@ -1059,10 +1060,12 @@ class RowDataSource {
   }
 
   Future<HomeRow> loadLibraryNextUp(String parentId, String serverId) async {
-    final response = await _getNextUpWithFallback(
+    final request = _getNextUpWithFallback(
       parentId: parentId,
       limit: _defaultLimit,
     );
+    final recentlyPlayed = fetchSeriesLastPlayed(_client);
+    final response = await request;
     final row = _buildRow(
       id: 'nextUp_$parentId',
       title: _l10n.nextUp,
@@ -1072,6 +1075,7 @@ class RowDataSource {
     );
     final enrichedItems = await _enrichNextUpItemsWithSeriesLastPlayed(
       row.items,
+      recentlyPlayed,
     );
     return row.copyWith(items: enrichedItems);
   }
@@ -2287,19 +2291,9 @@ class RowDataSource {
               id: item.imdbId.isNotEmpty ? item.imdbId : item.tmdbId,
               serverId: 'seerr',
               rawData: {
-                'Name': item.title,
-                'Type': item.type,
-                'Overview': '',
-                'PosterPath': item.posterUrl ?? '',
-                'BackdropPath': item.backdropUrl ?? item.posterUrl ?? '',
-                'ProductionYear': item.year,
-                'SeerrMediaType': item.type == 'Series' ? 'tv' : 'movie',
+                ...item.cardData,
                 'UserRating': item.userRating ?? '',
                 'ShowUserRatings': showUserRatings,
-                'ProviderIds': {
-                  if (item.imdbId.isNotEmpty) 'Imdb': item.imdbId,
-                  if (item.tmdbId.isNotEmpty) 'Tmdb': item.tmdbId,
-                },
               },
             );
           }).toList();
@@ -2307,7 +2301,7 @@ class RowDataSource {
             id: rowId,
             title: title,
             rowType: HomeRowType.pluginDynamic,
-            items: aggregatedItems,
+            items: withoutUnratedOrBlockedItems(aggregatedItems),
           );
         } catch (e) {
           debugPrint('[RowDataSource] Failed to load custom dynamic section: $e');
@@ -2317,6 +2311,15 @@ class RowDataSource {
             rowType: HomeRowType.pluginDynamic,
           );
         }
+
+      // Seerr sliders load through the Seerr repository on Home, since they
+      // come from Seerr rather than from the media server.
+      case HomeSectionPluginSource.seerr:
+        return HomeRow(
+          id: rowId,
+          title: title,
+          rowType: HomeRowType.pluginDynamic,
+        );
     }
   }
 
@@ -2471,7 +2474,8 @@ class RowDataSource {
 
   Future<List<AggregatedItem>> _enrichNextUpItemsWithSeriesLastPlayed(
     List<AggregatedItem> items,
-  ) => enrichNextUpItemsWithSeriesLastPlayed(items, _client);
+    Future<Map<String, String>?> recentlyPlayed,
+  ) => enrichNextUpItemsWithSeriesLastPlayed(items, _client, recentlyPlayed);
 
   (String, String) _resolveAudioSort(String? sortOpt, String itemType) {
     if (sortOpt == 'release_year' &&
