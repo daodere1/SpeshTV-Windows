@@ -33,7 +33,7 @@ SpeshTV branding, themes, Store identity, local-first search/progress,
 refresh/cache optimizations, custom guide and playback/session fixes remain.
 The customized guide is adapted rather than replaced by upstream's rebuilt
 guide. Platform-specific Android/iOS builds were not upgraded here.
-See MOONFIN_2_8_INTEGRATION.md for scope and verification.
+See Git history for the upstream base and prior verification.
 
 ## Moonfin 2.7 Integration
 
@@ -45,7 +45,7 @@ SpeshTV branding, application IDs, signing setup, per-user credentials,
 custom guide/filter navigation, local-first progress/search deduplication,
 HDR handling and optional Windows announcements remain fork features.
 The custom guide/player and incremental search are adapted rather than
-replaced wholesale. See MOONFIN_2_7_INTEGRATION.md for verification status.
+replaced wholesale. See Git history for prior verification.
 
 Based on the existing Moonfin-Core checkout at upstream commit
 f18c45b1fbf9b63871b4f93237179f9706154763, including the local SpeshTV changes.

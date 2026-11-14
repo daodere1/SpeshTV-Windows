@@ -2,12 +2,12 @@ param([switch]$TestOnly, [switch]$NoAnnouncements,
     [string]$ToolchainRoot = (Join-Path $PSScriptRoot '.toolchains'),
     [string]$PubCache)
 $ErrorActionPreference = 'Stop'
-$workspace = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$buildParent = Split-Path $PSScriptRoot -Parent
 if (Test-Path V:\) { throw 'V: is already in use.' }
-& subst V: $PSScriptRoot
+& subst V: $buildParent
 if ($LASTEXITCODE -ne 0) { throw 'Could not map build workspace.' }
 try {
-    $root = 'V:\'
+    $root = Join-Path 'V:\' (Split-Path $PSScriptRoot -Leaf)
     if ($PubCache) { $env:PUB_CACHE = $PubCache }
     $env:GIT_CONFIG_COUNT = '2'
     $env:GIT_CONFIG_KEY_0 = 'safe.directory'
