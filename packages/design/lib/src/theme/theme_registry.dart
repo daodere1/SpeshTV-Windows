@@ -1,3 +1,4 @@
+import 'themes/spesh_cinematic_theme_spec.dart';
 import 'oled_derivation.dart';
 import 'oled_tuning.dart';
 import 'theme_spec.dart';
@@ -8,6 +9,7 @@ import 'themes/eightbit_hero_theme_spec.dart';
 
 class ThemeRegistry {
   const ThemeRegistry._();
+  static const cinematicOnly = bool.fromEnvironment('SPESHMEDIA_CLIENT', defaultValue: true) || bool.fromEnvironment('SPESHTV_WEB');
 
   static const String moonfinId = 'moonfin';
   static const String neonPulseId = 'neon_pulse';
@@ -37,25 +39,37 @@ class ThemeRegistry {
 
   /// All themes (built-in + plugin-supplied + store-saved) keyed by id.
   /// Plugin/server themes take precedence over store themes on id clash.
-  static Map<String, ThemeSpec> get availableThemes => {
-        ..._builtIns,
-        ..._store,
-        ..._custom,
-      };
+  static Map<String, ThemeSpec> get availableThemes =>
+      cinematicOnly
+      ? {
+          'spesh-cinematic':
+              speshCinematicThemeSpec,
+        }
+      : {
+          ..._builtIns,
+          // Server themes can override this bundled fallback.
+          'spesh-cinematic': speshCinematicThemeSpec,
+          ..._store,
+          ..._custom,
+        };
 
   /// The theme the user picked, before OLED Mode is layered on.
-  static ThemeSpec _base = moonfinThemeSpec;
+  static ThemeSpec _base = cinematicOnly ? speshCinematicThemeSpec : moonfinThemeSpec;
   static OledTuning _oled = OledTuning.off;
 
   /// [_base] with [_oled] applied. Memoized rather than derived per read:
   /// `AppColorScheme` proxies this getter on every colour lookup, so deriving
   /// lazily would allocate `Color`s in the paint path.
-  static ThemeSpec _active = moonfinThemeSpec;
+  static ThemeSpec _active = cinematicOnly ? speshCinematicThemeSpec : moonfinThemeSpec;
 
   static ThemeSpec get active => _active;
 
   static void setActiveById(String id) {
-    _base = availableThemes[id] ?? moonfinThemeSpec;
+    _base =
+        availableThemes[id] ??
+        (cinematicOnly
+            ? speshCinematicThemeSpec
+            : moonfinThemeSpec);
     _recompute();
   }
 
@@ -68,7 +82,10 @@ class ThemeRegistry {
   static void _recompute() => _active = applyOled(_base, _oled);
 
   static ThemeSpec resolveById(String id) {
-    return availableThemes[id] ?? moonfinThemeSpec;
+    return availableThemes[id] ??
+        (cinematicOnly
+            ? speshCinematicThemeSpec
+            : moonfinThemeSpec);
   }
 
   /// Register or replace a plugin-supplied theme. Built-in IDs are reserved
@@ -87,9 +104,11 @@ class ThemeRegistry {
   static void replaceCustomThemes(Iterable<ThemeSpec> specs) {
     _custom
       ..clear()
-      ..addEntries(specs
-          .where((s) => !builtInIds.contains(s.id))
-          .map((s) => MapEntry(s.id, s)));
+      ..addEntries(
+        specs
+            .where((s) => !builtInIds.contains(s.id))
+            .map((s) => MapEntry(s.id, s)),
+      );
   }
 
   static void removeCustom(String id) {

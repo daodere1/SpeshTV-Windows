@@ -5,6 +5,8 @@ import 'package:flutter_tvos/flutter_tvos.dart'
 import 'package:moonfin_design/moonfin_design.dart';
 
 import 'seerr/seerr_media_type_badge.dart';
+import 'spesh_brand.dart';
+import 'spesh_anime_badges.dart';
 import '../../preference/preference_constants.dart';
 import '../../util/platform_detection.dart';
 import '../../util/tv_ui_scale.dart';
@@ -117,6 +119,8 @@ class MediaCard extends StatefulWidget {
   final double? playedPercentage;
   final WatchedIndicatorBehavior watchedBehavior;
   final String? itemType;
+  final String? animeMarkerItemId;
+  final String? animeMarkerSeriesId;
   final String? seerrMediaType;
   final int? seerrStatus;
   final Color? focusColor;
@@ -145,7 +149,6 @@ class MediaCard extends StatefulWidget {
 
   /// The item behind the subbed/dubbed pill. Set only for standalone items such as
   /// movies, which have no series to inherit a verdict from.
-  final String? animeMarkerItemId;
 
   /// The item behind the Incomplete badge, for cards that can show a Live TV
   /// recording. The badge draws nothing unless the item is incomplete.
@@ -190,6 +193,8 @@ class MediaCard extends StatefulWidget {
     this.playedPercentage,
     this.watchedBehavior = WatchedIndicatorBehavior.always,
     this.itemType,
+    this.animeMarkerItemId,
+    this.animeMarkerSeriesId,
     this.seerrMediaType,
     this.seerrStatus,
     this.focusColor,
@@ -210,7 +215,7 @@ class MediaCard extends StatefulWidget {
     this.isBanner = false,
     this.showLabel = true,
     this.classicHomeLabel = false,
-    this.animeMarkerItemId,
+
     this.recordingItemId,
   });
 
@@ -391,9 +396,7 @@ class _MediaCardState extends State<MediaCard> with FocusStateMixin {
           widget.titleColor ??
           (isNeon ? AppColorScheme.accent : AppColorScheme.onSurface),
       fontWeight: classic ? FontWeight.w600 : FontWeight.bold,
-      fontSize: classic
-          ? tvPx(22)
-          : MediaCard._titleFontSize(baseTextStyle),
+      fontSize: classic ? tvPx(22) : MediaCard._titleFontSize(baseTextStyle),
       height: classic ? 30 / 22 : null,
       shadows: const [Shadow(blurRadius: 4, color: Colors.black54)],
     );
@@ -473,11 +476,30 @@ class _MediaCardState extends State<MediaCard> with FocusStateMixin {
                       itemType: widget.itemType,
                       seerrMediaType: widget.seerrMediaType,
                       seerrStatus: widget.seerrStatus,
-                      imageOverlays: widget.imageOverlays,
+                      imageOverlays: [
+                        ...widget.imageOverlays,
+                        if (speshWeb && widget.animeMarkerItemId != null)
+                          Positioned(
+                            left: 6,
+                            right: 32,
+                            top:
+                                widget.overlayOccupiesTopLeft ||
+                                    widget.isFavorite ||
+                                    widget.seerrMediaType != null
+                                ? 34
+                                : 6,
+                            child: SpeshAnimeItemAudioBadge(
+                              itemId: widget.animeMarkerItemId!,
+                              seriesId: widget.animeMarkerSeriesId,
+                            ),
+                          ),
+                      ],
                       imageUnderlays: widget.imageUnderlays,
                       imageSourceAspectRatio: widget.imageSourceAspectRatio,
                       overlayOccupiesTopLeft: widget.overlayOccupiesTopLeft,
-                      animeMarkerItemId: widget.animeMarkerItemId,
+                      animeMarkerItemId: speshWeb
+                          ? null
+                          : widget.animeMarkerItemId,
                       recordingItemId: widget.recordingItemId,
                       isGenreFallback: widget.isGenreFallback,
                     ),
@@ -507,10 +529,7 @@ class _MediaCardState extends State<MediaCard> with FocusStateMixin {
                       height: titleLineHeight,
                       width: cardWidth,
                       child: showMarquee
-                          ? MarqueeText(
-                              text: widget.title!,
-                              style: titleStyle,
-                            )
+                          ? MarqueeText(text: widget.title!, style: titleStyle)
                           : Text(
                               widget.title!,
                               maxLines: 1,
@@ -926,8 +945,7 @@ class _CardImage extends StatelessWidget {
                                 ? const EdgeInsets.only(bottom: 4)
                                 : EdgeInsets.zero,
                           ),
-                        if (isFavorite)
-                          const MediaFavoriteBadge(size: 22),
+                        if (isFavorite) const MediaFavoriteBadge(size: 22),
                       ],
                     ),
                   ),
@@ -975,12 +993,14 @@ class _CardImage extends StatelessWidget {
                         ? AppRadius.circular(radius + _focusRingInset)
                         : borders.cardRadius +
                               AppRadius.circular(_focusRingInset),
-                    border: Border.fromBorderSide(
-                      borders.focusBorder.copyWith(
-                        color: borderColor,
-                        width: 3.0,
-                      ),
-                    ),
+                    border: ThemeRegistry.active.id == 'spesh-cinematic'
+                        ? SpeshCinematicBorder()
+                        : Border.fromBorderSide(
+                            borders.focusBorder.copyWith(
+                              color: borderColor,
+                              width: 3.0,
+                            ),
+                          ),
                   ),
                 ),
               ),
@@ -1050,9 +1070,8 @@ class _PlaceholderIcon extends StatelessWidget {
                         fontSize: 14,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 2.5,
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.onSurface.withValues(alpha: 0.5),
+                        color: Theme.of(context).colorScheme.onSurface
+                            .withValues(alpha: 0.5),
                       ),
                     ),
                   ),

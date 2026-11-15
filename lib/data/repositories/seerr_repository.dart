@@ -14,6 +14,7 @@ class SeerrRepository {
   final MediaServerClient _client;
 
   SeerrHttpClient? _httpClient;
+  SeerrHttpClient? _calendarClient;
   bool _initialized = false;
   String? _lastUserId;
 
@@ -916,17 +917,38 @@ class SeerrRepository {
         .toList(),
   );
 
+  SeerrHttpClient _calendarTransport() {
+    final base = _client.baseUrl;
+    final token = _client.accessToken;
+    if (base.isEmpty || token == null || token.isEmpty) {
+      throw StateError('Jellyfin session is unavailable');
+    }
+    final current = _calendarClient;
+    if (current == null || current.proxyConfig.jellyfinBaseUrl != base ||
+        current.proxyConfig.jellyfinToken != token) {
+      current?.close();
+      _calendarClient = SeerrHttpClient(proxyConfig: MoonfinProxyConfig(
+        jellyfinBaseUrl: base, jellyfinToken: token,
+      ));
+    }
+    return _calendarClient!;
+  }
+
+  // Core authorizes calendar access with the current Jellyfin session. It does
+  // not need the viewer's Seerr login/status probe before reading an airing.
   Future<List<dynamic>> getRadarrCalendar({String? start, String? end}) =>
-      _withClient((c) => c.getRadarrCalendar(start: start, end: end));
+      _calendarTransport().getRadarrCalendar(start: start, end: end);
 
   Future<List<dynamic>> getSonarrCalendar({String? start, String? end}) =>
-      _withClient((c) => c.getSonarrCalendar(start: start, end: end));
+      _calendarTransport().getSonarrCalendar(start: start, end: end);
 
   Future<SeerrStatus> getStatus() => _withClient((c) => c.getStatus());
 
   Future<void> logout() => logoutMoonfin();
 
   void close() {
+    _calendarClient?.close();
+    _calendarClient = null;
     _httpClient?.close();
     _httpClient = null;
   }

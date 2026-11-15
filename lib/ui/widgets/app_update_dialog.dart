@@ -130,7 +130,7 @@ Future<void> _downloadAndInstallWindowsUpdate(
                 LinearProgressIndicator(
                   value: progress,
                   backgroundColor: Colors.white24,
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.blueAccent),
+                  valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
                 ),
                 const SizedBox(height: 12),
                 Text(

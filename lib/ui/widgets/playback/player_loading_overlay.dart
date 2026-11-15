@@ -101,7 +101,7 @@ class _PlayerLoadingOverlayState extends State<PlayerLoadingOverlay>
       return Column(mainAxisSize: MainAxisSize.min, children: [
         const SpeshBrand(height: 48),
         const SizedBox(height: 24),
-        const CircularProgressIndicator(color: Color(0xFF56D9CC)),
+        const CircularProgressIndicator(),
         if (hasLabel) Padding(padding: const EdgeInsets.only(top: 24),
           child: Text(label, textAlign: TextAlign.center)),
       ]);

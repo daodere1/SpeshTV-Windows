@@ -65,14 +65,20 @@ class AppTheme {
     // Pixel themes use blocky zero-radius chrome; other themes stay rounded.
     // Apple idioms get continuous-corner squircles instead of round-rects.
     final pixel = spec.isPixel;
+    final cinematic = spec.id == 'spesh-cinematic';
     final apple = AppUiIdiomResolver.current != AppUiIdiom.material;
     final OutlinedBorder buttonShape = pixel
         ? const RoundedRectangleBorder(borderRadius: BorderRadius.zero)
+        : cinematic
+        ? RoundedRectangleBorder(borderRadius: spec.borders.chipRadius)
         : apple
-            ? AppShapes.squircle(AppShapes.small)
-            : JellyfinTokens.shapes.smallShape;
-    final inputRadius =
-        pixel ? BorderRadius.zero : JellyfinTokens.shapes.smallRadius;
+        ? AppShapes.squircle(AppShapes.small)
+        : JellyfinTokens.shapes.smallShape;
+    final inputRadius = pixel
+        ? BorderRadius.zero
+        : cinematic
+        ? BorderRadius.circular(24)
+        : JellyfinTokens.shapes.smallRadius;
     return ThemeData(
       useMaterial3: true,
       platform: switch (AppUiIdiomResolver.current) {
@@ -95,32 +101,75 @@ class AppTheme {
       ],
       colorScheme: ColorScheme.dark(
         primary: c.accent,
-        secondary: JellyfinTokens.colors.secondary,
+        secondary: cinematic ? c.inputBorderFocused : JellyfinTokens.colors.secondary,
+        onSecondary: cinematic ? c.onAccent : Colors.black,
+        primaryContainer: cinematic ? c.surfaceVariant : null,
+        onPrimaryContainer: cinematic ? c.accent : null,
+        secondaryContainer: cinematic ? c.accent : null,
+        onSecondaryContainer: cinematic ? c.onAccent : null,
+        tertiary: cinematic ? c.inputBorderFocused : null,
+        onTertiary: cinematic ? c.onAccent : null,
+        tertiaryContainer: cinematic ? c.surfaceVariant : null,
+        onTertiaryContainer: cinematic ? c.onSurface : null,
+        surfaceTint: cinematic ? Colors.transparent : null,
+        surfaceContainerLowest: cinematic ? c.background : null,
+        surfaceContainerLow: cinematic ? c.surface : null,
+        surfaceContainer: cinematic ? c.surface : null,
+        surfaceContainerHigh: cinematic ? c.surfaceVariant : null,
+        outline: cinematic ? c.inputBorder : null,
+        outlineVariant: cinematic ? c.buttonNormal : null,
+        inverseSurface: cinematic ? c.onSurface : null,
+        onInverseSurface: cinematic ? c.background : null,
+        inversePrimary: cinematic ? c.onAccent : null,
         surface: c.surface,
         surfaceContainerHighest: c.surfaceVariant,
         error: c.error ?? JellyfinTokens.colors.error,
-        errorContainer: (c.error ?? JellyfinTokens.colors.error).withValues(alpha: 0.2),
+        errorContainer: (c.error ?? JellyfinTokens.colors.error).withValues(
+          alpha: 0.2,
+        ),
         onErrorContainer: c.error ?? JellyfinTokens.colors.error,
         onPrimary: c.onAccent,
         onSurface: c.onSurface,
         scrim: c.scrim,
       ),
       scaffoldBackgroundColor: c.background,
+      iconButtonTheme: cinematic ? IconButtonThemeData(style: ButtonStyle(
+        backgroundColor: WidgetStateProperty.resolveWith((states) =>
+            states.contains(WidgetState.selected) ? c.accent : c.buttonNormal),
+        foregroundColor: WidgetStateProperty.resolveWith((states) =>
+            states.contains(WidgetState.disabled) ? c.onButtonDisabled :
+            states.contains(WidgetState.selected) ? c.onAccent : c.accent),
+        overlayColor: WidgetStatePropertyAll(c.accent.withValues(alpha: 0.12)),
+        side: WidgetStateProperty.resolveWith((states) =>
+            states.contains(WidgetState.focused)
+                ? BorderSide(color: c.inputBorderFocused, width: 2)
+                : BorderSide.none),
+      )) : null,
+      segmentedButtonTheme: cinematic ? SegmentedButtonThemeData(style: ButtonStyle(
+        backgroundColor: WidgetStateProperty.resolveWith((states) =>
+            states.contains(WidgetState.selected) ? c.accent : c.surface),
+        foregroundColor: WidgetStateProperty.resolveWith((states) =>
+            states.contains(WidgetState.disabled) ? c.onButtonDisabled :
+            states.contains(WidgetState.selected) ? c.onAccent : c.onSurface),
+        side: WidgetStatePropertyAll(BorderSide(color: c.inputBorder)),
+      )) : null,
       textSelectionTheme: TextSelectionThemeData(
-        selectionColor: c.accent.withValues(alpha: 0.40),
-        selectionHandleColor: c.accent,
+        selectionColor: (cinematic ? c.inputBorderFocused : c.accent).withValues(alpha: 0.40),
+        selectionHandleColor: cinematic ? c.inputBorderFocused : c.accent,
         cursorColor: c.accent,
       ),
       cardTheme: CardThemeData(
         // From the spec so OLED Mode reaches Cards instead of leaving them as
         // grey slabs on a black scaffold.
         color: c.card,
-        shape: buttonShape,
+        shape: cinematic
+            ? RoundedRectangleBorder(
+                borderRadius: spec.borders.cardRadius,
+                side: spec.borders.cardBorder,
+              )
+            : buttonShape,
       ),
-      appBarTheme: AppBarTheme(
-        backgroundColor: c.background,
-        elevation: 0,
-      ),
+      appBarTheme: AppBarTheme(backgroundColor: c.background, elevation: 0),
       pageTransitionsTheme: AppUiIdiomResolver.current == AppUiIdiom.iosMobile
           ? _cupertinoTransitions
           : _fadeScaleTransitions,
@@ -180,11 +229,11 @@ class AppTheme {
                 side: const BorderSide(color: Color(0x33FFFFFF), width: 1),
               )
             : pixel
-                ? RoundedRectangleBorder(
-                    borderRadius: BorderRadius.zero,
-                    side: BorderSide(color: c.surfaceVariant, width: 2),
-                  )
-                : JellyfinTokens.shapes.largeShape,
+            ? RoundedRectangleBorder(
+                borderRadius: BorderRadius.zero,
+                side: BorderSide(color: c.surfaceVariant, width: 2),
+              )
+            : JellyfinTokens.shapes.largeShape,
       ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith<Color?>((states) {
@@ -197,7 +246,9 @@ class AppTheme {
     );
   }
 
-  static final darkTheme = buildTheme(ThemeRegistry.resolveById(ThemeRegistry.moonfinId));
+  static final darkTheme = buildTheme(
+    ThemeRegistry.resolveById(ThemeRegistry.moonfinId),
+  );
 
   static const _fadeScaleTransitions = PageTransitionsTheme(
     builders: {
@@ -302,10 +353,7 @@ class _FadeScalePageTransitionsBuilder extends PageTransitionsBuilder {
 
     return FadeTransition(
       opacity: curved,
-      child: ScaleTransition(
-        scale: scaleTween.animate(curved),
-        child: child,
-      ),
+      child: ScaleTransition(scale: scaleTween.animate(curved), child: child),
     );
   }
 }

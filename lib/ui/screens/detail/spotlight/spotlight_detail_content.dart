@@ -51,6 +51,7 @@ import 'spotlight_images.dart';
 import 'spotlight_landscape_layout.dart';
 import 'spotlight_portrait_layout.dart';
 import 'widgets/spotlight_section_modal.dart';
+import 'widgets/spotlight_modal_grids.dart';
 import 'widgets/spotlight_summary_card.dart';
 
 /// "Spotlight" detail-screen style: a hero-first layout with Play plus at most
@@ -357,7 +358,12 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
 
   SpotlightCardActions _cardActions(AggregatedItem item) {
     return SpotlightCardActions(
-      openItem: (entry) => _closeModalThen(() {
+      openItem: (entry) {
+        if (entry.type == 'Season' && _modalOpen) {
+          unawaited(_openSeasonEpisodes(entry));
+          return;
+        }
+        _closeModalThen(() {
         if (item.type == 'Episode' && entry.id == item.id) {
           playItemOnScreen(context);
         } else if (entry.serverId == 'seerr') {
@@ -387,7 +393,8 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
               ? context.pushReplacement(location)
               : context.push(location);
         }
-      }),
+        });
+      },
       openPerson: (personId) => _closeModalThen(() {
         context.push(
           item.serverId == 'seerr'
@@ -467,6 +474,57 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
   bool get _navbarFollowsFocus =>
       PlatformDetection.isTV ||
       FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+
+  Future<void> _openSeasonEpisodes(AggregatedItem season) async {
+    var episodes = _vm.browseSeasonEpisodes(season);
+    final action = await SpotlightSectionModal.show<VoidCallback>(
+      context,
+      title: '${_vm.item?.name ?? ''} · ${season.name}',
+      icon: Icons.video_library_outlined,
+      showBack: true,
+      sections: [
+        SpotlightModalSection(
+          title: AppLocalizations.of(context).episodes,
+          builder: (modalContext, firstFocusNode) => StatefulBuilder(
+            builder: (modalContext, update) => FutureBuilder<List<AggregatedItem>>(
+              future: episodes,
+              builder: (modalContext, snapshot) {
+                if (snapshot.hasError) {
+                  return TextButton.icon(
+                    onPressed: () => update(() {
+                      episodes = _vm.browseSeasonEpisodes(season);
+                    }),
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Could not load episodes. Retry'),
+                  );
+                }
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.data!.isEmpty) {
+                  return const Text('No episodes available.');
+                }
+                return SpotlightMediaGridSection(
+                  items: snapshot.data!,
+                  imageApi: _vm.imageApi,
+                  prefs: widget.prefs,
+                  aspectRatio: 16 / 9,
+                  landscapeCells: true,
+                  firstFocusNode: firstFocusNode,
+                  onItemTap: (episode) {
+                    Navigator.of(modalContext, rootNavigator: true).pop<VoidCallback>(
+                      () => _cardActions(_vm.item!).openItem(episode),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+    if (mounted && action != null) action();
+  }
 
   Future<void> _openCard(SpotlightCardSpec spec) async {
     if (_modalOpen) return;

@@ -3,7 +3,11 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+
 import 'spesh_brand.dart';
+import 'spesh_cinematic.dart';
+import 'spesh_streaming_services.dart';
+
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
@@ -16,6 +20,7 @@ import '../../data/repositories/multi_server_repository.dart';
 import '../../data/repositories/user_views_repository.dart';
 import '../../data/services/achievements_service.dart';
 import '../../data/services/library_scope_service.dart';
+import '../../data/services/media_server_client_factory.dart';
 import '../../data/services/plugin_sync_service.dart';
 import '../../preference/preference_constants.dart';
 import '../../preference/seerr_preferences.dart';
@@ -47,8 +52,8 @@ import 'shuffle_overlay.dart';
 import 'user_menu_dialog.dart';
 
 import 'package:playback_core/playback_core.dart';
+
 import '../../data/models/aggregated_item.dart';
-import '../../data/services/media_server_client_factory.dart';
 import '../navigation/app_router.dart';
 import 'offline_aware_image.dart';
 import 'paced_network_image.dart';
@@ -71,7 +76,9 @@ class LeftSidebar extends StatefulWidget {
   /// Notifier updated when the sidebar's focus state changes.
   /// Use this instead of walking the element tree to determine if the
   /// current focus is within the sidebar; it's resilient during teardown.
-  static final ValueNotifier<bool> isFocusedNotifier = ValueNotifier<bool>(false);
+  static final ValueNotifier<bool> isFocusedNotifier = ValueNotifier<bool>(
+    false,
+  );
 
   const LeftSidebar({
     super.key,
@@ -104,6 +111,10 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
   final _scrollController = ScrollController();
 
   List<AggregatedLibrary> _libraries = [];
+  int _libraryRequest = 0;
+  List<String> get _studios =>
+      speshStreamingServices.map((service) => service.name).toList();
+  bool _studiosExpanded = false;
   bool _isExpanded = false;
   bool _showLabels = false;
   bool _librariesExpanded = false;
@@ -170,7 +181,12 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
       (_) => _updateClock(),
     );
     _loadUserImage();
-    _userSub = _userRepo.currentUserStream.listen((_) => _loadUserImage());
+    _userSub = _userRepo.currentUserStream.listen((_) {
+      _loadUserImage();
+
+      if (mounted) setState(() => _libraries = []);
+      _loadLibraries();
+    });
     _prefs.addListener(_onPrefsChanged);
     _viewsRepo.addListener(_onUserViewsChanged);
     GetIt.instance<PluginSyncService>().addListener(_onPrefsChanged);
@@ -179,7 +195,9 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
     }
     _loadLibraries();
     FocusManager.instance.addListener(_trackPreviousFocus);
-    if (PlatformDetection.isTV || (PlatformDetection.isDesktop || (PlatformDetection.isWeb && !PlatformDetection.useMobileUi))) {
+    if (PlatformDetection.isTV ||
+        (PlatformDetection.isDesktop ||
+            (PlatformDetection.isWeb && !PlatformDetection.useMobileUi))) {
       _armTvFocusGate();
       _sidebarFocus.addListener(_onSidebarFocusNodeChanged);
     }
@@ -234,7 +252,9 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
     }
     NavigationLayout.chromeFocusRoots.remove(_sidebarFocus);
     FocusManager.instance.removeListener(_trackPreviousFocus);
-    if (PlatformDetection.isTV || (PlatformDetection.isDesktop || (PlatformDetection.isWeb && !PlatformDetection.useMobileUi))) {
+    if (PlatformDetection.isTV ||
+        (PlatformDetection.isDesktop ||
+            (PlatformDetection.isWeb && !PlatformDetection.useMobileUi))) {
       _sidebarFocus.removeListener(_onSidebarFocusNodeChanged);
     }
     _clockTimer?.cancel();
@@ -326,6 +346,8 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
   }
 
   Future<void> _loadLibraries() async {
+    final request = ++_libraryRequest;
+
     try {
       final useMultiServer = _prefs.get(
         UserPreferences.enableMultiServerLibraries,
@@ -343,7 +365,9 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
             )
           : libs;
 
-      if (mounted && !_librariesEqual(_libraries, filtered)) {
+      if (mounted &&
+          request == _libraryRequest &&
+          !_librariesEqual(_libraries, filtered)) {
         setState(() => _libraries = filtered);
       }
     } catch (_) {}
@@ -352,7 +376,11 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
   bool _librariesEqual(List<AggregatedLibrary> a, List<AggregatedLibrary> b) {
     if (a.length != b.length) return false;
     for (int i = 0; i < a.length; i++) {
-      if (a[i].id != b[i].id) return false;
+      if (a[i].id != b[i].id ||
+          a[i].serverId != b[i].serverId ||
+          a[i].name != b[i].name ||
+          a[i].collectionType != b[i].collectionType)
+        return false;
     }
     return true;
   }
@@ -428,7 +456,8 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
           // A handoff can target a specific item like the avatar, and
           // re-requesting home here would stomp it.
           final primary = FocusManager.instance.primaryFocus;
-          final hasSpecificChild = primary != null &&
+          final hasSpecificChild =
+              primary != null &&
               !identical(primary, _sidebarFocus) &&
               _isDescendantOf(primary, _sidebarFocus);
           if (!hasSpecificChild) {
@@ -457,13 +486,17 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
   }
 
   void _markNavigationAwayFromSidebar() {
-    if (PlatformDetection.isTV || (PlatformDetection.isDesktop || (PlatformDetection.isWeb && !PlatformDetection.useMobileUi))) {
+    if (PlatformDetection.isTV ||
+        (PlatformDetection.isDesktop ||
+            (PlatformDetection.isWeb && !PlatformDetection.useMobileUi))) {
       _openedRouteFromRail = true;
     }
   }
 
   void _onSidebarFocusChange(bool hasFocus) {
-    if (PlatformDetection.isTV || (PlatformDetection.isDesktop || (PlatformDetection.isWeb && !PlatformDetection.useMobileUi))) {
+    if (PlatformDetection.isTV ||
+        (PlatformDetection.isDesktop ||
+            (PlatformDetection.isWeb && !PlatformDetection.useMobileUi))) {
       return;
     }
     // On mobile, keep sidebar opening explicit (menu tap) to avoid
@@ -487,7 +520,8 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
   KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent) {
       final primary = FocusManager.instance.primaryFocus;
-      final insideMusicCard = primary != null && _isDescendantOf(primary, _musicCardFocusNode);
+      final insideMusicCard =
+          primary != null && _isDescendantOf(primary, _musicCardFocusNode);
 
       if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
         if (insideMusicCard) {
@@ -629,7 +663,9 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
   }
 
   Widget _buildDrawerLayout() {
-    if (PlatformDetection.isTV || (PlatformDetection.isDesktop || (PlatformDetection.isWeb && !PlatformDetection.useMobileUi))) {
+    if (PlatformDetection.isTV ||
+        (PlatformDetection.isDesktop ||
+            (PlatformDetection.isWeb && !PlatformDetection.useMobileUi))) {
       return _buildTvLayout();
     }
     final expandedWidth = _isMobile
@@ -666,58 +702,61 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                         : _buildContent(),
                   )
                 : Container(
-              decoration: BoxDecoration(
-                gradient: _isMobile
-                    ? null
-                    : LinearGradient(
-                        begin: Alignment.centerLeft,
-                        end: Alignment.centerRight,
-                        colors: [
-                          _overlayColor().withValues(alpha: _overlayOpacity()),
-                          _overlayColor().withValues(
-                            alpha: _overlayOpacity() * 0.75,
-                          ),
-                          Colors.transparent,
-                        ],
-                        stops: [0.0, 0.7, 1.0],
-                      ),
-                color: _isMobile
-                    ? _overlayColor().withValues(alpha: _overlayOpacity())
-                    : null,
-                border: isNeon
-                    ? Border(
-                        right: ThemeRegistry.active.borders.chipBorder.copyWith(
-                          color: AppColorScheme.accent,
-                          width: 1.2,
-                        ),
-                      )
-                    : null,
-                boxShadow: _isExpanded
-                    ? [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.6),
-                          blurRadius: 20,
-                          offset: const Offset(4, 0),
-                        ),
-                        if (isNeon)
-                          const BoxShadow(
-                            color: Color(0x66FF2E92),
-                            blurRadius: 12,
-                            offset: Offset(2, 0),
-                          ),
-                        if (isNeon)
-                          const BoxShadow(
-                            color: Color(0x5500E5FF),
-                            blurRadius: 10,
-                            offset: Offset(1, 0),
-                          ),
-                      ]
-                    : null,
-              ),
-              child: _isMobile
-                  ? SafeArea(right: false, child: _buildContent())
-                  : _buildContent(),
-            ),
+                    decoration: BoxDecoration(
+                      gradient: _isMobile
+                          ? null
+                          : LinearGradient(
+                              begin: Alignment.centerLeft,
+                              end: Alignment.centerRight,
+                              colors: [
+                                _overlayColor().withValues(
+                                  alpha: _overlayOpacity(),
+                                ),
+                                _overlayColor().withValues(
+                                  alpha: _overlayOpacity() * 0.75,
+                                ),
+                                Colors.transparent,
+                              ],
+                              stops: [0.0, 0.7, 1.0],
+                            ),
+                      color: _isMobile
+                          ? _overlayColor().withValues(alpha: _overlayOpacity())
+                          : null,
+                      border: isNeon
+                          ? Border(
+                              right: ThemeRegistry.active.borders.chipBorder
+                                  .copyWith(
+                                    color: AppColorScheme.accent,
+                                    width: 1.2,
+                                  ),
+                            )
+                          : null,
+                      boxShadow: _isExpanded
+                          ? [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.6),
+                                blurRadius: 20,
+                                offset: const Offset(4, 0),
+                              ),
+                              if (isNeon)
+                                const BoxShadow(
+                                  color: Color(0x66FF2E92),
+                                  blurRadius: 12,
+                                  offset: Offset(2, 0),
+                                ),
+                              if (isNeon)
+                                const BoxShadow(
+                                  color: Color(0x5500E5FF),
+                                  blurRadius: 10,
+                                  offset: Offset(1, 0),
+                                ),
+                            ]
+                          : null,
+                    ),
+                    child: _isMobile
+                        ? SafeArea(right: false, child: _buildContent())
+                        : _buildContent(),
+                  ),
           ),
         ),
         if (!_isExpanded)
@@ -782,14 +821,29 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
     final backdropColor = _overlayColor().withValues(alpha: _overlayOpacity());
     final isNeon = ThemeRegistry.active.id == ThemeRegistry.neonPulseId;
     final desktopHoverRail =
-        (PlatformDetection.isDesktop || (PlatformDetection.isWeb && !PlatformDetection.useMobileUi)) && !PlatformDetection.isTV;
+        (PlatformDetection.isDesktop ||
+            (PlatformDetection.isWeb && !PlatformDetection.useMobileUi)) &&
+        !PlatformDetection.isTV;
     final railWidth = _isExpanded ? _kExpandedWidthTV : _kCollapsedWidthTV;
 
     final rail = AnimatedContainer(
+      margin: speshCinematic
+          ? const EdgeInsets.fromLTRB(12, 16, 0, 16)
+          : EdgeInsets.zero,
+      decoration: speshCinematic
+          ? BoxDecoration(
+              color: const Color(0xFF0D0F13),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: const Color(0xFF25272C)),
+            )
+          : null,
       duration: _kExpandDuration,
       curve: Curves.easeInOut,
       width: railWidth,
-      child: ClipRect(
+      child: ClipRRect(
+        borderRadius: speshCinematic
+            ? BorderRadius.circular(28)
+            : BorderRadius.zero,
         child: FocusScope(
           node: _sidebarFocus,
           onFocusChange: _onSidebarFocusChange,
@@ -855,7 +909,9 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                 child: AnimatedContainer(
                   duration: _kExpandDuration,
                   curve: Curves.easeInOut,
-                  width: _isExpanded ? _kExpandedBackdropWidthTV : _kCollapsedWidthTV,
+                  width: _isExpanded
+                      ? _kExpandedBackdropWidthTV
+                      : _kCollapsedWidthTV,
                   child: _buildContent(),
                 ),
               ),
@@ -946,17 +1002,22 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
 
   Widget _buildContent() {
     final l10n = AppLocalizations.of(context);
-    final showShuffle = _prefs.get(UserPreferences.showShuffleButton);
-    final showGenres = _prefs.get(UserPreferences.showGenresButton);
-    final showFavorites = _prefs.get(UserPreferences.showFavoritesButton);
+    final showShuffle =
+        !speshWeb && _prefs.get(UserPreferences.showShuffleButton);
+    final showGenres =
+        !speshWeb && _prefs.get(UserPreferences.showGenresButton);
+    final showFavorites =
+        !speshWeb && _prefs.get(UserPreferences.showFavoritesButton);
     // Checked alongside the show* preferences, never written into them, since
     // those sync and would follow the account to the parent's other devices.
     final kidsMode = _kidsMode;
     final showLiveTv = _showLiveTvButton;
     final navLibraries = _navLibraries;
     final showLibraries =
-        !kidsMode && _prefs.get(UserPreferences.showLibrariesInToolbar);
+        !kidsMode &&
+        (speshCinematic || _prefs.get(UserPreferences.showLibrariesInToolbar));
     final showLibrariesIndividually =
+        !speshCinematic &&
         _prefs.get(UserPreferences.showLibrariesIndividually);
     final showSyncPlay =
         !kidsMode &&
@@ -1030,6 +1091,18 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                     context.navigateTopLevel(Destinations.search);
                   },
                 ),
+                if (speshCinematic && !kidsMode)
+                  _SidebarItem(
+                    key: const ValueKey('sidebar-calendar'),
+                    icon: Icons.calendar_month_outlined,
+                    label: 'Calendar',
+                    showLabel: _showLabels,
+                    onPressed: () {
+                      _onNavigate();
+                      _markNavigationAwayFromSidebar();
+                      context.navigateTopLevel(Destinations.cinematicCalendar);
+                    },
+                  ),
                 if (showShuffle)
                   _SidebarItem(
                     key: const ValueKey('sidebar-shuffle'),
@@ -1168,7 +1241,10 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                             child: Icon(
                               Icons.expand_more,
                               size:
-                                  ((PlatformDetection.isDesktop || (PlatformDetection.isWeb && !PlatformDetection.useMobileUi)) &&
+                                  ((PlatformDetection.isDesktop ||
+                                          (PlatformDetection.isWeb &&
+                                              !PlatformDetection
+                                                  .useMobileUi)) &&
                                       !PlatformDetection.isTV)
                                   ? 18
                                   : 16,
@@ -1176,9 +1252,10 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                             ),
                           )
                         : null,
-                    onPressed: () => setState(
-                      () => _librariesExpanded = !_librariesExpanded,
-                    ),
+                    onPressed: () {
+                      _expand();
+                      setState(() => _librariesExpanded = !_librariesExpanded);
+                    },
                   ),
                   AnimatedSize(
                     key: const ValueKey('sidebar-libraries-children'),
@@ -1200,6 +1277,50 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                           )
                         : const SizedBox.shrink(),
                   ),
+                ],
+                if (speshCinematic && !kidsMode) ...[
+                  _SidebarItem(
+                    key: const ValueKey('sidebar-studios'),
+                    icon: Icons.business_outlined,
+                    label: 'Streaming services',
+                    showLabel: _showLabels,
+                    trailing: _showLabels
+                        ? Icon(
+                            _studiosExpanded
+                                ? Icons.expand_less
+                                : Icons.expand_more,
+                            size: 18,
+                          )
+                        : null,
+                    onPressed: () {
+                      _expand();
+                      setState(() => _studiosExpanded = !_studiosExpanded);
+                    },
+                  ),
+                  if (_studiosExpanded && _showLabels)
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final name in _studios)
+                          Tooltip(
+                            message: name,
+                            child: IconButton(
+                              key: ValueKey('studio-$name'),
+                              tooltip: name,
+                              icon: StreamingServiceIcon(name),
+                              onPressed: () {
+                                _onNavigate();
+                                _markNavigationAwayFromSidebar();
+                                context.navigateTopLevel(
+                                  streamingServiceRoute(name),
+                                );
+                              },
+                            ),
+                          ),
+                      ],
+                    ),
                 ],
                 // The slot is taken here rather than inside the builder, so
                 // the rows below keep their colour whether or not anything is
@@ -1305,7 +1426,9 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
 
   void _exitSidebarToContent() {
     _collapse();
-    if (PlatformDetection.isTV || (PlatformDetection.isDesktop || (PlatformDetection.isWeb && !PlatformDetection.useMobileUi))) {
+    if (PlatformDetection.isTV ||
+        (PlatformDetection.isDesktop ||
+            (PlatformDetection.isWeb && !PlatformDetection.useMobileUi))) {
       _restoreFocusOutsideSidebar();
     }
   }
@@ -1510,7 +1633,9 @@ class _SidebarItemState extends State<_SidebarItem> {
   @override
   Widget build(BuildContext context) {
     final desktopSidebar =
-        (PlatformDetection.isDesktop || (PlatformDetection.isWeb && !PlatformDetection.useMobileUi)) && !PlatformDetection.isTV;
+        (PlatformDetection.isDesktop ||
+            (PlatformDetection.isWeb && !PlatformDetection.useMobileUi)) &&
+        !PlatformDetection.isTV;
     final useBaseForFocus = widget.baseColor != null;
     final highlighted =
         (desktopSidebar && _isHovered) ||
@@ -1558,7 +1683,9 @@ class _SidebarItemState extends State<_SidebarItem> {
                           ? baseColor.withValues(alpha: 0.12)
                           : focusColor.withValues(alpha: 0.12))
                     : Colors.transparent,
-                borderRadius: PlatformDetection.isTV
+                borderRadius: speshCinematic
+                    ? BorderRadius.circular(18)
+                    : PlatformDetection.isTV
                     ? AppRadius.circular(24)
                     : BorderRadius.zero,
               ),
@@ -1645,7 +1772,9 @@ class _SidebarLibraryItemState extends State<_SidebarLibraryItem> {
   @override
   Widget build(BuildContext context) {
     final desktopSidebar =
-        (PlatformDetection.isDesktop || (PlatformDetection.isWeb && !PlatformDetection.useMobileUi)) && !PlatformDetection.isTV;
+        (PlatformDetection.isDesktop ||
+            (PlatformDetection.isWeb && !PlatformDetection.useMobileUi)) &&
+        !PlatformDetection.isTV;
     final focusColor = Color(_prefs.get(UserPreferences.focusColor).colorValue);
     final baseColor = widget.baseColor ?? Colors.white.withValues(alpha: 0.5);
     final useBaseForFocus = widget.baseColor != null;
@@ -1715,11 +1844,7 @@ class _SidebarLibraryItemState extends State<_SidebarLibraryItem> {
 class SidebarMusicCard extends StatefulWidget {
   final bool isExpanded;
   final FocusNode? focusNode;
-  const SidebarMusicCard({
-    super.key,
-    required this.isExpanded,
-    this.focusNode,
-  });
+  const SidebarMusicCard({super.key, required this.isExpanded, this.focusNode});
 
   @override
   State<SidebarMusicCard> createState() => _SidebarMusicCardState();
@@ -1754,11 +1879,8 @@ class _SidebarMusicCardState extends State<SidebarMusicCard> {
     return raw is AggregatedItem ? raw : null;
   }
 
-  String? _artUrl(AggregatedItem item) => audioArtUrl(
-        item,
-        clientFactory: _clientFactory,
-        maxHeight: 120,
-      );
+  String? _artUrl(AggregatedItem item) =>
+      audioArtUrl(item, clientFactory: _clientFactory, maxHeight: 120);
 
   Widget _buildCardButton({
     required IconData icon,
@@ -1792,7 +1914,9 @@ class _SidebarMusicCardState extends State<SidebarMusicCard> {
               child: Icon(
                 icon,
                 size: large ? 22 : 18,
-                color: focused ? AppColorScheme.surface : AppColorScheme.onSurface,
+                color: focused
+                    ? AppColorScheme.surface
+                    : AppColorScheme.onSurface,
               ),
             ),
           );
@@ -1835,16 +1959,20 @@ class _SidebarMusicCardState extends State<SidebarMusicCard> {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: focused ? AppColorScheme.accent : Colors.transparent,
+                        color: focused
+                            ? AppColorScheme.accent
+                            : Colors.transparent,
                         width: 2,
                       ),
                       boxShadow: focused
                           ? [
                               BoxShadow(
-                                color: AppColorScheme.accent.withValues(alpha: 0.4),
+                                color: AppColorScheme.accent.withValues(
+                                  alpha: 0.4,
+                                ),
                                 blurRadius: 8,
                                 spreadRadius: 1,
-                              )
+                              ),
                             ]
                           : null,
                     ),
@@ -1855,10 +1983,14 @@ class _SidebarMusicCardState extends State<SidebarMusicCard> {
                               fit: BoxFit.cover,
                             )
                           : Container(
-                              color: AppColorScheme.onSurface.withValues(alpha: 0.1),
+                              color: AppColorScheme.onSurface.withValues(
+                                alpha: 0.1,
+                              ),
                               child: Icon(
                                 Icons.music_note,
-                                color: AppColorScheme.onSurface.withValues(alpha: 0.6),
+                                color: AppColorScheme.onSurface.withValues(
+                                  alpha: 0.6,
+                                ),
                               ),
                             ),
                     ),
@@ -1878,21 +2010,14 @@ class _SidebarMusicCardState extends State<SidebarMusicCard> {
 
     final isNeon = ThemeRegistry.active.id == ThemeRegistry.neonPulseId;
     final border = isNeon
-        ? Border.all(
-            color: const Color(0xFF00F0FF),
-            width: 1.5,
-          )
+        ? Border.all(color: const Color(0xFF00F0FF), width: 1.5)
         : Border.all(
             color: AppColorScheme.onSurface.withValues(alpha: 0.15),
             width: 1.0,
           );
     final boxShadow = isNeon
         ? const [
-            BoxShadow(
-              color: Color(0x3300F0FF),
-              blurRadius: 8,
-              spreadRadius: 1,
-            )
+            BoxShadow(color: Color(0x3300F0FF), blurRadius: 8, spreadRadius: 1),
           ]
         : null;
 
@@ -1941,10 +2066,13 @@ class _SidebarMusicCardState extends State<SidebarMusicCard> {
                                     fit: BoxFit.cover,
                                   )
                                 : Container(
-                                    color: AppColorScheme.onSurface.withValues(alpha: 0.1),
+                                    color: AppColorScheme.onSurface.withValues(
+                                      alpha: 0.1,
+                                    ),
                                     child: Icon(
                                       Icons.music_note,
-                                      color: AppColorScheme.onSurface.withValues(alpha: 0.6),
+                                      color: AppColorScheme.onSurface
+                                          .withValues(alpha: 0.6),
                                     ),
                                   ),
                           ),
@@ -1969,7 +2097,9 @@ class _SidebarMusicCardState extends State<SidebarMusicCard> {
                                 Text(
                                   artist,
                                   style: TextStyle(
-                                    color: AppColorScheme.onSurface.withValues(alpha: 0.6),
+                                    color: AppColorScheme.onSurface.withValues(
+                                      alpha: 0.6,
+                                    ),
                                     fontSize: 11,
                                   ),
                                   maxLines: 1,
@@ -1999,10 +2129,7 @@ class _SidebarMusicCardState extends State<SidebarMusicCard> {
                 onPressed: isPlaying ? _manager.pause : _manager.resume,
                 large: true,
               ),
-              _buildCardButton(
-                icon: Icons.skip_next,
-                onPressed: _manager.next,
-              ),
+              _buildCardButton(icon: Icons.skip_next, onPressed: _manager.next),
               _buildCardButton(
                 icon: Icons.stop,
                 onPressed: () => unawaited(_manager.stop(userInitiated: true)),

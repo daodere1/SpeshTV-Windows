@@ -203,7 +203,9 @@ class SpotlightMediaGridSection extends StatelessWidget {
 
                     return MediaCard(
                       key: ValueKey(cellKeys[i]),
-                      title: entry.name,
+                      title: entry.type == 'Episode' && entry.indexNumber != null
+                          ? '${entry.indexNumber}${entry.rawData['IndexNumberEnd'] == null ? '' : '–${entry.rawData['IndexNumberEnd']}'} · ${entry.name}'
+                          : entry.name,
                       subtitle: entry.personRole,
                       titleColor: titleColor,
                       imageUrl: spotlightItemImageUrl(imageApi, entry),

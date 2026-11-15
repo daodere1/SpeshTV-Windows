@@ -4,6 +4,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'spesh_brand.dart';
+import 'spesh_streaming_services.dart';
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
@@ -987,9 +988,9 @@ class _TopToolbarState extends State<TopToolbar> with RouteAware {
 
   Widget _buildCenter() {
     final isNeon = ThemeRegistry.active.id == ThemeRegistry.neonPulseId;
-    final showShuffle = _prefs.get(UserPreferences.showShuffleButton);
-    final showGenres = _prefs.get(UserPreferences.showGenresButton);
-    final showFavorites = _prefs.get(UserPreferences.showFavoritesButton);
+    final showShuffle = !speshWeb && _prefs.get(UserPreferences.showShuffleButton);
+    final showGenres = !speshWeb && _prefs.get(UserPreferences.showGenresButton);
+    final showFavorites = !speshWeb && _prefs.get(UserPreferences.showFavoritesButton);
     // Checked alongside the show* preferences, never written into them, since
     // those sync and would follow the account to the parent's other devices.
     final kidsMode = _kidsMode;
@@ -1072,6 +1073,24 @@ class _TopToolbarState extends State<TopToolbar> with RouteAware {
                   },
                 ),
               ),
+              if (speshWeb && !kidsMode) ...[
+                _gap(),
+                _orderButton(
+                  order: (order++).toDouble(),
+                  child: ExpandableIconButton(
+                    key: const ValueKey('toolbar_studios'),
+                    forceExpanded: alwaysExpanded,
+                    icon: Icons.business_outlined,
+                    label: 'Studios',
+                    baseColor: nextNavColor(),
+                    onPressed: () async {
+                      final name = await pickSpeshStudio(context);
+                      if (!context.mounted || name == null) return;
+                      context.navigateTopLevel(streamingServiceRoute(name));
+                    },
+                  ),
+                ),
+              ],
               if (showShuffle) ...[
                 _gap(),
                 _orderButton(

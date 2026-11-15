@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:playback_core/playback_core.dart';
+
 import '../widgets/spesh_brand.dart';
+import '../widgets/spesh_cinematic.dart';
+import '../screens/calendar/cinematic_calendar_screen.dart';
 import 'spesh_web_entry.dart';
+
 import 'package:server_core/server_core.dart' show ServerType;
 
 import '../../auth/repositories/server_repository.dart';
@@ -311,6 +315,7 @@ final appRouter = GoRouter(
             ? state.extra as RemoteSearchSession
             : null,
         initialQuery: state.uri.queryParameters['query'],
+        initialSource: state.uri.queryParameters['source'],
         scopedLibraryId: state.uri.queryParameters['libraryId'],
       ),
     ),
@@ -448,20 +453,43 @@ final appRouter = GoRouter(
 
     // Item details
     GoRoute(
+      path: Destinations.cinematicCalendar,
+      builder: (context, state) => const CinematicCalendarScreen(),
+    ),
+    GoRoute(
       path: Destinations.itemDetail,
-      builder: (context, state) {
+      pageBuilder: (context, state) {
         final itemId = state.pathParameters['itemId']!;
         final serverId = state.uri.queryParameters['serverId'];
         final autoPlay = state.uri.queryParameters['autoPlay'] == 'true';
         final contextSeasonId = state.uri.queryParameters['seasonContext'];
-        return ItemDetailScreen(
+        final modal =
+            speshCinematic &&
+            !autoPlay &&
+            MediaQuery.sizeOf(context).width >= 760;
+        final screen = ItemDetailScreen(
           // The browsed season decides which episode list this screen loads, so
           // a change of context has to remount rather than reuse the view model.
           key: ValueKey('$itemId|${contextSeasonId ?? ''}'),
           itemId: itemId,
           serverId: serverId,
           autoPlay: autoPlay,
+          embedded: modal,
           contextSeasonId: contextSeasonId,
+        );
+        if (!modal)
+          return MaterialPage<void>(key: state.pageKey, child: screen);
+        return CustomTransitionPage<void>(
+          key: state.pageKey,
+          opaque: false,
+          transitionDuration: const Duration(milliseconds: 180),
+          reverseTransitionDuration: const Duration(milliseconds: 150),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+              FadeTransition(opacity: animation, child: child),
+          child: CinematicDetailFrame(
+            child: screen,
+            onClose: () => context.popOrHome(),
+          ),
         );
       },
       routes: [
@@ -667,8 +695,7 @@ final appRouter = GoRouter(
       builder: (context, state) {
         final videoId = state.uri.queryParameters['videoId'];
         final url = state.uri.queryParameters['url'];
-        return TrailerPlayerScreen(videoId: videoId, trailerUrl: url,
-            retryAlternative: state.extra == true);
+        return TrailerPlayerScreen(videoId: videoId, trailerUrl: url, retryAlternative: state.extra == true);
       },
     ),
     GoRoute(
@@ -720,16 +747,32 @@ final appRouter = GoRouter(
     ),
     GoRoute(
       path: Destinations.seerrMediaDetail,
-      builder: (context, state) {
+      pageBuilder: (context, state) {
         final rawId = state.pathParameters['itemId']!;
         final kind = state.uri.queryParameters['mediaType'] == 'tv'
             ? TmdbItemKind.tv
             : TmdbItemKind.movie;
         final ref = TmdbItemRef.tryParse(rawId) ?? TmdbItemRef(kind, rawId);
-        return ItemDetailScreen(
+        final modal = speshCinematic && MediaQuery.sizeOf(context).width >= 760;
+        final screen = ItemDetailScreen(
           key: ValueKey(ref.itemId),
           itemId: ref.itemId,
           seerrTitle: state.uri.queryParameters['title'],
+          embedded: modal,
+        );
+        if (!modal)
+          return MaterialPage<void>(key: state.pageKey, child: screen);
+        return CustomTransitionPage<void>(
+          key: state.pageKey,
+          opaque: false,
+          transitionDuration: const Duration(milliseconds: 180),
+          reverseTransitionDuration: const Duration(milliseconds: 150),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+              FadeTransition(opacity: animation, child: child),
+          child: CinematicDetailFrame(
+            child: screen,
+            onClose: () => context.popOrHome(),
+          ),
         );
       },
     ),
@@ -745,7 +788,8 @@ final appRouter = GoRouter(
       builder: (context, state) {
         final personId = state.pathParameters['personId']!;
         final prefs = GetIt.instance<UserPreferences>();
-        if (prefs.get(UserPreferences.detailScreenStyle) != DetailScreenStyle.classic) {
+        if (prefs.get(UserPreferences.detailScreenStyle) !=
+            DetailScreenStyle.classic) {
           return ItemDetailScreen(
             key: ValueKey('tmdb:$personId'),
             itemId: 'tmdb:$personId',

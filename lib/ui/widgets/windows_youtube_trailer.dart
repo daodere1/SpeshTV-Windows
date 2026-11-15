@@ -69,7 +69,7 @@ class _WindowsYouTubeTrailerState extends State<WindowsYouTubeTrailer> {
   @override
   void initState() {
     super.initState();
-    _log('starting build 30000191');
+    _log('starting native embedded trailer');
     _startup = Timer(const Duration(seconds: 25), _fail);
     unawaited(_start());
   }

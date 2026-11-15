@@ -62,6 +62,7 @@ abstract final class SpotlightSectionModal {
     Listenable? refreshOn,
     SpotlightModalContent Function()? refresh,
     VoidCallback? onNearEnd,
+    bool showBack = false,
   }) {
     FocusManager.instance.primaryFocus?.unfocus();
     final future = showGeneralDialog<T>(
@@ -77,6 +78,7 @@ abstract final class SpotlightSectionModal {
         refreshOn: refreshOn,
         refresh: refresh,
         onNearEnd: onNearEnd,
+        showBack: showBack,
       ),
       transitionBuilder: (context, anim, secondAnim, child) {
         final scale = Tween<double>(begin: 0.96, end: 1.0).animate(
@@ -95,6 +97,7 @@ abstract final class SpotlightSectionModal {
 }
 
 class _SpotlightModalShell extends StatefulWidget {
+  final bool showBack;
   final String title;
   final IconData? icon;
   final List<SpotlightModalSection> sections;
@@ -113,6 +116,7 @@ class _SpotlightModalShell extends StatefulWidget {
     this.refreshOn,
     this.refresh,
     this.onNearEnd,
+    this.showBack = false,
   });
 
   @override
@@ -351,6 +355,8 @@ class _SpotlightModalShellState extends State<_SpotlightModalShell> {
           padding: const EdgeInsets.fromLTRB(24, 20, 12, 12),
           child: Row(
             children: [
+              if (widget.showBack)
+                BackButton(onPressed: () => _dismiss(fromKeyEvent: false)),
               if (_icon != null)
                 Padding(
                   padding: const EdgeInsets.only(right: 12),

@@ -110,7 +110,10 @@ class AppThemeController extends ChangeNotifier {
   ) async {
     await prefs.set(UserPreferences.visualTheme, themeId);
     await prefs.set(UserPreferences.customThemeId, '');
-    await prefs.set(UserPreferences.focusColor, _defaultFocusColorForTheme(themeId));
+    await prefs.set(
+      UserPreferences.focusColor,
+      _defaultFocusColorForTheme(themeId),
+    );
     _apply(themeId, '', _activeOled);
   }
 
@@ -157,12 +160,12 @@ class AppThemeController extends ChangeNotifier {
     final prefTheme = prefs.get(UserPreferences.visualTheme);
     final customId = _customIdFor(prefs);
     final hasCustom =
-      customId.isNotEmpty &&
-      !ThemeRegistry.builtInIds.contains(customId) &&
-      ThemeRegistry.availableThemes.containsKey(customId);
+        customId.isNotEmpty &&
+        !ThemeRegistry.builtInIds.contains(customId) &&
+        ThemeRegistry.availableThemes.containsKey(customId);
     final initial = hasCustom
         ? ThemeRegistry.resolveById(customId)
-      : ThemeRegistry.resolveById(builtInThemeIdFor(prefTheme));
+        : ThemeRegistry.resolveById(builtInThemeIdFor(prefTheme));
     return AppThemeController(
       initial,
       prefTheme,
@@ -172,8 +175,10 @@ class AppThemeController extends ChangeNotifier {
   }
 
   static String _customIdFor(UserPreferences prefs) {
+    if (speshWeb) return 'spesh-cinematic';
     // A web-build fallback, never a persisted override of user/server choices.
-    if (speshWeb && !prefs.containsPreference(UserPreferences.customThemeId) &&
+    if (speshWeb &&
+        !prefs.containsPreference(UserPreferences.customThemeId) &&
         !prefs.containsPreference(UserPreferences.visualTheme)) {
       return 'spesha-style';
     }

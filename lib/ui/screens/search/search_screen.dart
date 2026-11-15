@@ -36,6 +36,7 @@ import '../../../util/focus/row_focus_coordinator.dart';
 import '../../theme/app_theme_controller.dart';
 import '../../widgets/bottom_nav/bottom_navbar.dart';
 import '../../widgets/library_row.dart';
+import '../../widgets/spesh_cinematic.dart';
 import '../../widgets/media_badge.dart';
 import '../../widgets/media_card.dart';
 import '../../widgets/navigation_layout.dart';
@@ -46,12 +47,14 @@ import '../../widgets/skeleton/skeleton_library_grid.dart';
 
 class SearchScreen extends StatefulWidget {
   final String? initialQuery;
+  final String? initialSource;
   final String? scopedLibraryId;
   final RemoteSearchSession? remoteSearch;
 
   const SearchScreen({
     super.key,
     this.initialQuery,
+    this.initialSource,
     this.scopedLibraryId,
     this.remoteSearch,
   });
@@ -118,12 +121,16 @@ class _SearchScreenState extends State<SearchScreen>
       _searchRepository,
       getIt<MediaServerClient>(),
       scopedParentId: widget.scopedLibraryId,
-      multiServerRepository: widget.scopedLibraryId == null &&
-              _userPreferences.get(UserPreferences.enableMultiServerLibraries) &&
+      multiServerRepository:
+          widget.scopedLibraryId == null &&
+              _userPreferences.get(
+                UserPreferences.enableMultiServerLibraries,
+              ) &&
               !shouldUseOfflineCatalog()
           ? getIt<MultiServerRepository>()
           : null,
     );
+    if (widget.initialSource == 'vod') _vm.setSource(SearchSource.vod);
     _vm.addListener(_onViewModelChanged);
     _initSeerr();
 
@@ -498,8 +505,7 @@ class _SearchScreenState extends State<SearchScreen>
   }
 
   bool _tryFocusSidebar() {
-    if (_userPreferences.get(UserPreferences.navbarPosition) !=
-        NavbarPosition.left) {
+    if (cinematicNavbarPosition(_userPreferences) != NavbarPosition.left) {
       return false;
     }
     final focusNavbar = NavigationLayout.focusNavbarNotifier.value;
@@ -712,8 +718,7 @@ class _SearchScreenState extends State<SearchScreen>
       return KeyEventResult.ignored;
     }
     if (event.logicalKey.isUpKey) {
-      if (_userPreferences.get(UserPreferences.navbarPosition) ==
-          NavbarPosition.top) {
+      if (cinematicNavbarPosition(_userPreferences) == NavbarPosition.top) {
         return _tryFocusNavbar()
             ? KeyEventResult.handled
             : KeyEventResult.ignored;
@@ -738,8 +743,7 @@ class _SearchScreenState extends State<SearchScreen>
       return KeyEventResult.ignored;
     }
     if (event.logicalKey.isUpKey) {
-      if (_userPreferences.get(UserPreferences.navbarPosition) ==
-          NavbarPosition.top) {
+      if (cinematicNavbarPosition(_userPreferences) == NavbarPosition.top) {
         return _tryFocusNavbar()
             ? KeyEventResult.handled
             : KeyEventResult.ignored;
@@ -785,8 +789,7 @@ class _SearchScreenState extends State<SearchScreen>
       return KeyEventResult.handled;
     }
     if (event.logicalKey.isUpKey) {
-      if (_userPreferences.get(UserPreferences.navbarPosition) ==
-          NavbarPosition.top) {
+      if (cinematicNavbarPosition(_userPreferences) == NavbarPosition.top) {
         return _tryFocusNavbar()
             ? KeyEventResult.handled
             : KeyEventResult.ignored;
@@ -799,7 +802,10 @@ class _SearchScreenState extends State<SearchScreen>
   String? _imageUrl(AggregatedItem item, {int? maxWidth, int? maxHeight}) {
     final api = _vm.imageApiFor(item);
     final type = item.type;
-    if (type == 'Episode' || type == 'Program' || type == 'Recording') {
+    if ((speshCinematic && const ['Movie', 'Series'].contains(type)) ||
+        type == 'Episode' ||
+        type == 'Program' ||
+        type == 'Recording') {
       if (item.backdropImageTags.isNotEmpty) {
         return api.getBackdropImageUrl(
           item.id,
@@ -830,15 +836,7 @@ class _SearchScreenState extends State<SearchScreen>
 
   String? _subtitle(AggregatedItem item) {
     if (item.type == 'Audio') return item.albumArtist ?? item.album;
-    final source = item.rawData['SpeshSource'];
-    final number = item.rawData['ChannelNumber']?.toString();
-    final parts = [
-      if (number != null && number.isNotEmpty) '#$number',
-      if (source == 'local') 'Local',
-      if (source == 'vod') 'VOD',
-      if (item.subtitle != null && item.subtitle!.isNotEmpty) item.subtitle!,
-    ];
-    return parts.isEmpty ? null : parts.join(' / ');
+    return item.subtitle;
   }
 
   Widget _buildVoiceActivation(Color idleColor) {
@@ -936,8 +934,7 @@ class _SearchScreenState extends State<SearchScreen>
     ];
 
     final topbar =
-        _userPreferences.get(UserPreferences.navbarPosition) ==
-        NavbarPosition.top;
+        cinematicNavbarPosition(_userPreferences) == NavbarPosition.top;
 
     final scaffold = Scaffold(
       backgroundColor: AppColorScheme.background,
@@ -949,8 +946,7 @@ class _SearchScreenState extends State<SearchScreen>
           child: Column(
             children: [
               const SizedBox(height: 30),
-              if (topbar || !PlatformDetection.isTV)
-                const SizedBox(height: 50),
+              if (topbar || !PlatformDetection.isTV) const SizedBox(height: 50),
               Center(
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
@@ -1070,10 +1066,26 @@ class _SearchScreenState extends State<SearchScreen>
                     scrollDirection: Axis.horizontal,
                     child: SegmentedButton<SearchSource>(
                       segments: const [
-                        ButtonSegment(value: SearchSource.all, label: Text('All'), icon: Icon(Icons.search)),
-                        ButtonSegment(value: SearchSource.local, label: Text('Local'), icon: Icon(Icons.folder_outlined)),
-                        ButtonSegment(value: SearchSource.vod, label: Text('VOD'), icon: Icon(Icons.video_library_outlined)),
-                        ButtonSegment(value: SearchSource.live, label: Text('Live TV'), icon: Icon(Icons.live_tv)),
+                        ButtonSegment(
+                          value: SearchSource.all,
+                          label: Text('All'),
+                          icon: Icon(Icons.search),
+                        ),
+                        ButtonSegment(
+                          value: SearchSource.local,
+                          label: Text('Local'),
+                          icon: Icon(Icons.folder_outlined),
+                        ),
+                        ButtonSegment(
+                          value: SearchSource.vod,
+                          label: Text('VOD'),
+                          icon: Icon(Icons.video_library_outlined),
+                        ),
+                        ButtonSegment(
+                          value: SearchSource.live,
+                          label: Text('Live TV'),
+                          icon: Icon(Icons.live_tv),
+                        ),
                       ],
                       selected: {_vm.source},
                       onSelectionChanged: (value) => _vm.setSource(value.first),
@@ -1083,12 +1095,20 @@ class _SearchScreenState extends State<SearchScreen>
               if (_vm.searching) const LinearProgressIndicator(minHeight: 2),
               if (_vm.errorMessage.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                  child: Row(children: [
-                    Expanded(child: Text(_vm.errorMessage)),
-                    IconButton(tooltip: 'Retry search', icon: const Icon(Icons.refresh),
-                      onPressed: () => _vm.searchImmediate(_vm.query)),
-                  ]),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(child: Text(_vm.errorMessage)),
+                      IconButton(
+                        tooltip: 'Retry search',
+                        icon: const Icon(Icons.refresh),
+                        onPressed: () => _vm.searchImmediate(_vm.query),
+                      ),
+                    ],
+                  ),
                 ),
               Expanded(child: _buildBody()),
             ],
@@ -1106,15 +1126,15 @@ class _SearchScreenState extends State<SearchScreen>
         return const SizedBox.shrink();
       case SearchState.loading:
         if (_vm.results.isEmpty) {
-          return const SkeletonLibraryGrid(
-            aspectRatio: 2 / 3,
-            itemCount: 18,
-          );
+          return const SkeletonLibraryGrid(aspectRatio: 2 / 3, itemCount: 18);
         }
         return _buildResults();
       case SearchState.ready
-          when _vm.results.isEmpty && _vm.seerrResults.isEmpty && _vm.gameResults.isEmpty:
-        if (_vm.searching) return const Center(child: CircularProgressIndicator());
+          when _vm.results.isEmpty &&
+              _vm.seerrResults.isEmpty &&
+              _vm.gameResults.isEmpty:
+        if (_vm.searching)
+          return const Center(child: CircularProgressIndicator());
         return Center(
           child: Text(
             AppLocalizations.of(context).noResultsForQuery(_vm.query),
@@ -1170,7 +1190,11 @@ class _SearchScreenState extends State<SearchScreen>
     ];
 
     final isMobile = PlatformDetection.useMobileUi;
-    final horizontalPadding = isMobile ? 20.0 : 48.0;
+    final horizontalPadding = isMobile
+        ? 20.0
+        : speshCinematic
+        ? 104.0
+        : 48.0;
     // Index of the tabs pill in the coordinator's entries (field is 0).
     const tabsIndex = 1;
 
@@ -1357,8 +1381,14 @@ class _SearchScreenState extends State<SearchScreen>
     final rows = <Widget>[];
     for (var r = 0; r < groups.length; r++) {
       final group = groups[r];
-      final ar = MediaCard.aspectRatioForType(group.items.first.type);
-      final cardWidth = (ar == 2/3) ? 108.0 : 150.0;
+      final ar = speshCinematic
+          ? 16 / 9
+          : MediaCard.aspectRatioForType(group.items.first.type);
+      final cardWidth = speshCinematic
+          ? 280.0
+          : (ar == 2 / 3)
+          ? 108.0
+          : 150.0;
       rows.add(
         LibraryRow(
           key: _allRowKey(r),
@@ -1595,11 +1625,13 @@ class _SearchScreenState extends State<SearchScreen>
     return MediaCard(
       title: item.displayTitle,
       subtitle: yearStr,
-      imageUrl: item.posterPath != null
+      imageUrl: speshCinematic && item.backdropPath != null
+          ? 'https://image.tmdb.org/t/p/w780${item.backdropPath}'
+          : item.posterPath != null
           ? '$_tmdbPosterBase${item.posterPath}'
           : null,
       width: width,
-      aspectRatio: 2 / 3,
+      aspectRatio: speshCinematic ? 16 / 9 : 2 / 3,
       itemType: item.mediaType == 'tv' ? 'Series' : 'Movie',
       focusColor: focusColor,
       cardFocusExpansion: cardFocusExpansion,
@@ -1607,8 +1639,9 @@ class _SearchScreenState extends State<SearchScreen>
       onKeyEvent: onNavKey,
       onTap: () => switch (item.mediaType) {
         'person' => context.push(Destinations.seerrPerson(item.id.toString())),
-        'collection' =>
-          context.push(Destinations.seerrCollection(item.id.toString())),
+        'collection' => context.push(
+          Destinations.seerrCollection(item.id.toString()),
+        ),
         _ => context.push(
           Destinations.seerrMedia(
             item.id.toString(),
@@ -1628,7 +1661,9 @@ class _SearchScreenState extends State<SearchScreen>
     final count = _currentTabItemCount();
     if (count == 0) return const SizedBox.shrink();
 
-    final imageAspect = (isSeerr || isGames)
+    final imageAspect = speshCinematic && !isGames
+        ? 16 / 9
+        : (isSeerr || isGames)
         ? 2 / 3
         : MediaCard.aspectRatioForType(
             _vm.results[_groupIndex(_selectedTab)].items.first.type,
@@ -1637,11 +1672,15 @@ class _SearchScreenState extends State<SearchScreen>
     return LayoutBuilder(
       builder: (context, constraints) {
         const spacing = 12.0;
-        final targetWidth = (imageAspect == 2/3) ? 108.0 : 150.0;
+        final targetWidth = speshCinematic
+            ? 280.0
+            : (imageAspect == 2 / 3)
+            ? 108.0
+            : 150.0;
         final available = constraints.maxWidth - horizontalPadding * 2;
         final columns = ((available + spacing) / (targetWidth + spacing))
             .floor()
-            .clamp(3, 20);
+            .clamp(speshCinematic ? 1 : 3, speshCinematic ? 6 : 20);
         final cellWidth = (available - (columns - 1) * spacing) / columns;
         final imageHeight = cellWidth / imageAspect;
         final childAspectRatio = cellWidth / (imageHeight + 48);
@@ -1701,7 +1740,9 @@ class _SearchScreenState extends State<SearchScreen>
     bool cardFocusExpansion,
   ) {
     final item = _vm.results[_groupIndex(_selectedTab)].items[index];
-    final ar = MediaCard.aspectRatioForType(item.type);
+    final ar = speshCinematic
+        ? 16 / 9
+        : MediaCard.aspectRatioForType(item.type);
     return _resultItemCard(
       item: item,
       width: cellWidth,
@@ -1763,9 +1804,8 @@ class _SearchScreenState extends State<SearchScreen>
       cardFocusExpansion: cardFocusExpansion,
       focusNode: focusNode,
       onKeyEvent: onNavKey,
-      onTap: () => context.push(
-        Destinations.gameDetailOf(result.libraryId, game.id),
-      ),
+      onTap: () =>
+          context.push(Destinations.gameDetailOf(result.libraryId, game.id)),
     );
   }
 

@@ -56,7 +56,8 @@ enum SeerrShortcut {
   movies,
   series,
   requests,
-  issues;
+  issues,
+  search;
 
   /// What the discover screen's copy of the row offers, since that screen is
   /// the destination the Discover tile would point at.
@@ -76,6 +77,7 @@ enum SeerrShortcut {
     series => l10n.series,
     requests => l10n.seerrRequestsTitle,
     issues => l10n.seerrIssuesTitle,
+    search => l10n.search,
   };
 
   IconData get icon => switch (this) {
@@ -84,6 +86,7 @@ enum SeerrShortcut {
     series => Icons.tv,
     requests => Icons.playlist_add_check,
     issues => Icons.report_problem_outlined,
+    search => Icons.search,
   };
 
   void open(BuildContext context) {
@@ -98,6 +101,8 @@ enum SeerrShortcut {
         context.push(Destinations.seerrRequests);
       case issues:
         context.push('${Destinations.seerrRequests}?tab=issues');
+      case search:
+        context.push('${Destinations.search}?source=vod');
     }
   }
 

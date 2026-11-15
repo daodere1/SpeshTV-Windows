@@ -6,9 +6,11 @@ import '../../preference/preference_constants.dart';
 import '../../preference/user_preferences.dart';
 import '../../util/platform_detection.dart';
 import '../../util/overlay_color_palette.dart';
+import '../theme/app_theme_controller.dart';
 import 'bottom_nav/bottom_navbar.dart';
 import 'download_progress_bar.dart';
 import 'left_sidebar.dart';
+import 'spesh_cinematic.dart';
 import 'top_toolbar.dart';
 
 import 'dart:async';
@@ -162,7 +164,7 @@ class _NavigationLayoutState extends State<NavigationLayout>
   @override
   void initState() {
     super.initState();
-    final storedPosition = _prefs.get(UserPreferences.navbarPosition);
+    final storedPosition = cinematicNavbarPosition(_prefs);
     _position = NavigationLayout.sanitizeNavbarPosition(storedPosition);
     if (_position != storedPosition) {
       _prefs.set(UserPreferences.navbarPosition, _position);
@@ -309,7 +311,8 @@ class _NavigationLayoutState extends State<NavigationLayout>
 
   @override
   Widget build(BuildContext context) {
-    final layout = switch (_position) {
+    context.dependOnInheritedWidgetOfExactType<AppThemeScope>();
+    final layout = switch (cinematicNavbarPosition(_prefs)) {
       NavbarPosition.left => _buildSidebar(),
       NavbarPosition.top => _buildToolbar(),
       NavbarPosition.bottom =>

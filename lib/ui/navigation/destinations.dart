@@ -74,6 +74,7 @@ class Destinations {
   // Browsing
   static const libraryBrowse = '/library/:libraryId';
   static const allGenres = '/genres';
+  static const cinematicCalendar = '/calendar';
   static const allFavorites = '/favorites';
   static const folderBrowse = '/folder/:folderId';
   static const collectionBrowse = '/collection/:collectionId';

@@ -307,7 +307,7 @@ class _MoonfinLogoAnimationState extends State<MoonfinLogoAnimation>
         );
       },
       child: speshWeb ? Icon(Icons.live_tv_outlined,
-        color: const Color(0xFF56D9CC), size: widget.size) : SvgPicture.asset(
+        color: Theme.of(context).colorScheme.primary, size: widget.size) : SvgPicture.asset(
         'assets/icons/moonfin_logo.svg',
         width: widget.size,
         height: widget.size,

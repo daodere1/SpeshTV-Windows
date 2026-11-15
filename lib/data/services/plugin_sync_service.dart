@@ -80,6 +80,9 @@ class PluginSyncService extends ChangeNotifier {
   bool get seerrEnabled => _seerrEnabled;
   bool get seerrAvailable =>
       _pluginAvailable && _seerrEnabled && _prefs.get(UserPreferences.seerrEnabled);
+  bool? _sonarrCalendarSupported;
+  bool get sonarrCalendarAvailable =>
+      _pluginAvailable && (_sonarrCalendarSupported ?? seerrAvailable);
   bool _seerrInfoAvailable = false;
   bool get seerrInfoAvailable => _seerrInfoAvailable;
 
@@ -245,6 +248,7 @@ class PluginSyncService extends ChangeNotifier {
     _pluginVersion = null;
     _seerrUrl = null;
     _seerrEnabled = false;
+    _sonarrCalendarSupported = null;
     _seerrInfoAvailable = false;
     _mdblistAvailable = false;
     _tmdbAvailable = false;
@@ -318,6 +322,8 @@ class PluginSyncService extends ChangeNotifier {
       _pluginVersion = _readString(pingResult, 'version');
       _seerrUrl = _readString(pingResult, 'seerrUrl');
       _seerrEnabled = _readBool(pingResult, 'seerrEnabled') ?? false;
+      _sonarrCalendarSupported = _readBool(pingResult, 'sonarrCalendarAvailable') ??
+          _readBool(pingResult, 'calendarAvailable');
       _mdblistAvailable = _readBool(pingResult, 'mdblistAvailable') ?? false;
       _tmdbAvailable = _readBool(pingResult, 'tmdbAvailable') ?? false;
       _tmdbThumbsSupported =

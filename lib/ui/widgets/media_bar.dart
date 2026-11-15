@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:moonfin/ui/widgets/top_toolbar.dart';
 
 import 'offline_aware_image.dart';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -22,6 +23,8 @@ import 'package:playback_plex/playback_plex.dart';
 import 'package:server_core/server_core.dart';
 
 import '../../data/models/media_bar_slide_item.dart';
+import '../../data/repositories/tmdb_repository.dart';
+import '../../data/services/plugin_sync_service.dart';
 import '../../data/models/media_bar_state.dart';
 import '../../data/services/background_service.dart';
 import '../../data/services/media_server_client_factory.dart';
@@ -47,6 +50,8 @@ import '../../playback/mpv_client_certificate.dart';
 import 'bounded_network_image.dart';
 import 'fullscreen_backdrop_switcher.dart';
 import 'navigation_layout.dart';
+import 'spesh_cinematic.dart';
+import 'spesh_brand.dart';
 import 'mediabar/bookshelf_layout.dart';
 import 'mediabar/aya_media_bar.dart';
 import 'mediabar/gallery_coverflow.dart';
@@ -211,6 +216,7 @@ class _MediaBarState extends State<MediaBar>
       });
     }
   }
+
   bool _mainPlaybackActive = false;
   bool _trailerUsingMedia3 = false;
   String? _activeYouTubeVideoId;
@@ -235,8 +241,7 @@ class _MediaBarState extends State<MediaBar>
 
   bool get _hideLeftNavArrowForSidebar {
     if (PlatformDetection.useMobileUi) return false;
-    return widget.prefs.get(UserPreferences.navbarPosition) ==
-        NavbarPosition.left;
+    return cinematicNavbarPosition(widget.prefs) == NavbarPosition.left;
   }
 
   Color _mediaBarOverlayColor() {
@@ -269,8 +274,9 @@ class _MediaBarState extends State<MediaBar>
     );
     _isHomeRouteActive = _isHomeRouteCurrent();
     appRouter.routerDelegate.addListener(_syncHomeRouteActive);
-    PlayerRouteObserver.instance.isPlayerActive
-        .addListener(_onPlayerRouteChanged);
+    PlayerRouteObserver.instance.isPlayerActive.addListener(
+      _onPlayerRouteChanged,
+    );
     widget.viewModel.addListener(_onStateChanged);
     widget.prefs.addListener(_onPrefsChanged);
     _screensaverController.visible.addListener(_onScreensaverVisibleChanged);
@@ -357,8 +363,9 @@ class _MediaBarState extends State<MediaBar>
     _screensaverController.visible.removeListener(_onScreensaverVisibleChanged);
     WidgetsBinding.instance.removeObserver(this);
     appRouter.routerDelegate.removeListener(_syncHomeRouteActive);
-    PlayerRouteObserver.instance.isPlayerActive
-        .removeListener(_onPlayerRouteChanged);
+    PlayerRouteObserver.instance.isPlayerActive.removeListener(
+      _onPlayerRouteChanged,
+    );
     super.dispose();
   }
 
@@ -519,6 +526,13 @@ class _MediaBarState extends State<MediaBar>
 
   void _onStateChanged() {
     if (!mounted) return;
+    final selected = widget.viewModel.items.elementAtOrNull(_currentIndex);
+    if ((_activeTrailerItemId != null &&
+            _activeTrailerItemId != selected?.itemId) ||
+        (_pendingTrailerItemId != null &&
+            _pendingTrailerItemId != selected?.itemId)) {
+      _cancelTrailerPreview(rebuild: false);
+    }
     setState(() {});
     final state = widget.viewModel.state;
     if (state is MediaBarLoading) {
@@ -578,7 +592,7 @@ class _MediaBarState extends State<MediaBar>
     if (!_isHomeRouteActive) return;
 
     final mode = UserPreferences.normalizeMediaBarMode(
-      widget.prefs.get(UserPreferences.mediaBarMode),
+      cinematicMediaBarMode(widget.prefs),
     );
     if (mode != UserPreferences.mediaBarModeMakd) {
       _lastSyncedMakdBackdropUrl = null;
@@ -606,7 +620,7 @@ class _MediaBarState extends State<MediaBar>
   bool _isMakdMobileMode() {
     if (!PlatformDetection.useMobileUi) return false;
     final mode = UserPreferences.normalizeMediaBarMode(
-      widget.prefs.get(UserPreferences.mediaBarMode),
+      cinematicMediaBarMode(widget.prefs),
     );
     return mode == UserPreferences.mediaBarModeMakd;
   }
@@ -614,7 +628,7 @@ class _MediaBarState extends State<MediaBar>
   bool _isAyaMobileMode() {
     if (!PlatformDetection.useMobileUi) return false;
     final mode = UserPreferences.normalizeMediaBarMode(
-      widget.prefs.get(UserPreferences.mediaBarMode),
+      cinematicMediaBarMode(widget.prefs),
     );
     return mode == UserPreferences.mediaBarModeAya;
   }
@@ -933,14 +947,14 @@ class _MediaBarState extends State<MediaBar>
 
   bool _isBookshelfMode() {
     final mode = UserPreferences.normalizeMediaBarMode(
-      widget.prefs.get(UserPreferences.mediaBarMode),
+      cinematicMediaBarMode(widget.prefs),
     );
     return mode == UserPreferences.mediaBarModeBookshelf;
   }
 
   bool _isGalleryMode() {
     final mode = UserPreferences.normalizeMediaBarMode(
-      widget.prefs.get(UserPreferences.mediaBarMode),
+      cinematicMediaBarMode(widget.prefs),
     );
     return mode == UserPreferences.mediaBarModeGallery;
   }
@@ -1002,6 +1016,9 @@ class _MediaBarState extends State<MediaBar>
     bool rebuild = true,
     bool retainYouTubePlayer = false,
   }) {
+    // Browser iframes must be destroyed between titles. Native players support
+    // suspension, but retaining a browser iframe can expose the previous video.
+    if (PlatformDetection.isWeb) retainYouTubePlayer = false;
     final wasTrailerPlaying = _isTrailerPlaying;
     final wasUsingMedia3 = _trailerUsingMedia3;
     final wasUsingAppleTv = _trailerUsingAppleTv;
@@ -1016,8 +1033,12 @@ class _MediaBarState extends State<MediaBar>
     _trailerUsingAppleTv = false;
     // Stop both media-bar-owned players unconditionally: the flags can desync
     // from what is actually playing.
-    _trailerPlayer?.stop();
-    unawaited(_appleTvTrailerPlayer?.stop());
+    if (PlatformDetection.isWindows) {
+      unawaited(_disposeTrailerPlayer());
+    } else {
+      unawaited(_trailerPlayer?.stop());
+      unawaited(_appleTvTrailerPlayer?.stop());
+    }
     // Media3 is a shared singleton (also drives row previews); only release it
     // when the trailer owned it.
     if (wasUsingMedia3) {
@@ -1050,6 +1071,14 @@ class _MediaBarState extends State<MediaBar>
     }
   }
 
+  bool _trailerRequestIsCurrent(MediaBarSlideItem item, int resolveId) {
+    final selected = widget.viewModel.items.elementAtOrNull(_currentIndex);
+    return mounted &&
+        resolveId == _trailerResolveId &&
+        selected?.itemId == item.itemId &&
+        selected?.serverId == item.serverId;
+  }
+
   Future<void> _prepareTrailerPreview(
     MediaBarSlideItem item,
     int resolveId,
@@ -1071,15 +1100,40 @@ class _MediaBarState extends State<MediaBar>
     StreamResolutionResult? localRes;
     final webOnly = PlatformDetection.isWeb;
     final supportsEmbeddedYouTube = _supportsEmbeddedYouTubePreview();
+    List<Map<String, dynamic>> remoteTrailers = item.remoteTrailers;
+    var identifiedTrailer = false;
+    if (speshWeb &&
+        (item.tmdbId?.isNotEmpty == true || item.imdbId?.isNotEmpty == true) &&
+        GetIt.instance.isRegistered<TmdbRepository>() &&
+        GetIt.instance<PluginSyncService>().tmdbDetailsAvailable) {
+      // Resolve by provider identity, rather than a broad title search or a
+      // potentially stale server trailer association.
+      remoteTrailers = [];
+      final details = await GetIt.instance<TmdbRepository>()
+          .titleDetails(
+            type: item.itemType == 'Series' ? 'tv' : 'movie',
+            tmdbId: item.tmdbId,
+            imdbId: item.imdbId,
+          )
+          .timeout(const Duration(seconds: 5), onTimeout: () => null);
+      if (!_trailerRequestIsCurrent(item, resolveId)) return;
+      final url = details?['trailerUrl'] as String?;
+      if (url != null && url.isNotEmpty) {
+        remoteTrailers = [
+          {'Url': url},
+        ];
+        identifiedTrailer = true;
+      }
+    }
 
     // Negotiate local trailers through the shared PlaybackInfo path (direct-play
     // when compatible, transcode otherwise) instead of a hand-built URL.
     try {
       // Outside titles aren't on the server, so they have no local trailer.
-      final trailers = item.isExternal
+      final trailers = item.isExternal || identifiedTrailer
           ? const <Map<String, dynamic>>[]
           : await client.itemsApi.getLocalTrailers(item.itemId);
-      if (!mounted || resolveId != _trailerResolveId) return;
+      if (!_trailerRequestIsCurrent(item, resolveId)) return;
 
       final trailer = _preferredLocalTrailer(trailers);
       if (trailer != null) {
@@ -1092,7 +1146,7 @@ class _MediaBarState extends State<MediaBar>
               enableTranscoding: true,
             )
             .timeout(_trailerResolveTimeout);
-        if (!mounted || resolveId != _trailerResolveId) return;
+        if (!_trailerRequestIsCurrent(item, resolveId)) return;
         streamUrl = localRes.streamUrl;
       }
     } catch (error, stack) {
@@ -1103,7 +1157,6 @@ class _MediaBarState extends State<MediaBar>
       );
     }
 
-    List<Map<String, dynamic>> remoteTrailers = item.remoteTrailers;
     // Plex items never carry trailer links, so there's nothing to fetch and
     // one is searched for instead.
     if (client.serverType == ServerType.plex) {
@@ -1112,17 +1165,17 @@ class _MediaBarState extends State<MediaBar>
           item.title,
           year: item.year,
         );
-        if (!mounted || resolveId != _trailerResolveId) return;
+        if (!_trailerRequestIsCurrent(item, resolveId)) return;
         if (url != null) {
           remoteTrailers = [
             {'Url': url},
           ];
         }
       }
-    } else if (remoteTrailers.isEmpty && !item.isExternal) {
+    } else if (remoteTrailers.isEmpty && !item.isExternal && !speshWeb) {
       try {
         final fullItem = await client.itemsApi.getItem(item.itemId);
-        if (!mounted || resolveId != _trailerResolveId) return;
+        if (!_trailerRequestIsCurrent(item, resolveId)) return;
         remoteTrailers =
             (fullItem['RemoteTrailers'] as List?)
                 ?.cast<Map<String, dynamic>>() ??
@@ -1142,10 +1195,8 @@ class _MediaBarState extends State<MediaBar>
             break;
           }
           if (!webOnly) {
-            final stream = await YouTubeStreamResolver.resolveFromUrl(
-              url,
-              maxHeight: PlatformDetection.isAndroid ? 360 : null,
-            ).timeout(_trailerResolveTimeout, onTimeout: () => null);
+            final stream = await YouTubeStreamResolver.resolveFromUrl(url)
+                .timeout(_trailerResolveTimeout, onTimeout: () => null);
             streamUrl = stream?.url;
             if (streamUrl != null) {
               useYouTubeHeaders = true;
@@ -1155,12 +1206,12 @@ class _MediaBarState extends State<MediaBar>
         } else if (!webOnly) {
           streamUrl = url;
         }
-        if (!mounted || resolveId != _trailerResolveId) return;
+        if (!_trailerRequestIsCurrent(item, resolveId)) return;
         if (streamUrl != null) break;
       }
     }
 
-    if (!mounted || resolveId != _trailerResolveId) return;
+    if (!_trailerRequestIsCurrent(item, resolveId)) return;
 
     if (youTubeVideoId != null) {
       _activeTrailerItemId = item.itemId;
@@ -1211,11 +1262,13 @@ class _MediaBarState extends State<MediaBar>
         final persistentViewId = _media3PlatformViewId;
         if (persistentViewId != null) {
           await _media3TrailerBackend!.activateView(persistentViewId);
-          if (!mounted || resolveId != _trailerResolveId) return;
+          if (!_trailerRequestIsCurrent(item, resolveId)) return;
         }
         await _media3TrailerBackend!.setVolume(0);
-        await _media3TrailerBackend.configureSubtitleStyle(verticalOffset: 0.15);
-        if (!mounted || resolveId != _trailerResolveId) return;
+        await _media3TrailerBackend.configureSubtitleStyle(
+          verticalOffset: 0.15,
+        );
+        if (!_trailerRequestIsCurrent(item, resolveId)) return;
 
         final payload = <String, dynamic>{
           'url': streamUrl,
@@ -1252,7 +1305,7 @@ class _MediaBarState extends State<MediaBar>
         _trailerUsingMedia3 = false;
         final player = _ensureTrailerPlayer();
         await player.setVolume(0);
-        if (!mounted || resolveId != _trailerResolveId) return;
+        if (!_trailerRequestIsCurrent(item, resolveId)) return;
 
         await YouTubeStreamResolver.preferAudioLanguage(
           player,
@@ -1265,8 +1318,9 @@ class _MediaBarState extends State<MediaBar>
           headers: localHeaders,
           audioLanguage: youTubeAudioLanguage,
         );
-        if (!mounted || resolveId != _trailerResolveId) return;
+        if (!_trailerRequestIsCurrent(item, resolveId)) return;
         await applyMpvClientCertificate(player, streamUrl);
+        if (!_trailerRequestIsCurrent(item, resolveId)) return;
         await player.open(media).timeout(_openTimeout);
         if (resolveId != _trailerResolveId || !_trailerShouldBeActive()) {
           await player.stop();
@@ -1295,7 +1349,9 @@ class _MediaBarState extends State<MediaBar>
       );
       _markTrailerFailed(item.itemId);
       // This item's stream failed; the bar keeps cycling.
-      if (mounted) _cancelTrailerPreview(retainYouTubePlayer: true);
+      if (_trailerRequestIsCurrent(item, resolveId)) {
+        _cancelTrailerPreview(retainYouTubePlayer: true);
+      }
     }
   }
 
@@ -1303,7 +1359,7 @@ class _MediaBarState extends State<MediaBar>
     MediaBarSlideItem item,
     int resolveId,
   ) async {
-    if (!mounted || resolveId != _trailerResolveId) return;
+    if (!_trailerRequestIsCurrent(item, resolveId)) return;
     if (!_trailerRevealArmed) return;
     if (_activeTrailerItemId != item.itemId) return;
     if (!_trailerShouldBeActive()) return;
@@ -1437,11 +1493,13 @@ class _MediaBarState extends State<MediaBar>
       if (!mounted || resolveId != _trailerResolveId) return;
 
       await player.play();
-      if (resolveId != _trailerResolveId || !_trailerShouldBeActive()) {
+      if (!_trailerRequestIsCurrent(item, resolveId)) return;
+      if (!_trailerShouldBeActive()) {
         _cancelTrailerPreview();
         return;
       }
     } catch (_) {
+      if (!_trailerRequestIsCurrent(item, resolveId)) return;
       _markTrailerFailed(item.itemId);
       _cancelTrailerPreview();
       return;
@@ -1450,7 +1508,8 @@ class _MediaBarState extends State<MediaBar>
     _isTrailerPlaying = true;
     _autoAdvanceTimer?.cancel();
     final ready = await _waitForMediaKitTrailerReady(player, resolveId);
-    if (resolveId != _trailerResolveId || !_trailerShouldBeActive()) {
+    if (!_trailerRequestIsCurrent(item, resolveId)) return;
+      if (!_trailerShouldBeActive()) {
       _cancelTrailerPreview();
       return;
     }
@@ -1617,8 +1676,11 @@ class _MediaBarState extends State<MediaBar>
     final player = _trailerPlayer;
     _trailerPlayer = null;
     _trailerController = null;
-    await player?.stop();
-    player?.dispose();
+    try {
+      await player?.stop();
+    } finally {
+      await player?.dispose();
+    }
   }
 
   void _clearSponsorBlockTracking() {
@@ -1763,6 +1825,9 @@ class _MediaBarState extends State<MediaBar>
   }
 
   void _onYouTubePlaybackStarted() {
+    if (_activeTrailerItemId !=
+        widget.viewModel.items.elementAtOrNull(_currentIndex)?.itemId)
+      return;
     if (!mounted || _activeYouTubeVideoId == null) {
       return;
     }
@@ -1898,7 +1963,7 @@ class _MediaBarState extends State<MediaBar>
     final l10n = AppLocalizations.of(context);
     final state = widget.viewModel.state;
     final mode = UserPreferences.normalizeMediaBarMode(
-      widget.prefs.get(UserPreferences.mediaBarMode),
+      cinematicMediaBarMode(widget.prefs),
     );
     final useMakdStyle = mode == UserPreferences.mediaBarModeMakd;
     final useBookshelfStyle = mode == UserPreferences.mediaBarModeBookshelf;
@@ -1907,23 +1972,21 @@ class _MediaBarState extends State<MediaBar>
 
     return switch (state) {
       MediaBarLoading() => _wrapStatusFocus(
-          SizedBox(
-            height: widget.height,
-            child: const Center(
-              child: CircularProgressIndicator(),
-            ),
-          ),
+        SizedBox(
+          height: widget.height,
+          child: const Center(child: CircularProgressIndicator()),
         ),
+      ),
       MediaBarDisabled() => const SizedBox.shrink(),
       MediaBarError(:final error) => _wrapStatusFocus(
-          _buildStatusPanel(
-            context,
-            title: l10n.mediaBarError,
-            detail: describeError(error, l10n),
-            showRetry: true,
-          ),
-          onSelect: () => widget.viewModel.load(context: context, force: true),
+        _buildStatusPanel(
+          context,
+          title: l10n.mediaBarError,
+          detail: describeError(error, l10n),
+          showRetry: true,
         ),
+        onSelect: () => widget.viewModel.load(context: context, force: true),
+      ),
       MediaBarReady(items: final items) =>
         items.isEmpty
             ? const SizedBox.shrink()
@@ -1983,9 +2046,8 @@ class _MediaBarState extends State<MediaBar>
                     children: [
                       Text(
                         title,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: AppColorScheme.onSurface,
-                        ),
+                        style: Theme.of(context).textTheme.titleSmall
+                            ?.copyWith(color: AppColorScheme.onSurface),
                       ),
                       if (detail != null && detail.isNotEmpty)
                         Text(
@@ -2026,7 +2088,7 @@ class _MediaBarState extends State<MediaBar>
         isMobile && MediaQuery.of(context).size.shortestSide >= 600;
     final hasLeftSidebar =
         !isMobile &&
-        widget.prefs.get(UserPreferences.navbarPosition) == NavbarPosition.left;
+        cinematicNavbarPosition(widget.prefs) == NavbarPosition.left;
     final logoLeftInset = 40.0 + (hasLeftSidebar ? 88.0 : 0.0);
     // A peeking row lifts the info card level with the arrows, so it keeps
     // clear of them the way it does beside the sidebar.
@@ -2035,8 +2097,7 @@ class _MediaBarState extends State<MediaBar>
         : (PlatformDetection.isTV ? 25.0 : 24.0);
     final navbarAtTop =
         isMobile &&
-        (widget.prefs.get(UserPreferences.navbarPosition) ==
-            NavbarPosition.top);
+        (cinematicNavbarPosition(widget.prefs) == NavbarPosition.top);
     final toolbarInset = navbarAtTop
         ? MediaQuery.of(context).padding.top + 60.0
         : 0.0;
@@ -2165,7 +2226,8 @@ class _MediaBarState extends State<MediaBar>
                                   currentItem.itemId,
                                 ),
                                 enableAdditionalRatings: widget.prefs.get(
-                                  UserPreferences.mediaBarEnableAdditionalRatings,
+                                  UserPreferences
+                                      .mediaBarEnableAdditionalRatings,
                                 ),
                                 enabledRatings: widget.prefs.get(
                                   UserPreferences.mediaBarEnabledRatings,
@@ -2211,8 +2273,7 @@ class _MediaBarState extends State<MediaBar>
     final isMobile = PlatformDetection.useMobileUi;
     final navbarAtTop =
         isMobile &&
-        (widget.prefs.get(UserPreferences.navbarPosition) ==
-            NavbarPosition.top);
+        (cinematicNavbarPosition(widget.prefs) == NavbarPosition.top);
     final toolbarInset = navbarAtTop
         ? MediaQuery.of(context).padding.top + 60.0
         : 0.0;
@@ -2442,7 +2503,8 @@ class _MediaBarState extends State<MediaBar>
                                   item: currentItem,
                                   ratings: currentRatings,
                                   enableAdditionalRatings: widget.prefs.get(
-                                    UserPreferences.mediaBarEnableAdditionalRatings,
+                                    UserPreferences
+                                        .mediaBarEnableAdditionalRatings,
                                   ),
                                   enabledRatings: widget.prefs.get(
                                     UserPreferences.mediaBarEnabledRatings,
@@ -2677,7 +2739,7 @@ class _MediaBarState extends State<MediaBar>
 
   EdgeInsets _ayaMediaBarInsets() {
     final navbarIsTop =
-        widget.prefs.get(UserPreferences.navbarPosition) == NavbarPosition.top;
+        cinematicNavbarPosition(widget.prefs) == NavbarPosition.top;
 
     final isMobile = PlatformDetection.useMobileUi;
     final isTvTopNavbar = navbarIsTop && PlatformDetection.isTV && !isMobile;
@@ -2980,8 +3042,7 @@ class _MediaBarState extends State<MediaBar>
                   ? Media3VideoView(
                       fill: Colors.transparent,
                       role: 'preview',
-                      onPlatformViewCreated: (id) =>
-                          _media3PlatformViewId = id,
+                      onPlatformViewCreated: (id) => _media3PlatformViewId = id,
                     )
                   : _trailerUsingAppleTv
                   ? FittedBox(
@@ -3198,9 +3259,10 @@ class _KenBurnsImageState extends State<_KenBurnsImage>
     super.initState();
     _controller = AnimationController(vsync: this, duration: widget.duration)
       ..forward();
-    _scale = Tween<double>(begin: 1.0, end: 1.1).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
-    );
+    _scale = Tween<double>(
+      begin: 1.0,
+      end: 1.1,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
   }
 
   @override

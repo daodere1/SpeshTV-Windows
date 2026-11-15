@@ -1118,6 +1118,18 @@ class ItemDetailViewModel extends ChangeNotifier {
     }
   }
 
+  /// Fetch a browsed season without replacing the series detail behind it.
+  Future<List<AggregatedItem>> browseSeasonEpisodes(AggregatedItem season) async {
+    final seriesId = season.seriesId ?? _item?.seriesId ?? itemId;
+    final data = await _client.itemsApi.getEpisodes(
+      seriesId,
+      seasonId: season.id,
+      fields: _episodeOverviewFields,
+    );
+    return _mapItems((data['Items'] as List?) ?? [],
+        fallbackRating: _item?.officialRating);
+  }
+
   Future<void> _loadEpisodes() async {
     final item = _item;
     if (item == null) return;

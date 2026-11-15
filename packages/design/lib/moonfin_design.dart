@@ -26,6 +26,7 @@ export 'src/theme/app_spacing.dart';
 export 'src/theme/app_shapes.dart';
 export 'src/theme/theme_spec.dart';
 export 'src/theme/theme_registry.dart';
+export 'src/theme/themes/spesh_cinematic_theme_spec.dart';
 export 'src/theme/oled_tuning.dart';
 export 'src/theme/oled_derivation.dart';
 export 'src/theme/glass_settings.dart';
@@ -34,3 +35,5 @@ export 'src/widgets/glass_surface.dart';
 export 'src/widgets/glass_backdrop.dart';
 export 'src/widgets/glass_recipe.dart';
 export 'src/widgets/pixel_border_painter.dart';
+
+export 'src/widgets/spesh_cinematic_border.dart';

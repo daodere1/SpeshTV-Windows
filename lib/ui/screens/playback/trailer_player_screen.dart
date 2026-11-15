@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -67,7 +68,8 @@ class _TrailerPlayerScreenState extends State<TrailerPlayerScreen> {
   );
 
   bool get _supportsEmbeddedYouTubePlatform {
-    return PlatformDetection.isWindows || PlatformDetection.isIOS ||
+    return PlatformDetection.isWindows ||
+        PlatformDetection.isIOS ||
         PlatformDetection.isMacOS;
   }
 
@@ -157,9 +159,14 @@ class _TrailerPlayerScreenState extends State<TrailerPlayerScreen> {
   void _failTrailer(String message) {
     if (!mounted || _closing) return;
     _startupTimer?.cancel();
-    setState(() { _loading = false; _error = message; });
+    setState(() {
+      _loading = false;
+      _error = message;
+    });
     final videoId = _resolvedVideoId();
-    if (!_youtubeFallbackAttempted && canAutoFallbackToYouTube() && videoId != null &&
+    if (!_youtubeFallbackAttempted &&
+        canAutoFallbackToYouTube() &&
+        videoId != null &&
         youtubeTrailerId('https://www.youtube.com/watch?v=$videoId') != null) {
       _closing = true;
       _youtubeFallbackAttempted = true;
@@ -473,134 +480,158 @@ class _TrailerPlayerScreenState extends State<TrailerPlayerScreen> {
     }());
   }
 
+  void _closeTrailer() {
+    if (_closing || !mounted) return;
+    _closing = true;
+    _startupTimer?.cancel();
+    _startupPositionSub?.cancel();
+    _sponsorBlockPositionSub?.cancel();
+    unawaited(_player?.stop());
+    unawaited(_appleTvPlayer?.stop());
+    Navigator.of(context).maybePop();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: ColoredBox(
-              color: Colors.black,
-              child: ((kIsWeb || _useEmbeddedYouTube) && _webVideoId != null)
-                  ? Center(
-                      child: AspectRatio(
-                        aspectRatio: 16 / 9,
-                        child: PlatformDetection.isWindows
-                            ? WindowsYouTubeTrailer(
-                                videoId: _webVideoId!,
-                                onReady: _onEmbeddedPlaybackStarted,
-                                onCompleted: () {
-                                  if (mounted && !_closing) {
-                                    _closing = true;
-                                    Navigator.of(context).pop(true);
-                                  }
-                                },
-                                onUnavailable: _fallBackToStreamPlayback,
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): _closeTrailer,
+        const SingleActivator(LogicalKeyboardKey.goBack): _closeTrailer,
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
+            children: [
+              Positioned.fill(
+                child: ColoredBox(
+                  color: Colors.black,
+                  child:
+                      ((kIsWeb || _useEmbeddedYouTube) && _webVideoId != null)
+                      ? Center(
+                          child: AspectRatio(
+                            aspectRatio: 16 / 9,
+                            child: PlatformDetection.isWindows
+                                ? WindowsYouTubeTrailer(
+                                    videoId: _webVideoId!,
+                                    onReady: _onEmbeddedPlaybackStarted,
+                                    onCompleted: () {
+                                      if (mounted && !_closing) {
+                                        _closing = true;
+                                        Navigator.of(context).pop(true);
+                                      }
+                                    },
+                                    onUnavailable: _fallBackToStreamPlayback,
+                                  )
+                                : WebYouTubeTrailer(
+                                    videoId: _webVideoId!,
+                                    suspended: _error != null,
+                                    muted: false,
+                                    showCaptions: _showCaptions,
+                                    loop: false,
+                                    showControls: true,
+                                    autoplayTimeout: const Duration(
+                                      seconds: 15,
+                                    ),
+                                    onPlaybackStarted:
+                                        _onEmbeddedPlaybackStarted,
+                                    onCompleted: () {
+                                      if (mounted && !_closing) {
+                                        _closing = true;
+                                        Navigator.of(context).pop(true);
+                                      }
+                                    },
+                                    onEmbeddedUnavailable: _useEmbeddedYouTube
+                                        ? _fallBackToStreamPlayback
+                                        : null,
+                                    onAutoplayFailed: _useEmbeddedYouTube
+                                        ? _fallBackToStreamPlayback
+                                        : null,
+                                  ),
+                          ),
+                        )
+                      : PlatformDetection.useApplePreviewPlayer
+                      ? (_appleTvPlayer?.textureId != null
+                            ? FittedBox(
+                                fit: BoxFit.contain,
+                                clipBehavior: Clip.hardEdge,
+                                child: SizedBox(
+                                  width: 1920,
+                                  height: 1080,
+                                  child: Texture(
+                                    textureId: _appleTvPlayer!.textureId!,
+                                  ),
+                                ),
                               )
-                            : WebYouTubeTrailer(
-                          videoId: _webVideoId!,
-                          suspended: _error != null,
-                          muted: false,
-                          showCaptions: _showCaptions,
-                          loop: false,
-                          showControls: true,
-                          autoplayTimeout: const Duration(seconds: 15),
-                          onPlaybackStarted: _onEmbeddedPlaybackStarted,
-                          onCompleted: () {
-                            if (mounted && !_closing) {
-                              _closing = true;
-                              Navigator.of(context).pop(true);
-                            }
-                          },
-                          onEmbeddedUnavailable: _useEmbeddedYouTube
-                              ? _fallBackToStreamPlayback
-                              : null,
-                          onAutoplayFailed: _useEmbeddedYouTube
-                              ? _fallBackToStreamPlayback
-                              : null,
+                            : const SizedBox.shrink())
+                      : (_controller != null
+                            ? Video(
+                                controller: _controller!,
+                                controls: AdaptiveVideoControls,
+                                fit: BoxFit.contain,
+                                pauseUponEnteringBackgroundMode: false,
+                                fill: Colors.black,
+                              )
+                            : const SizedBox.shrink()),
+                ),
+              ),
+              if (_loading) const Center(child: CircularProgressIndicator()),
+              if (_error != null)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _error!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: Colors.white),
                         ),
-                      ),
-                    )
-                  : PlatformDetection.useApplePreviewPlayer
-                  ? (_appleTvPlayer?.textureId != null
-                        ? FittedBox(
-                            fit: BoxFit.contain,
-                            clipBehavior: Clip.hardEdge,
-                            child: SizedBox(
-                              width: 1920,
-                              height: 1080,
-                              child: Texture(
-                                textureId: _appleTvPlayer!.textureId!,
-                              ),
-                            ),
-                          )
-                        : const SizedBox.shrink())
-                  : (_controller != null
-                        ? Video(
-                            controller: _controller!,
-                            controls: AdaptiveVideoControls,
-                            fit: BoxFit.contain,
-                            pauseUponEnteringBackgroundMode: false,
-                            fill: Colors.black,
-                          )
-                        : const SizedBox.shrink()),
-            ),
-          ),
-          if (_loading) const Center(child: CircularProgressIndicator()),
-          if (_error != null)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _error!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white),
+                        if (_resolvedVideoId() != null) ...[
+                          const SizedBox(height: 16),
+                          FilledButton.icon(
+                            icon: const Icon(Icons.open_in_new),
+                            label: const Text('Open in YouTube'),
+                            onPressed: () async {
+                              final opened = await launchTrailerExternally(
+                                'https://www.youtube.com/watch?v=${_resolvedVideoId()}',
+                              );
+                              if (opened &&
+                                  mounted &&
+                                  context.mounted &&
+                                  !_closing) {
+                                _closing = true;
+                                Navigator.of(context).pop();
+                              }
+                            },
+                          ),
+                        ],
+                      ],
                     ),
-                    if (_resolvedVideoId() != null) ...[
-                      const SizedBox(height: 16),
-                      FilledButton.icon(
-                        icon: const Icon(Icons.open_in_new),
-                        label: const Text('Open in YouTube'),
-                        onPressed: () async {
-                          final opened = await launchTrailerExternally(
-                            'https://www.youtube.com/watch?v=${_resolvedVideoId()}',
-                          );
-                          if (opened && mounted && context.mounted && !_closing) {
-                            _closing = true;
-                            Navigator.of(context).pop();
-                          }
-                        },
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          SafeArea(
-            child: Align(
-              alignment: Alignment.topLeft,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: IconButton(
-                  icon: const AdaptiveIcon(
-                    Icons.arrow_back,
-                    color: Colors.white,
                   ),
-                  onPressed: () {
-                    _closing = true;
-                    _player?.stop();
-                    unawaited(_appleTvPlayer?.stop());
-                    Navigator.of(context).pop();
-                  },
+                ),
+              SafeArea(
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: IconButton.filledTonal(
+                      key: const ValueKey('trailer_back'),
+                      tooltip: 'Back',
+                      icon: const AdaptiveIcon(
+                        Icons.arrow_back,
+                        color: Colors.white,
+                      ),
+                      onPressed: _closeTrailer,
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
