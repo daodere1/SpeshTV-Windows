@@ -582,6 +582,14 @@ class _MediaCardState extends State<MediaCard> with FocusStateMixin {
               focusNode: widget.focusNode,
               autofocus: widget.autofocus,
               onKeyEvent: (node, event) {
+                if (widget.onLongPress != null &&
+                    event is KeyDownEvent &&
+                    (event.logicalKey == LogicalKeyboardKey.contextMenu ||
+                     (event.logicalKey == LogicalKeyboardKey.f10 &&
+                      HardwareKeyboard.instance.isShiftPressed))) {
+                  widget.onLongPress!();
+                  return KeyEventResult.handled;
+                }
                 if (widget.onLongPress != null) {
                   final handlerResult = _selectKeyHandler.handleKeyEvent(
                     event,

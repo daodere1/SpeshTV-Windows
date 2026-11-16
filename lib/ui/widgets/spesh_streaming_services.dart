@@ -1,7 +1,6 @@
 import '../navigation/destinations.dart';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 class StreamingServiceIcon extends StatelessWidget {
   const StreamingServiceIcon(this.name, {super.key});
@@ -19,18 +18,62 @@ class StreamingServiceIcon extends StatelessWidget {
       'Peacock' => 'peacock',
       _ => 'discoveryplus',
     };
-    return Semantics(
-      label: name,
-      child: SvgPicture.asset(
-        'assets/icons/streaming/$slug.svg',
-        width: 36,
-        height: 28,
-        colorFilter: name == 'Peacock'
-            ? null
-            : const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Image.asset(
+        'assets/icons/streaming/$slug.png',
+        width: 52,
+        height: 52,
+        cacheWidth: 156,
+        semanticLabel: name,
+        fit: BoxFit.contain,
       ),
     );
   }
+}
+
+/// Original service artwork with a persistent label for mouse, touch and remotes.
+class StreamingServiceTile extends StatelessWidget {
+  const StreamingServiceTile(this.name, {super.key, required this.onPressed});
+  final String name;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 72,
+    child: TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ExcludeSemantics(child: StreamingServiceIcon(name)),
+          const SizedBox(height: 6),
+          if (name == 'Paramount+')
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                name,
+                maxLines: 1,
+                softWrap: false,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            )
+          else
+            Text(
+              name,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+        ],
+      ),
+    ),
+  );
 }
 
 /// Curated network discovery, not an assertion of regional streaming rights.
@@ -60,27 +103,49 @@ String streamingServiceRoute(String name) {
 }
 
 /// Shared mobile chooser so toolbar and bottom navigation expose the same services.
-Future<String?> pickSpeshStudio(BuildContext context) => showModalBottomSheet<String>(
-  context: context,
-  useSafeArea: true,
-  showDragHandle: true,
-  builder: (context) => Padding(
-    padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-    child: Column(mainAxisSize: MainAxisSize.min, children: [
-      Row(children: [
-        const Expanded(child: Text('Studios & streaming services',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700))),
-        CloseButton(),
-      ]),
-      const SizedBox(height: 16),
-      Wrap(spacing: 12, runSpacing: 12, children: [
-        for (final service in speshStreamingServices)
-          SizedBox(width: 76, height: 64, child: IconButton.filledTonal(
-            tooltip: service.name,
-            onPressed: () => Navigator.of(context).pop(service.name),
-            icon: StreamingServiceIcon(service.name),
-          )),
-      ]),
-    ]),
-  ),
-);
+Future<String?> pickSpeshStudio(BuildContext context) =>
+    showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+      ),
+      showDragHandle: true,
+      builder: (context) => SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Studios & streaming services',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  CloseButton(),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  for (final service in speshStreamingServices)
+                    StreamingServiceTile(
+                      service.name,
+                      onPressed: () => Navigator.of(context).pop(service.name),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );

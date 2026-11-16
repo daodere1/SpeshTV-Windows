@@ -511,6 +511,12 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
                   aspectRatio: 16 / 9,
                   landscapeCells: true,
                   firstFocusNode: firstFocusNode,
+                  currentItemId: _vm.item?.type == 'Episode'
+                      ? _vm.item?.id : _vm.nextUp?.id,
+                  onItemChanged: () {
+                    if (!modalContext.mounted) return;
+                    update(() { episodes = _vm.browseSeasonEpisodes(season); });
+                  },
                   onItemTap: (episode) {
                     Navigator.of(modalContext, rootNavigator: true).pop<VoidCallback>(
                       () => _cardActions(_vm.item!).openItem(episode),

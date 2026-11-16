@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'spesh_brand.dart';
 import 'spesh_cinematic.dart';
 import 'spesh_streaming_services.dart';
+import 'spesh_navigation_glass.dart';
 
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
@@ -692,7 +693,11 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
             node: _sidebarFocus,
             onFocusChange: _onSidebarFocusChange,
             onKeyEvent: _onKeyEvent,
-            child: AppColorScheme.isGlass
+            child: speshCinematic
+                ? SpeshNavigationGlass(child: _isMobile
+                    ? SafeArea(right: false, child: _buildContent())
+                    : _buildContent())
+                : AppColorScheme.isGlass
                 ? GlassSurface(
                     cornerRadius: 18,
                     reinforced: _isMobile,
@@ -832,9 +837,8 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
           : EdgeInsets.zero,
       decoration: speshCinematic
           ? BoxDecoration(
-              color: const Color(0xFF0D0F13),
+              color: Colors.transparent,
               borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: const Color(0xFF25272C)),
             )
           : null,
       duration: _kExpandDuration,
@@ -844,13 +848,15 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
         borderRadius: speshCinematic
             ? BorderRadius.circular(28)
             : BorderRadius.zero,
-        child: FocusScope(
+        child: SpeshNavigationGlass(
+          enabled: speshCinematic,
+          child: FocusScope(
           node: _sidebarFocus,
           onFocusChange: _onSidebarFocusChange,
           onKeyEvent: _onKeyEvent,
           child: Stack(
             children: [
-              if (_isExpanded)
+              if (_isExpanded && !speshCinematic)
                 Align(
                   alignment: Alignment.centerLeft,
                   child: SizedBox(
@@ -916,6 +922,7 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                 ),
               ),
             ],
+          ),
           ),
         ),
       ),
@@ -1304,12 +1311,8 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                       runSpacing: 8,
                       children: [
                         for (final name in _studios)
-                          Tooltip(
-                            message: name,
-                            child: IconButton(
+                          StreamingServiceTile(name,
                               key: ValueKey('studio-$name'),
-                              tooltip: name,
-                              icon: StreamingServiceIcon(name),
                               onPressed: () {
                                 _onNavigate();
                                 _markNavigationAwayFromSidebar();
@@ -1317,7 +1320,6 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                                   streamingServiceRoute(name),
                                 );
                               },
-                            ),
                           ),
                       ],
                     ),

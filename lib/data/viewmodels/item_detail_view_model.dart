@@ -1212,6 +1212,16 @@ class ItemDetailViewModel extends ChangeNotifier {
     return loadAllSeriesEpisodes();
   }
 
+  /// Reload episode DTOs after a successful member/admin context action.
+  Future<void> refreshEpisodeLists() async {
+    if (_isDisposed) return;
+    final refreshAll = _seriesEpisodesLoaded || _seriesEpisodesRequested;
+    await Future.wait([
+      _loadEpisodes(),
+      if (refreshAll) refreshSeriesEpisodes(),
+    ]);
+  }
+
   Future<void> _loadNextUp() async {
     final previousId = _nextUp?.id;
     AggregatedItem? nextUp;

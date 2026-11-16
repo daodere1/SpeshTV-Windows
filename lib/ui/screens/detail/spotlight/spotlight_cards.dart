@@ -356,6 +356,7 @@ class _SpotlightCardsBuilder {
     bool landscapeCells = false,
     ValueChanged<AggregatedItem>? onTap,
     Map<int, int>? seerrSeasonStatus,
+    String? currentItemId,
   }) {
     return SpotlightModalSection(
       title: title,
@@ -369,6 +370,9 @@ class _SpotlightCardsBuilder {
         firstFocusNode: firstFocusNode,
         onItemTap: onTap ?? actions.openItem,
         seerrSeasonStatus: seerrSeasonStatus,
+        currentItemId: currentItemId,
+        onItemChanged: items.any((entry) => entry.type == 'Episode')
+            ? () => vm.refreshEpisodeLists() : null,
       ),
     );
   }
@@ -815,6 +819,7 @@ class _SpotlightCardsBuilder {
           l10n.seasons,
           seasons,
           seerrSeasonStatus: seerrItemSeasonStatus(vm),
+          currentItemId: vm.nextUp?.seasonId ?? item.seasonId,
         ),
       ],
     );
@@ -840,6 +845,7 @@ class _SpotlightCardsBuilder {
           episodes,
           aspectRatio: 16 / 9,
           landscapeCells: true,
+          currentItemId: vm.nextUp?.id,
         ),
       ],
     );
@@ -904,6 +910,7 @@ class _SpotlightCardsBuilder {
             firstFocusNode: firstFocusNode,
             onItemTap: actions.openItem,
             currentItemId: item.id,
+            onItemChanged: () => vm.refreshEpisodeLists(),
           ),
         ),
       );
