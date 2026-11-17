@@ -51,8 +51,8 @@ void main() {
     'bundled notes match this build and absent notes have safe fallback',
     () async {
       TestWidgetsFlutterBinding.ensureInitialized();
-      final notes = await SpeshReleaseNotes.load(version: '3.0.0+30000210');
-      expect(notes, contains('SpeshTV Windows 3.0.0'));
+      final notes = await SpeshReleaseNotes.load(version: '3.0.1+30000211');
+      expect(notes, contains('SpeshTV Windows 3.0.1'));
       expect(notes, contains('fill the entire Spotlight frame'));
       final missing = await SpeshReleaseNotes.load(
         version: '0.0.0+0',

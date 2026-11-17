@@ -3038,31 +3038,35 @@ class _MediaBarState extends State<MediaBar>
                   ? _trailerVideoOpacity
                   : 0.0,
               duration: const Duration(milliseconds: 800),
-              child: _trailerUsingMedia3 || mountPersistentMedia3
-                  ? Media3VideoView(
-                      fill: Colors.transparent,
-                      role: 'preview',
-                      onPlatformViewCreated: (id) => _media3PlatformViewId = id,
-                    )
-                  : _trailerUsingAppleTv
-                  ? FittedBox(
-                      fit: BoxFit.cover,
-                      clipBehavior: Clip.hardEdge,
-                      child: SizedBox(
-                        width: 1920,
-                        height: 1080,
-                        child: Texture(
-                          textureId: _appleTvTrailerPlayer!.textureId!,
+              child: ClipRect(
+                child: _trailerUsingMedia3 || mountPersistentMedia3
+                    ? Media3VideoView(
+                        fill: Colors.transparent,
+                        role: 'preview',
+                        onPlatformViewCreated: (id) =>
+                            _media3PlatformViewId = id,
+                      )
+                    : _trailerUsingAppleTv
+                    ? FittedBox(
+                        fit: BoxFit.contain,
+                        clipBehavior: Clip.hardEdge,
+                        child: SizedBox(
+                          width: 1920,
+                          height: 1080,
+                          child: Texture(
+                            textureId: _appleTvTrailerPlayer!.textureId!,
+                          ),
                         ),
+                      )
+                    : Video(
+                        controller: _trailerController!,
+                        controls: NoVideoControls,
+                        fit: BoxFit.contain,
+                        alignment: Alignment.center,
+                        pauseUponEnteringBackgroundMode: false,
+                        fill: Colors.black,
                       ),
-                    )
-                  : Video(
-                      controller: _trailerController!,
-                      controls: NoVideoControls,
-                      fit: BoxFit.cover,
-                      pauseUponEnteringBackgroundMode: false,
-                      fill: Colors.transparent,
-                    ),
+              ),
             ),
           ),
         ),
@@ -3077,45 +3081,33 @@ class _MediaBarState extends State<MediaBar>
                   : 0.0,
               duration: const Duration(milliseconds: 800),
               child: ClipRect(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    const overscan = 1.03;
-                    final w = constraints.maxWidth * overscan;
-                    final h = constraints.maxHeight * overscan;
-                    return OverflowBox(
-                      minWidth: w,
-                      minHeight: h,
-                      maxWidth: w,
-                      maxHeight: h,
-                      child: WebYouTubeTrailer(
-                        // Web swaps videos only via widget recreation; native
-                        // keeps one WebView and swaps via loadVideoById.
-                        key: PlatformDetection.isWeb
-                            ? ValueKey(_activeYouTubeVideoId)
-                            : const ValueKey('media-bar-embedded-yt'),
-                        videoId:
-                            (_activeYouTubeVideoId ?? _retainedYouTubeVideoId)!,
-                        suspended: _activeYouTubeVideoId == null,
-                        muted: !widget.prefs.get(
-                          UserPreferences.mediaBarTrailerAudio,
-                        ),
-                        showControls: false,
-                        showCaptions: widget.prefs.get(
-                          UserPreferences.mediaBarTrailerCaptions,
-                        ),
-                        ignorePointer: true,
-                        // Loop only when this is the sole slide. Otherwise an
-                        // ended trailer should advance rather than replay.
-                        loop: widget.viewModel.items.length <= 1,
-                        onPlaybackStarted: _onYouTubePlaybackStarted,
-                        onCompleted: () => _onTrailerCompleted(true),
-                        onAutoplayFailed: _handleYouTubeAutoplayFailed,
-                        onEmbeddedUnavailable:
-                            _handleEmbeddedYouTubeUnavailable,
-                        autoplayTimeout: const Duration(seconds: 7),
-                      ),
-                    );
-                  },
+                child: SizedBox.expand(
+                  child: WebYouTubeTrailer(
+                    // Web swaps videos only via widget recreation; native
+                    // keeps one WebView and swaps via loadVideoById.
+                    key: PlatformDetection.isWeb
+                        ? ValueKey(_activeYouTubeVideoId)
+                        : const ValueKey('media-bar-embedded-yt'),
+                    videoId:
+                        (_activeYouTubeVideoId ?? _retainedYouTubeVideoId)!,
+                    suspended: _activeYouTubeVideoId == null,
+                    muted: !widget.prefs.get(
+                      UserPreferences.mediaBarTrailerAudio,
+                    ),
+                    showControls: false,
+                    showCaptions: widget.prefs.get(
+                      UserPreferences.mediaBarTrailerCaptions,
+                    ),
+                    ignorePointer: true,
+                    // Loop only when this is the sole slide. Otherwise an
+                    // ended trailer should advance rather than replay.
+                    loop: widget.viewModel.items.length <= 1,
+                    onPlaybackStarted: _onYouTubePlaybackStarted,
+                    onCompleted: () => _onTrailerCompleted(true),
+                    onAutoplayFailed: _handleYouTubeAutoplayFailed,
+                    onEmbeddedUnavailable: _handleEmbeddedYouTubeUnavailable,
+                    autoplayTimeout: const Duration(seconds: 7),
+                  ),
                 ),
               ),
             ),
@@ -3227,7 +3219,7 @@ class _BackdropLayer extends StatelessWidget {
             child: BoundedNetworkImage(
               imageUrl: imageUrl,
               fit: BoxFit.cover,
-              alignment: Alignment.topCenter,
+              alignment: Alignment.center,
               memCacheWidth: MediaBar.backdropDecodeWidth(context),
               priority: ImageFetchPriority.high,
               errorBuilder: (_, _, _) =>

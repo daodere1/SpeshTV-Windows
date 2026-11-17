@@ -95,7 +95,8 @@ class _WebLocalTrailerState extends State<WebLocalTrailer> {
       ..style.border = '0'
       ..style.width = '100%'
       ..style.height = '100%'
-      ..style.objectFit = 'cover'
+      ..style.objectFit = 'contain'
+      ..style.objectPosition = 'center'
       ..style.backgroundColor = 'black'
       ..style.pointerEvents = widget.ignorePointer ? 'none' : 'auto';
     element.setAttribute('playsinline', '');

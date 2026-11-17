@@ -170,7 +170,7 @@ class _WebYouTubeTrailerState extends State<WebYouTubeTrailer> {
       ..style.overflow = 'hidden'
       ..style.pointerEvents = widget.ignorePointer ? 'none' : 'auto';
 
-    // Fixed-size stage, CSS-scaled to cover the container (see _applyScale).
+    // Fixed-size stage, CSS-scaled to fit the container (see _applyScale).
     final host = web.HTMLDivElement()
       ..id = '$_viewType-host'
       ..style.position = 'absolute'
@@ -205,7 +205,7 @@ class _WebYouTubeTrailerState extends State<WebYouTubeTrailer> {
     final boxWidth = container.clientWidth.toDouble();
     final boxHeight = container.clientHeight.toDouble();
     if (boxWidth <= 0 || boxHeight <= 0) return;
-    final scale = math.max(boxWidth / _stageWidth, boxHeight / _stageHeight);
+    final scale = math.min(boxWidth / _stageWidth, boxHeight / _stageHeight);
     final tx = (boxWidth - _stageWidth * scale) / 2;
     final ty = (boxHeight - _stageHeight * scale) / 2;
     host.style.transform = 'translate(${tx}px, ${ty}px) scale($scale)';

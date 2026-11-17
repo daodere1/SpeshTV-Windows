@@ -56,7 +56,7 @@ class _WebYouTubeTrailerState extends State<WebYouTubeTrailer> {
   late String _origin;
   static const _playerElementId = 'moonfin-player';
   static const _stageElementId = 'moonfin-stage';
-  // Rendered at this fixed size and CSS-scaled to the box; YouTube picks quality
+  // Rendered at this fixed size and CSS-scaled to fit the box; YouTube picks quality
   // from the player's pixel size, so a 1080p stage yields 1080p trailers.
   static const _stageWidth = 1920;
   static const _stageHeight = 1080;
@@ -631,7 +631,7 @@ class _WebYouTubeTrailerState extends State<WebYouTubeTrailer> {
     if (!stage) {
       return;
     }
-    const scale = Math.max(
+    const scale = Math.min(
       window.innerWidth / stageWidth,
       window.innerHeight / stageHeight
     );
