@@ -53,7 +53,7 @@ void main() {
       TestWidgetsFlutterBinding.ensureInitialized();
       final notes = await SpeshReleaseNotes.load(version: '3.0.0+30000210');
       expect(notes, contains('SpeshTV Windows 3.0.0'));
-      expect(notes, contains('full artwork inside its frame'));
+      expect(notes, contains('fill the entire Spotlight frame'));
       final missing = await SpeshReleaseNotes.load(
         version: '0.0.0+0',
         bundle: _Missing(),
