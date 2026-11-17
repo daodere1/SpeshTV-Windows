@@ -9,7 +9,8 @@ import 'package:moonfin_design/moonfin_design.dart';
 import 'package:server_core/server_core.dart';
 
 import '../../../data/repositories/seerr_repository.dart';
-import '../../../data/services/calendar_source_loader.dart';
+import '../../../data/services/calendar_snapshot_session.dart';
+import '../../widgets/focus/focusable_wrapper.dart';
 import '../../../util/calendar_eastern_time.dart';
 import '../../../data/services/plugin_sync_service.dart';
 import '../../../l10n/app_localizations.dart';
@@ -17,6 +18,19 @@ import '../../../preference/user_preferences.dart';
 import '../../navigation/destinations.dart';
 import '../../widgets/bounded_network_image.dart';
 import '../../widgets/navigation_layout.dart';
+
+enum CalendarMediaFilter { all, tv, movies }
+
+List<CinematicCalendarEntry> filterCalendarEntries(
+  List<CinematicCalendarEntry> entries,
+  CalendarMediaFilter filter,
+) => entries
+    .where(
+      (entry) =>
+          filter == CalendarMediaFilter.all ||
+          (filter == CalendarMediaFilter.tv ? entry.isTv : !entry.isTv),
+    )
+    .toList();
 
 class CinematicCalendarEntry {
   const CinematicCalendarEntry({
@@ -29,6 +43,7 @@ class CinematicCalendarEntry {
     this.episodeKey,
     this.timingPriority = 0,
     this.isTv = false,
+    this.availabilityLabel,
   });
   final DateTime date;
   final String title;
@@ -39,6 +54,7 @@ class CinematicCalendarEntry {
   final String? episodeKey;
   final int timingPriority;
   final bool isTv;
+  final String? availabilityLabel;
 }
 
 String? calendarEpisodeKey(String? series, Object? season, Object? episode) {
@@ -50,6 +66,32 @@ String? calendarEpisodeKey(String? series, Object? season, Object? episode) {
     return null;
   return '$name|$season|$episode';
 }
+
+String? calendarLocalItemId(Map item) {
+  final id = item['moonfinItemId']?.toString().trim();
+  return id == null || id.isEmpty ? null : id;
+}
+
+String? calendarAvailabilityLabel(Map item, {required bool tv}) {
+  if (tv) {
+    final episode = item['moonfinEpisodeId']?.toString().trim();
+    if (episode != null && episode.isNotEmpty) return 'Available';
+    return calendarLocalItemId(item) == null ? null : 'Series available';
+  }
+  return calendarLocalItemId(item) == null ? null : 'Available';
+}
+
+String radarrCalendarRoute(Map item) {
+  final localId = calendarLocalItemId(item);
+  if (localId != null) return Destinations.item(localId);
+  final tmdb = item['tmdbId']?.toString();
+  return tmdb == null || tmdb.isEmpty || tmdb == '0'
+      ? Destinations.searchWith('${item['title'] ?? ''}')
+      : Destinations.seerrMedia(tmdb, mediaType: 'movie');
+}
+
+String? _mergedAvailability(String? left, String? right) =>
+    left == 'Available' || right == 'Available' ? 'Available' : left ?? right;
 
 String sonarrCalendarRoute(Map item) {
   for (final key in ['moonfinEpisodeId', 'moonfinItemId']) {
@@ -118,7 +160,11 @@ List<CinematicCalendarEntry> calendarEntriesForRange(
               date: entry.date,
               title: entry.title,
               subtitle: entry.subtitle,
-              route: prior.route.startsWith('/item/')
+              route:
+                  prior.route.startsWith('/item/') &&
+                      !(entry.route.startsWith('/item/') &&
+                          entry.availabilityLabel == 'Available' &&
+                          prior.availabilityLabel != 'Available')
                   ? prior.route
                   : entry.route,
               imageUrl: entry.imageUrl ?? prior.imageUrl,
@@ -126,9 +172,15 @@ List<CinematicCalendarEntry> calendarEntriesForRange(
               episodeKey: key,
               timingPriority: entry.timingPriority,
               isTv: entry.isTv,
+              availabilityLabel: _mergedAvailability(
+                entry.availabilityLabel,
+                prior.availabilityLabel,
+              ),
             );
     } else if (entry.route.startsWith('/item/') &&
-        !prior.route.startsWith('/item/')) {
+        (!prior.route.startsWith('/item/') ||
+            (entry.availabilityLabel == 'Available' &&
+                prior.availabilityLabel != 'Available'))) {
       selected[key] = CinematicCalendarEntry(
         date: prior.date,
         title: prior.title,
@@ -139,6 +191,10 @@ List<CinematicCalendarEntry> calendarEntriesForRange(
         episodeKey: key,
         timingPriority: prior.timingPriority,
         isTv: prior.isTv,
+        availabilityLabel: _mergedAvailability(
+          prior.availabilityLabel,
+          entry.availabilityLabel,
+        ),
       );
     }
   }
@@ -169,10 +225,6 @@ List<CinematicCalendarEntry> calendarEntriesForRange(
   });
 }
 
-final _calendarLoaders = Expando<CalendarSourceLoader<CinematicCalendarEntry>>(
-  'member-calendar',
-);
-
 class CinematicCalendarScreen extends StatefulWidget {
   const CinematicCalendarScreen({super.key});
   @override
@@ -180,31 +232,55 @@ class CinematicCalendarScreen extends StatefulWidget {
       _CinematicCalendarScreenState();
 }
 
-class _CinematicCalendarScreenState extends State<CinematicCalendarScreen> {
+class _CinematicCalendarScreenState extends State<CinematicCalendarScreen>
+    with WidgetsBindingObserver {
+  Timer? _midnightRefresh;
   DateTime _month = DateTime(
     calendarEasternNow().year,
     calendarEasternNow().month,
     calendarEasternNow().day,
   );
   List<CinematicCalendarEntry> _entries = [];
+  CalendarMediaFilter _mediaFilter = CalendarMediaFilter.all;
   bool _loading = true;
   bool _refreshing = false;
-  StreamSubscription<CalendarSourceSnapshot<CinematicCalendarEntry>>?
-  _calendarSubscription;
+  final _calendarRequests = CalendarSnapshotSession<CinematicCalendarEntry>();
   bool _partialFailure = false;
   final Map<String, String> _sourceFailures = {};
-  int _generation = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _scheduleMidnightRefresh();
     _load();
   }
 
-  Future<void> _load({bool force = false}) async {
-    final generation = ++_generation;
-    await _calendarSubscription?.cancel();
-    if (!mounted || generation != _generation) return;
+  void _scheduleMidnightRefresh() {
+    _midnightRefresh?.cancel();
+    final now = DateTime.now();
+    _midnightRefresh = Timer(
+      calendarNextEasternMidnight(now).difference(now) +
+          const Duration(seconds: 15),
+      () {
+        if (!mounted) return;
+        _load(); // Read the server snapshot; this does not create a client cache.
+        _scheduleMidnightRefresh();
+      },
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      _midnightRefresh?.cancel();
+      return;
+    }
+    _load();
+    _scheduleMidnightRefresh();
+  }
+
+  void _load() {
     final now = calendarEasternNow();
     _month = DateTime(now.year, now.month, now.day);
     final month = _month;
@@ -280,6 +356,7 @@ class _CinematicCalendarScreenState extends State<CinematicCalendarScreen> {
           CinematicCalendarEntry(
             date: DateTime(date.year, date.month, date.day),
             isTv: item['Type'] == 'Episode' || series != null,
+            availabilityLabel: 'Available',
             title: series ?? title,
             subtitle: series == null ? 'Jellyfin' : '$title · Jellyfin',
             imageUrl: artwork,
@@ -316,6 +393,7 @@ class _CinematicCalendarScreenState extends State<CinematicCalendarScreen> {
               CinematicCalendarEntry(
                 date: airing.date,
                 isTv: true,
+                availabilityLabel: calendarAvailabilityLabel(item, tv: true),
                 hasAirTime: airing.hasTime,
                 timingPriority: 2,
                 episodeKey: calendarEpisodeKey(
@@ -341,8 +419,6 @@ class _CinematicCalendarScreenState extends State<CinematicCalendarScreen> {
               .getRadarrCalendar(start: day(start), end: day(end))
               .timeout(const Duration(seconds: 65));
           for (final item in values.whereType<Map>()) {
-            final id = item['tmdbId']?.toString();
-            if (id == null || id == '0') continue;
             // Calendar APIs can return a film for any release in the interval.
             for (final release in [
               'digitalRelease',
@@ -362,7 +438,8 @@ class _CinematicCalendarScreenState extends State<CinematicCalendarScreen> {
                           ? 'Digital'
                           : 'Physical'} · Radarr',
                   imageUrl: _remoteArtwork(item),
-                  route: Destinations.seerrMedia(id, mediaType: 'movie'),
+                  route: radarrCalendarRoute(item),
+                  availabilityLabel: calendarAvailabilityLabel(item, tv: false),
                 ),
               );
             }
@@ -371,47 +448,37 @@ class _CinematicCalendarScreenState extends State<CinematicCalendarScreen> {
           return entries;
         };
     }
-    final loader = _calendarLoaders[client] ??=
-        CalendarSourceLoader<CinematicCalendarEntry>();
-    final scope =
-        '${client.userId}|${start.year}-${start.month}-${start.day}|$seerrEnabled|$sonarrEnabled|90|${prefs.get(UserPreferences.kidsModeEnabled)}|agenda-v2';
-    _calendarSubscription = loader
-        .load(
-          scope: scope,
-          sources: sources,
-          force: force,
-          discardOnFailure: (error) =>
-              error is DioException &&
-              (error.response?.statusCode == 401 ||
-                  error.response?.statusCode == 403),
-        )
-        .listen((snapshot) {
-          if (!mounted || generation != _generation) return;
-          final rows = calendarEntriesForRange(
-            snapshot.sources.values.expand((rows) => rows),
-            start,
-            end,
-          );
-          setState(() {
-            _entries = rows;
-            _refreshing = snapshot.refreshing;
-            _loading = rows.isEmpty && snapshot.refreshing;
-            _partialFailure = snapshot.failures.isNotEmpty;
-            _sourceFailures
-              ..clear()
-              ..addAll(
-                snapshot.failures.map(
-                  (name, error) => MapEntry(name, _calendarFailure(error)),
-                ),
-              );
-          });
+    _calendarRequests.refresh(
+      sources: sources,
+      onSnapshot: (snapshot) {
+        if (!mounted) return;
+        final rows = calendarEntriesForRange(
+          snapshot.sources.values.expand((rows) => rows),
+          start,
+          end,
+        );
+        setState(() {
+          _entries = rows;
+          _refreshing = snapshot.refreshing;
+          _loading = rows.isEmpty && snapshot.refreshing;
+          _partialFailure = snapshot.failures.isNotEmpty;
+          _sourceFailures
+            ..clear()
+            ..addAll(
+              snapshot.failures.map(
+                (name, error) => MapEntry(name, _calendarFailure(error)),
+              ),
+            );
         });
+      },
+    );
   }
 
   @override
   void dispose() {
-    _generation++;
-    unawaited(_calendarSubscription?.cancel());
+    _midnightRefresh?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _calendarRequests.dispose();
     super.dispose();
   }
 
@@ -473,6 +540,7 @@ class _CinematicCalendarScreenState extends State<CinematicCalendarScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final visibleEntries = filterCalendarEntries(_entries, _mediaFilter);
     final compact = MediaQuery.sizeOf(context).width < 760;
     final l10n = AppLocalizations.of(context);
     return Scaffold(
@@ -501,7 +569,7 @@ class _CinematicCalendarScreenState extends State<CinematicCalendarScreen> {
                     ),
                     IconButton(
                       tooltip: l10n.refresh,
-                      onPressed: () => _load(force: true),
+                      onPressed: () => _load(),
                       icon: const Icon(Icons.refresh),
                     ),
                   ],
@@ -518,7 +586,7 @@ class _CinematicCalendarScreenState extends State<CinematicCalendarScreen> {
                         ),
                       ),
                       TextButton(
-                        onPressed: () => _load(force: true),
+                        onPressed: () => _load(),
                         child: Text(l10n.retry),
                       ),
                     ],
@@ -529,40 +597,33 @@ class _CinematicCalendarScreenState extends State<CinematicCalendarScreen> {
                 ),
                 const SizedBox(height: 17),
                 Text(
-                  'Air times use Eastern Time (EST/EDT). Release dates without a supplied time are marked “Time unavailable”.',
+                  'Schedules are cached on the server and refreshed at midnight Eastern (EST/EDT). Times without a supplied air time are marked “Time unavailable”.',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 10),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.tv, color: Color(0xFF8ABCF4), size: 16),
-                      SizedBox(width: 6),
-                      Text('TV', style: TextStyle(color: Color(0xFF8ABCF4))),
-                      SizedBox(width: 24),
-                      Icon(
-                        Icons.movie_outlined,
-                        color: Color(0xFFF3C564),
-                        size: 16,
-                      ),
-                      SizedBox(width: 6),
-                      Text(
-                        'Movies',
-                        style: TextStyle(color: Color(0xFFF3C564)),
-                      ),
-                    ],
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: CalendarMediaFilters(
+                    selected: _mediaFilter,
+                    onChanged: (value) => setState(() => _mediaFilter = value),
                   ),
                 ),
                 Expanded(
                   child: _loading
                       ? const Center(child: CircularProgressIndicator())
-                      : _entries.isEmpty
-                      ? const Center(child: Text('No upcoming releases.'))
+                      : visibleEntries.isEmpty && _refreshing
+                      ? const Center(child: CircularProgressIndicator())
+                      : visibleEntries.isEmpty
+                      ? Center(
+                          child: Text(
+                            _partialFailure
+                                ? 'Could not load upcoming releases. Use Retry above.'
+                                : 'No upcoming releases for this filter.',
+                          ),
+                        )
                       : ListView.builder(
-                          itemCount: _entries.length,
+                          itemCount: visibleEntries.length,
                           itemBuilder: (context, index) {
-                            final entry = _entries[index];
+                            final entry = visibleEntries[index];
                             final accent = entry.isTv
                                 ? const Color(0xFF8ABCF4)
                                 : const Color(0xFFF3C564);
@@ -573,8 +634,9 @@ class _CinematicCalendarScreenState extends State<CinematicCalendarScreen> {
                             final previous = index == 0
                                 ? null
                                 : calendarEasternDate(
-                                    _entries[index - 1].date,
-                                    hasAirTime: _entries[index - 1].hasAirTime,
+                                    visibleEntries[index - 1].date,
+                                    hasAirTime:
+                                        visibleEntries[index - 1].hasAirTime,
                                   );
                             final heading =
                                 previous == null || previous.day != date.day;
@@ -606,9 +668,9 @@ class _CinematicCalendarScreenState extends State<CinematicCalendarScreen> {
                                         color: accent.withValues(alpha: 0.45),
                                       ),
                                     ),
-                                    child: InkWell(
-                                      borderRadius: BorderRadius.circular(24),
-                                      onTap: () => context.push(entry.route),
+                                    child: CalendarEntryLink(
+                                      route: entry.route,
+                                      accent: accent,
                                       child: Padding(
                                         padding: const EdgeInsets.all(16),
                                         child: Row(
@@ -651,6 +713,44 @@ class _CinematicCalendarScreenState extends State<CinematicCalendarScreen> {
                                                     overflow:
                                                         TextOverflow.ellipsis,
                                                   ),
+                                                  if (entry.availabilityLabel !=
+                                                      null)
+                                                    Padding(
+                                                      padding:
+                                                          const EdgeInsets.only(
+                                                            top: 4,
+                                                          ),
+                                                      child: Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          const Icon(
+                                                            Icons.check_circle,
+                                                            size: 14,
+                                                            color: Color(
+                                                              0xFF8CDDAB,
+                                                            ),
+                                                          ),
+                                                          const SizedBox(
+                                                            width: 5,
+                                                          ),
+                                                          Flexible(
+                                                            child: Text(
+                                                              entry
+                                                                  .availabilityLabel!,
+                                                              style:
+                                                                  const TextStyle(
+                                                                    color: Color(
+                                                                      0xFF8CDDAB,
+                                                                    ),
+                                                                    fontSize:
+                                                                        12,
+                                                                  ),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
                                                   const SizedBox(height: 6),
                                                   Text(
                                                     entry.subtitle,
@@ -702,4 +802,94 @@ class _CinematicCalendarScreenState extends State<CinematicCalendarScreen> {
       ),
     );
   }
+}
+
+/// Pure view switch: selection never starts a schedule request.
+class CalendarMediaFilters extends StatelessWidget {
+  const CalendarMediaFilters({
+    super.key,
+    required this.selected,
+    required this.onChanged,
+  });
+  final CalendarMediaFilter selected;
+  final ValueChanged<CalendarMediaFilter> onChanged;
+  @override
+  Widget build(BuildContext context) => SegmentedButton<CalendarMediaFilter>(
+    segments: const [
+      ButtonSegment(
+        value: CalendarMediaFilter.all,
+        icon: Icon(Icons.filter_list),
+        label: Text('All'),
+      ),
+      ButtonSegment(
+        value: CalendarMediaFilter.tv,
+        icon: Icon(Icons.tv, color: Color(0xFF8ABCF4)),
+        label: Text('TV'),
+      ),
+      ButtonSegment(
+        value: CalendarMediaFilter.movies,
+        icon: Icon(Icons.movie_outlined, color: Color(0xFFF3C564)),
+        label: Text('Movies'),
+      ),
+    ],
+    selected: {selected},
+    onSelectionChanged: (selection) => onChanged(selection.single),
+  );
+}
+
+/// Native keyboard/controller activation and focus restoration on details Back.
+class CalendarEntryLink extends StatefulWidget {
+  const CalendarEntryLink({
+    super.key,
+    required this.route,
+    required this.child,
+    required this.accent,
+  });
+  final String route;
+  final Widget child;
+  final Color accent;
+  @override
+  State<CalendarEntryLink> createState() => _CalendarEntryLinkState();
+}
+
+class _CalendarEntryLinkState extends State<CalendarEntryLink> {
+  final _focus = FocusNode();
+  bool _opening = false;
+  Future<void> _open() async {
+    if (_opening) return;
+    _opening = true;
+    _focus.requestFocus();
+    try {
+      await context.push(widget.route);
+    } finally {
+      if (mounted) {
+        _opening = false;
+        _focus.requestFocus();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => FocusableWrapper(
+    focusNode: _focus,
+    onSelect: _open,
+    autoScroll: true,
+    borderRadius: 24,
+    focusColor: widget.accent,
+    descendantsAreFocusable: false,
+    disableScale: true,
+    highlightOnHover: true,
+    child: InkWell(
+      canRequestFocus: false,
+      onTap: _open,
+      borderRadius: BorderRadius.circular(24),
+      child: widget.child,
+    ),
+  );
 }

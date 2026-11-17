@@ -122,7 +122,7 @@ Future<String?> pickSpeshStudio(BuildContext context) =>
                 children: [
                   const Expanded(
                     child: Text(
-                      'Studios & streaming services',
+                      'Studios',
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w700,

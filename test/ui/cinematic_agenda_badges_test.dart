@@ -6,6 +6,20 @@ import 'package:moonfin/ui/screens/calendar/cinematic_calendar_screen.dart';
 import 'package:moonfin/ui/widgets/seerr/seerr_shortcuts.dart';
 
 void main() {
+  test('TV and movie filters use the loaded entries', () {
+    final tv = CinematicCalendarEntry(date: DateTime(2026,11,16), title: 'TV', subtitle: '', route: '/tv', isTv: true);
+    final movie = CinematicCalendarEntry(date: DateTime(2026,11,16), title: 'Movie', subtitle: '', route: '/movie');
+    expect(filterCalendarEntries([tv, movie], CalendarMediaFilter.all), [tv, movie]);
+    expect(filterCalendarEntries([tv, movie], CalendarMediaFilter.tv), [tv]);
+    expect(filterCalendarEntries([tv, movie], CalendarMediaFilter.movies), [movie]);
+  });
+  test('availability distinguishes episodes from a series-only library match', () {
+    expect(calendarAvailabilityLabel({}, tv: true), isNull);
+    expect(calendarAvailabilityLabel({'moonfinItemId': 'series'}, tv: true), 'Series available');
+    expect(calendarAvailabilityLabel({'moonfinItemId': 'series', 'moonfinEpisodeId': 'episode'}, tv: true), 'Available');
+    expect(sonarrCalendarRoute({'moonfinItemId': 'series', 'moonfinEpisodeId': 'episode'}), '/item/episode');
+    expect(calendarAvailabilityLabel({'moonfinItemId': 'movie'}, tv: false), 'Available');
+  });
   test('upcoming agenda keeps today, crosses month boundaries, and excludes yesterday', () {
     CinematicCalendarEntry row(String day, {bool tv = false}) =>
         CinematicCalendarEntry(

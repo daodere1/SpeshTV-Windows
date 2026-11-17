@@ -845,7 +845,7 @@ class SeerrHttpClient {
         'start': ?start,
         'end': ?end,
       },
-      options: _authOptions(),
+      options: _authOptions().copyWith(receiveTimeout: const Duration(seconds: 60)),
     );
     _requireSuccess(response, 'getRadarrCalendar');
     return response.data as List<dynamic>;
@@ -858,7 +858,7 @@ class SeerrHttpClient {
         'start': ?start,
         'end': ?end,
       },
-      options: _authOptions(),
+      options: _authOptions().copyWith(receiveTimeout: const Duration(seconds: 60)),
     );
     _requireSuccess(response, 'getSonarrCalendar');
     return response.data as List<dynamic>;

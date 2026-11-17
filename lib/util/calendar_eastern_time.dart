@@ -13,3 +13,8 @@ DateTime calendarEasternDate(DateTime date, {required bool hasAirTime}) =>
     : DateTime(date.year, date.month, date.day);
 
 DateTime calendarEasternNow() => tz.TZDateTime.now(_eastern);
+
+DateTime calendarNextEasternMidnight(DateTime instant) {
+  final now = tz.TZDateTime.from(instant, _eastern);
+  return tz.TZDateTime(_eastern, now.year, now.month, now.day + 1);
+}

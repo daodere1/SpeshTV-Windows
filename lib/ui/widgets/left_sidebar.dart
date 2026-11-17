@@ -1289,7 +1289,7 @@ class _LeftSidebarState extends State<LeftSidebar> with RouteAware {
                   _SidebarItem(
                     key: const ValueKey('sidebar-studios'),
                     icon: Icons.business_outlined,
-                    label: 'Streaming services',
+                    label: 'Studios',
                     showLabel: _showLabels,
                     trailing: _showLabels
                         ? Icon(

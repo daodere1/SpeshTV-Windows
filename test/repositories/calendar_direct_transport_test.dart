@@ -29,8 +29,12 @@ void main() {
     try {
       final result = await repository.getSonarrCalendar(start: '2026-11-01', end: '2026-12-01');
       expect(result.single['airDateUtc'], '2026-11-15T02:00:00Z');
-      expect(paths, ['/Moonfin/Seerr/Sonarr/Calendar']);
-      expect(auth.single, contains('test-token'));
+      when(() => client.accessToken).thenReturn('second-member-token');
+      final movies = await repository.getRadarrCalendar(start: '2026-11-01', end: '2026-12-01');
+      expect(movies, isNotEmpty);
+      expect(paths, ['/Moonfin/Seerr/Sonarr/Calendar','/Moonfin/Seerr/Radarr/Calendar']);
+      expect(auth.last, contains('second-member-token'));
+      expect(auth.first, contains('test-token'));
     } finally {
       repository.close();
       await server.close(force: true);
