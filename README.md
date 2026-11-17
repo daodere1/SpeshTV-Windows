@@ -30,11 +30,11 @@ the x64 Windows libarchive dependency from vcpkg.
 ```sh
 flutter pub get
 flutter gen-l10n
-flutter build windows --release --dart-define=SPESHMEDIA_CLIENT=true --dart-define=DISTRIBUTION_CHANNEL=speshtv-windows --dart-define=SPESHTV_ANNOUNCEMENTS=false
+flutter build windows --release --dart-define=SPESHMEDIA_CLIENT=true --dart-define=DISTRIBUTION_CHANNEL=speshtv-windows --dart-define=SPESHTV_ANNOUNCEMENTS=true
 ```
 
-`build-speshtv-windows.ps1` creates the portable announcement build; add
-`-NoAnnouncements` for the other variant. The local helper expects Flutter at
+`build-speshtv-windows.ps1` creates the standard Windows portable build.
+The local helper expects Flutter at
 `.toolchains/flutter-3.47.2` and vcpkg at `.toolchains/vcpkg`. Supply
 `-ToolchainRoot` and optionally `-PubCache` to use installed toolchains and a
 shared package cache elsewhere, or use the Flutter commands above.

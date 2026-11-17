@@ -45,6 +45,10 @@ void main() {
     await store.init();
     prefs = UserPreferences(store);
     images = _Images();
+    for (var n = 1; n <= 14; n++) {
+      when(() => images.getPrimaryImageUrl('s$n', maxHeight: 360))
+          .thenReturn('');
+    }
   });
   tearDown(() => GetIt.instance.reset());
   Future<void> open(
@@ -101,6 +105,8 @@ void main() {
       addTearDown(data.dispose);
       await open(tester, data);
       expect(find.text('Choose a season'), findsOneWidget);
+      verify(() => images.getPrimaryImageUrl('s1', maxHeight: 360))
+          .called(greaterThan(0));
       expect(find.textContaining('Episode 1-1'), findsNothing);
       await tester.tap(find.text('Season 1'));
       await tester.pumpAndSettle();

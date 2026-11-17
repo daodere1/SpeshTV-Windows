@@ -88,6 +88,10 @@ class _SpotlightSeasonBrowserState extends State<SpotlightSeasonBrowser> {
             'Name': widget.seasonLabel(number),
             'IndexNumber': number,
             'SpeshSeasonPicker': true,
+            'PrimaryImageItemId': groups[number]!.first.seasonId,
+            if (groups[number]!.first.rawData['SeasonPrimaryImageTag'] != null)
+              'PrimaryImageTag':
+                  groups[number]!.first.rawData['SeasonPrimaryImageTag'],
             'UserData': {'Played': groups[number]!.every((e) => e.isPlayed)},
           },
         ),
@@ -130,8 +134,7 @@ class _SpotlightSeasonBrowserState extends State<SpotlightSeasonBrowser> {
                     imageApi: widget.imageApi,
                     prefs: widget.prefs,
                     bounded: true,
-                    landscapeCells: true,
-                    aspectRatio: 16 / 9,
+                    aspectRatio: 2 / 3,
                     requestInitialFocus: true,
                     currentItemId: 'season_${widget.currentSeason}',
                     itemFocusNodes: _pickerNodes,

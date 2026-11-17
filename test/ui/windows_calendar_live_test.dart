@@ -51,9 +51,9 @@ void main() {
     'bundled notes match this build and absent notes have safe fallback',
     () async {
       TestWidgetsFlutterBinding.ensureInitialized();
-      final notes = await SpeshReleaseNotes.load(version: '2.8.0+30000207');
-      expect(notes, contains('2.8.0+30000207'));
-      expect(notes, contains('every minute'));
+      final notes = await SpeshReleaseNotes.load(version: '2.8.0+30000209');
+      expect(notes, contains('2.8.0+30000209'));
+      expect(notes, contains('full artwork inside its frame'));
       final missing = await SpeshReleaseNotes.load(
         version: '0.0.0+0',
         bundle: _Missing(),

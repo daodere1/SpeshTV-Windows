@@ -1509,7 +1509,7 @@ class _MediaBarState extends State<MediaBar>
     _autoAdvanceTimer?.cancel();
     final ready = await _waitForMediaKitTrailerReady(player, resolveId);
     if (!_trailerRequestIsCurrent(item, resolveId)) return;
-      if (!_trailerShouldBeActive()) {
+    if (!_trailerShouldBeActive()) {
       _cancelTrailerPreview();
       return;
     }
@@ -3223,15 +3223,40 @@ class _BackdropLayer extends StatelessWidget {
         imageUrl: url,
         duration: const Duration(milliseconds: 600),
         imageBuilder: (imageUrl) {
-          final Widget image = BoundedNetworkImage(
-            imageUrl: imageUrl,
-            memCacheWidth: MediaBar.backdropDecodeWidth(context),
-            priority: ImageFetchPriority.high,
-            errorBuilder: (_, _, _) =>
-                ColoredBox(color: AppColorScheme.background),
-          );
+          final Widget image = PlatformDetection.isWindows
+              ? ClipRect(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      BoundedNetworkImage(
+                        imageUrl: imageUrl,
+                        scale: 0.25,
+                        minWidth: 320,
+                        maxWidth: 640,
+                        blurSigma: 24,
+                        priority: ImageFetchPriority.high,
+                      ),
+                      const ColoredBox(color: Color(0x99000000)),
+                      BoundedNetworkImage(
+                        imageUrl: imageUrl,
+                        fit: BoxFit.contain,
+                        memCacheWidth: MediaBar.backdropDecodeWidth(context),
+                        priority: ImageFetchPriority.high,
+                        errorBuilder: (_, _, _) =>
+                            ColoredBox(color: AppColorScheme.background),
+                      ),
+                    ],
+                  ),
+                )
+              : BoundedNetworkImage(
+                  imageUrl: imageUrl,
+                  memCacheWidth: MediaBar.backdropDecodeWidth(context),
+                  priority: ImageFetchPriority.high,
+                  errorBuilder: (_, _, _) =>
+                      ColoredBox(color: AppColorScheme.background),
+                );
           final zoom = zoomDuration;
-          if (zoom == null) return image;
+          if (zoom == null || PlatformDetection.isWindows) return image;
           return _KenBurnsImage(duration: zoom, child: image);
         },
       ),

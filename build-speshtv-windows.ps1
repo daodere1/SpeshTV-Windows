@@ -1,4 +1,4 @@
-param([switch]$TestOnly, [switch]$NoAnnouncements,
+param([switch]$TestOnly,
     [string]$ToolchainRoot = (Join-Path $PSScriptRoot '.toolchains'),
     [string]$PubCache)
 $ErrorActionPreference = 'Stop'
@@ -38,8 +38,7 @@ try {
             & (Join-Path $env:VCPKG_ROOT 'vcpkg.exe') install libarchive:x64-windows --disable-metrics
             if ($LASTEXITCODE -ne 0) { throw 'Windows archive dependency build failed.' }
         }
-        $announce = if ($NoAnnouncements) { 'false' } else { 'true' }
-        & cmd /c "`"$flutter`" build windows --release --dart-define=SPESHMEDIA_CLIENT=true --dart-define=SPESHTV_ANNOUNCEMENTS=$announce --dart-define=DISTRIBUTION_CHANNEL=speshtv-windows 2>&1"
+        & cmd /c "`"$flutter`" build windows --release --dart-define=SPESHMEDIA_CLIENT=true --dart-define=SPESHTV_ANNOUNCEMENTS=true --dart-define=DISTRIBUTION_CHANNEL=speshtv-windows 2>&1"
         if ($LASTEXITCODE -ne 0) { throw 'SpeshTV Windows build failed.' }
         $release = Join-Path $root 'build/windows/x64/runner/Release'
         if (!(Test-Path (Join-Path $release 'SpeshTV.exe'))) { throw 'SpeshTV executable missing.' }
@@ -52,8 +51,7 @@ try {
             Select-Object -First 1
         if (!$crt) { throw 'Visual C++ runtime payload is missing.' }
         Copy-Item (Join-Path $crt.FullName '*.dll') $release -Force
-        $variant = if ($NoAnnouncements) { 'no-announce' } else { 'announce' }
-        $output = Join-Path $root "build/windows/SpeshTV-Windows-x64-$variant.zip"
+        $output = Join-Path $root "build/windows/SpeshTV-Windows-x64.zip"
         Compress-Archive -Path "$release/*" -DestinationPath $output -Force
         # Bundle only the public bot files. Never package a configured .env.
         Add-Type -AssemblyName System.IO.Compression.FileSystem

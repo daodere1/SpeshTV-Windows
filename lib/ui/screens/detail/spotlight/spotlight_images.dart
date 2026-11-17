@@ -13,6 +13,14 @@ String? spotlightItemImageUrl(ImageApi imageApi, AggregatedItem item) {
   final isLibraryItem =
       item.serverId != 'seerr' && !item.id.startsWith('tmdb:');
   final tag = item.primaryImageTag ?? item.primaryImageTagField;
+  // Picker IDs are stable local focus keys; artwork belongs to the real season.
+  if (isLibraryItem && item.rawData['SpeshSeasonPicker'] == true) {
+    final seasonId = item.primaryImageItemId;
+    return seasonId == null || seasonId.isEmpty
+        ? null
+        : imageApi.getPrimaryImageUrl(seasonId, maxHeight: 360, tag: tag);
+  }
+
   if (isLibraryItem && tag != null) {
     return imageApi.getPrimaryImageUrl(item.id, maxHeight: 360, tag: tag);
   }
@@ -65,7 +73,11 @@ String? spotlightLandscapeImageUrl(
 }) {
   final thumbTag = item.thumbImageTag;
   if (thumbTag != null && !item.id.startsWith('tmdb:')) {
-    return imageApi.getThumbImageUrl(item.id, maxWidth: maxWidth, tag: thumbTag);
+    return imageApi.getThumbImageUrl(
+      item.id,
+      maxWidth: maxWidth,
+      tag: thumbTag,
+    );
   }
   if (item.backdropImageTags.isNotEmpty && !item.id.startsWith('tmdb:')) {
     return imageApi.getBackdropImageUrl(
@@ -84,8 +96,9 @@ String? spotlightLandscapeImageUrl(
       tag: item.parentBackdropImageTags.first,
     );
   }
-  final seerrBackdrop =
-      spotlightSeerrBackdropUrl(item.rawData['BackdropPath'] as String?);
+  final seerrBackdrop = spotlightSeerrBackdropUrl(
+    item.rawData['BackdropPath'] as String?,
+  );
   if (seerrBackdrop != null) return seerrBackdrop;
 
   return fallbackUrl;
@@ -168,11 +181,7 @@ List<PersonBackdropCandidate> collectPersonSeerrBackdrops(
         final url = spotlightSeerrBackdropUrl(path);
         if (url != null) {
           results.add(
-            PersonBackdropCandidate(
-              key: key,
-              fullUrl: url,
-              cardUrl: url,
-            ),
+            PersonBackdropCandidate(key: key, fullUrl: url, cardUrl: url),
           );
         }
       }

@@ -24,6 +24,7 @@ import '../../widgets/media_card.dart';
 import '../../widgets/modern_row.dart';
 import '../../widgets/bottom_nav/bottom_navbar.dart';
 import '../../widgets/navigation_layout.dart';
+import '../../widgets/spesh_cinematic.dart';
 import '../../widgets/fullscreen_backdrop_switcher.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../util/error_message.dart';
@@ -47,8 +48,7 @@ class SeerrDiscoverScreen extends StatefulWidget {
   const SeerrDiscoverScreen({super.key});
 
   @override
-  State<SeerrDiscoverScreen> createState() =>
-      _SeerrDiscoverScreenState();
+  State<SeerrDiscoverScreen> createState() => _SeerrDiscoverScreenState();
 }
 
 class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
@@ -61,8 +61,10 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
   Timer? _backdropDebounce;
   String? _backdropUrl;
   final _initialFocusNode = FocusNode(debugLabel: 'seerrDiscoverInitial');
-  final _loadingHoldFocusNode =
-      FocusNode(debugLabel: 'seerrDiscoverLoadingHold', skipTraversal: true);
+  final _loadingHoldFocusNode = FocusNode(
+    debugLabel: 'seerrDiscoverLoadingHold',
+    skipTraversal: true,
+  );
   final _requestsEntryFocusNode = FocusNode(debugLabel: 'seerrRequestsEntry');
   int _badgeCount = 0;
   bool _initialFocusResolved = false;
@@ -91,7 +93,7 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
 
   void _onRowLeftEdge() {
     final prefs = GetIt.instance<UserPreferences>();
-    final navbarIsLeft = prefs.get(UserPreferences.navbarPosition) == NavbarPosition.left;
+    final navbarIsLeft = cinematicNavbarPosition(prefs) == NavbarPosition.left;
     if (!navbarIsLeft) return;
     final focusNavbar = NavigationLayout.focusNavbarNotifier.value;
     if (focusNavbar != null) {
@@ -116,7 +118,7 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
         return true;
       }
       final prefs = GetIt.instance<UserPreferences>();
-      final navbarPosition = prefs.get(UserPreferences.navbarPosition);
+      final navbarPosition = cinematicNavbarPosition(prefs);
       if (navbarPosition == NavbarPosition.top) {
         NavigationLayout.focusNavbarNotifier.value?.call();
       }
@@ -303,7 +305,9 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
         if (!mounted) return;
         final backdrop = item.backdropPath;
         setState(() {
-          _backdropUrl = backdrop != null ? '$_tmdbBackdropBase$backdrop' : null;
+          _backdropUrl = backdrop != null
+              ? '$_tmdbBackdropBase$backdrop'
+              : null;
         });
       });
     });
@@ -317,36 +321,44 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
   }
 
   @override
-  Widget build(BuildContext context) =>
-      RequestInitialFocus(
-        // On mobile the target is never attached (no row autofocuses it), so
-        // RequestInitialFocus simply finds nothing to focus and gives up.
-        targetNode: _initialFocusNode,
-        child: _buildScreenContent(context),
-      );
+  Widget build(BuildContext context) => RequestInitialFocus(
+    // On mobile the target is never attached (no row autofocuses it), so
+    // RequestInitialFocus simply finds nothing to focus and gives up.
+    targetNode: _initialFocusNode,
+    child: _buildScreenContent(context),
+  );
 
   Widget _buildScreenContent(BuildContext context) {
     final topPad = MediaQuery.of(context).padding.top;
     final prefs = GetIt.instance<UserPreferences>();
-    final navbarPosition = prefs.get(UserPreferences.navbarPosition);
+    final navbarPosition = cinematicNavbarPosition(prefs);
     final backdropEnabled = prefs.get(UserPreferences.homeBackdropEnabled);
     final navbarHeight = navbarPosition == NavbarPosition.top
-        ? (PlatformDetection.isTV ? 95.0 : PlatformDetection.useMobileUi ? 60.0 : 80.0)
+        ? (PlatformDetection.isTV
+              ? 95.0
+              : PlatformDetection.useMobileUi
+              ? 60.0
+              : 80.0)
         : 0.0;
     final navbarIsLeft = navbarPosition == NavbarPosition.left;
     final tvTopNavbarInset =
-        navbarPosition == NavbarPosition.top && PlatformDetection.isTV && !PlatformDetection.useMobileUi
+        navbarPosition == NavbarPosition.top &&
+            PlatformDetection.isTV &&
+            !PlatformDetection.useMobileUi
         ? 48.0
         : 0.0;
     final rowLeftInset =
         ((navbarIsLeft && !PlatformDetection.useMobileUi)
-            ? 56.0
+            ? (speshCinematic ? 88.0 : 56.0)
             : tvTopNavbarInset) +
         (!PlatformDetection.useMobileUi ? 16.0 : 0.0);
     final infoPanelLeft =
-        ((navbarIsLeft && !PlatformDetection.useMobileUi) ? 80.0 : 48.0) +
+        ((navbarIsLeft && !PlatformDetection.useMobileUi)
+            ? (speshCinematic ? 112.0 : 80.0)
+            : 48.0) +
         (!PlatformDetection.useMobileUi ? 16.0 : 0.0);
-    final infoTopInset = topPad + (navbarHeight > 0 ? navbarHeight - 12.0 : 28.0);
+    final infoTopInset =
+        topPad + (navbarHeight > 0 ? navbarHeight - 12.0 : 28.0);
     // On phones the navbar pill and row titles crowd the top edge, so the
     // requests entry drops below them.
     final requestsEntryTop = PlatformDetection.useMobileUi
@@ -373,7 +385,11 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
                   if (_isModern)
                     SizedBox(height: requestsEntryTop + 44.0)
                   else
-                    _InfoPanel(item: _selectedItem, topInset: infoTopInset, leftInset: infoPanelLeft),
+                    _InfoPanel(
+                      item: _selectedItem,
+                      topInset: infoTopInset,
+                      leftInset: infoPanelLeft,
+                    ),
                   Expanded(
                     child: Focus(
                       focusNode: _loadingHoldFocusNode,
@@ -417,7 +433,12 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
         children: [
           for (int i = 0; i < 4; i++) ...[
             Padding(
-              padding: EdgeInsets.fromLTRB(20 * desktopScale, 16, 20 * desktopScale, 8),
+              padding: EdgeInsets.fromLTRB(
+                20 * desktopScale,
+                16,
+                20 * desktopScale,
+                8,
+              ),
               child: SkeletonBox(
                 width: 140.0 + (i * 25),
                 height: 18,
@@ -457,10 +478,7 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: vm.refresh,
-              child: Text(l10n.retry),
-            ),
+            ElevatedButton(onPressed: vm.refresh, child: Text(l10n.retry)),
           ],
         ),
       );
@@ -623,18 +641,16 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
                   ),
                 )
               : hasItems
-                  ? child
-                  : Center(
-                      child: Text(
-                        l10n.noItems,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurface
-                                  .withAlpha(128),
-                            ),
-                      ),
+              ? child
+              : Center(
+                  child: Text(
+                    l10n.noItems,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurface
+                          .withAlpha(128),
                     ),
+                  ),
+                ),
         );
       },
     );
@@ -643,16 +659,15 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
   bool Function(ScrollNotification) _loadMoreOnScroll(
     SeerrDiscoverRow row,
     int rowIndex,
-  ) =>
-      (notification) {
-        if (notification is ScrollUpdateNotification &&
-            notification.metrics.extentAfter < 300 &&
-            row.hasMore &&
-            !row.isLoading) {
-          _viewModel?.loadMore(rowIndex);
-        }
-        return false;
-      };
+  ) => (notification) {
+    if (notification is ScrollUpdateNotification &&
+        notification.metrics.extentAfter < 300 &&
+        row.hasMore &&
+        !row.isLoading) {
+      _viewModel?.loadMore(rowIndex);
+    }
+    return false;
+  };
 
   Widget _buildMediaRow(
     SeerrDiscoverRow row,
@@ -662,10 +677,14 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
     FocusNode? firstFocusNode,
   }) {
     final suppressFocusGlow = ThemeRegistry.active.borders.focusGlow.isNotEmpty;
-    final focusColor =
-      Color(GetIt.instance<UserPreferences>().get(UserPreferences.focusColor).colorValue);
-    final cardExpansion =
-      GetIt.instance<UserPreferences>().get(UserPreferences.cardFocusExpansion);
+    final focusColor = Color(
+      GetIt.instance<UserPreferences>()
+          .get(UserPreferences.focusColor)
+          .colorValue,
+    );
+    final cardExpansion = GetIt.instance<UserPreferences>().get(
+      UserPreferences.cardFocusExpansion,
+    );
     final desktopScale = GetIt.instance<UserPreferences>()
         .get(UserPreferences.desktopUiScale)
         .scaleFactor;
@@ -698,7 +717,8 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
           5 * desktopScale,
         ),
         onLeftEdge: _onRowLeftEdge,
-        onVerticalNavigation: (isUp) => _onRowVerticalNavigation(rowIndex, isUp),
+        onVerticalNavigation: (isUp) =>
+            _onRowVerticalNavigation(rowIndex, isUp),
         onTap: (index, item) => _onItemTap(item),
         onIndexChanged: (index, item) {
           _onItemSelected(item);
@@ -744,13 +764,21 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
     );
   }
 
-  ({double imageHeight, double portraitWidth, double focusedWidth, double desktopScale})
-      _modernSizes() {
+  ({
+    double imageHeight,
+    double portraitWidth,
+    double focusedWidth,
+    double desktopScale,
+  })
+  _modernSizes() {
     final desktopScale = _prefs.get(UserPreferences.desktopUiScale).scaleFactor;
-    final platformScale =
-        PlatformDetection.isTV ? 0.8 * desktopScale : desktopScale;
-    final imageHeight =
-        modernImageHeight(_prefs.get(UserPreferences.posterSize), platformScale);
+    final platformScale = PlatformDetection.isTV
+        ? 0.8 * desktopScale
+        : desktopScale;
+    final imageHeight = modernImageHeight(
+      _prefs.get(UserPreferences.posterSize),
+      platformScale,
+    );
     return (
       imageHeight: imageHeight,
       portraitWidth: imageHeight * 2 / 3,
@@ -811,18 +839,22 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
     final itemSpacing = cardExpansion && !PlatformDetection.useMobileUi
         ? MediaCard.focusGap(sizes.portraitWidth, minimum: 12.0 * desktopScale)
         : 12.0 * desktopScale;
-    final maxDetailsWidth = (MediaQuery.sizeOf(context).width -
-            rowLeftInset -
-            MediaQuery.paddingOf(context).right -
-            2 * sideInset)
-        .clamp(sizes.portraitWidth, double.infinity)
-        .toDouble();
+    final maxDetailsWidth =
+        (MediaQuery.sizeOf(context).width -
+                rowLeftInset -
+                MediaQuery.paddingOf(context).right -
+                2 * sideInset)
+            .clamp(sizes.portraitWidth, double.infinity)
+            .toDouble();
     // A phone caps a grown card at the row width.
     final focusedWidth = PlatformDetection.useMobileUi
-        ? sizes.focusedWidth.clamp(sizes.portraitWidth, maxDetailsWidth).toDouble()
+        ? sizes.focusedWidth
+              .clamp(sizes.portraitWidth, maxDetailsWidth)
+              .toDouble()
         : sizes.focusedWidth;
     final rowPadding = 5.0 * desktopScale;
-    final rowHeight = sizes.imageHeight +
+    final rowHeight =
+        sizes.imageHeight +
         modernMetadataBudget(_prefs, UserPreferences.detailsRatings) *
             desktopScale +
         2 * rowPadding;
@@ -840,9 +872,15 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
         leadingPadding: sideInset,
         height: rowHeight,
         clipBehavior: Clip.none,
-        padding: EdgeInsets.fromLTRB(sideInset, rowPadding, sideInset, rowPadding),
+        padding: EdgeInsets.fromLTRB(
+          sideInset,
+          rowPadding,
+          sideInset,
+          rowPadding,
+        ),
         onLeftEdge: _onRowLeftEdge,
-        onVerticalNavigation: (isUp) => _onRowVerticalNavigation(rowIndex, isUp),
+        onVerticalNavigation: (isUp) =>
+            _onRowVerticalNavigation(rowIndex, isUp),
         onTap: (index, item) => _onItemTap(item),
         onIndexChanged: (index, item) {
           _onItemSelected(item);
@@ -865,7 +903,8 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
         focusNode: autofocusFirst ? firstFocusNode : null,
         itemBuilder: (context, item, index, isFocused) {
           final key = _modernKey(item);
-          final isTouch = PlatformDetection.useMobileUi &&
+          final isTouch =
+              PlatformDetection.useMobileUi &&
               InputModeTracker.of(context) == InputMode.pointer;
           return SelectorBuilder<bool>(
             listenable: _modernExpansion.listenable,
@@ -880,7 +919,9 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
               final card = MediaCard(
                 title: item.displayTitle,
                 subtitle: _yearFromItem(item),
-                imageUrl: expanded ? _modernFocusedImageUrl(item) : _posterUrl(item),
+                imageUrl: expanded
+                    ? _modernFocusedImageUrl(item)
+                    : _posterUrl(item),
                 width: width,
                 aspectRatio: expanded ? 16 / 9 : 2 / 3,
                 seerrMediaType: item.mediaType,
@@ -922,31 +963,35 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
                         cardKey: key,
                         controller: scrollController,
                         builder: (context, hovered) =>
-                            ValueListenableBuilder<Map<String, Map<String, double>>>(
-                          valueListenable: _modernRatings,
-                          builder: (context, ratings, _) => ModernCardDetails(
-                            prefs: _prefs,
-                            ratingSettings: UserPreferences.detailsRatings,
-                            cardWidth: width,
-                            detailsWidth: modernDetailsWidth(
-                              controller: scrollController,
-                              index: index,
-                              itemCount: row.items.length,
-                              itemExtent: sizes.portraitWidth,
-                              itemSpacing: itemSpacing,
-                              focusedWidth: width,
-                              maxWidth: maxDetailsWidth,
-                              leadingInset: sideInset,
-                              trailingInset: sideInset,
-                              hovered: hovered,
+                            ValueListenableBuilder<
+                              Map<String, Map<String, double>>
+                            >(
+                              valueListenable: _modernRatings,
+                              builder: (context, ratings, _) =>
+                                  ModernCardDetails(
+                                    prefs: _prefs,
+                                    ratingSettings:
+                                        UserPreferences.detailsRatings,
+                                    cardWidth: width,
+                                    detailsWidth: modernDetailsWidth(
+                                      controller: scrollController,
+                                      index: index,
+                                      itemCount: row.items.length,
+                                      itemExtent: sizes.portraitWidth,
+                                      itemSpacing: itemSpacing,
+                                      focusedWidth: width,
+                                      maxWidth: maxDetailsWidth,
+                                      leadingInset: sideInset,
+                                      trailingInset: sideInset,
+                                      hovered: hovered,
+                                    ),
+                                    overview: item.overview,
+                                    communityRating: (item.voteAverage ?? 0) > 0
+                                        ? item.voteAverage
+                                        : null,
+                                    additionalRatings: ratings[key] ?? const {},
+                                  ),
                             ),
-                            overview: item.overview,
-                            communityRating: (item.voteAverage ?? 0) > 0
-                                ? item.voteAverage
-                                : null,
-                            additionalRatings: ratings[key] ?? const {},
-                          ),
-                        ),
                       )
                     : null,
               );
@@ -1042,7 +1087,8 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
     String mediaType,
   ) => [
     for (final item in items)
-      if (item.mediaType == mediaType && (item.backdropPath?.isNotEmpty ?? false))
+      if (item.mediaType == mediaType &&
+          (item.backdropPath?.isNotEmpty ?? false))
         item.backdropPath!,
   ];
 
@@ -1309,6 +1355,7 @@ class _SeerrDiscoverScreenState extends State<SeerrDiscoverScreen> {
     return date.substring(0, 4);
   }
 }
+
 class _Backdrop extends StatelessWidget {
   final String? url;
   const _Backdrop({this.url});
@@ -1361,13 +1408,11 @@ class _InfoPanel extends StatelessWidget {
     final shadows = [
       Shadow(
         blurRadius: 4,
-        color: isNeon ? Colors.black : AppColorScheme.scrim.withValues(alpha: 0.54),
+        color: isNeon
+            ? Colors.black
+            : AppColorScheme.scrim.withValues(alpha: 0.54),
       ),
-      if (isNeon)
-        const Shadow(
-          blurRadius: 10,
-          color: Colors.black,
-        ),
+      if (isNeon) const Shadow(blurRadius: 10, color: Colors.black),
     ];
     final year = _SeerrDiscoverScreenState._yearFromItem(item!);
     final rating = item!.voteAverage;
@@ -1409,18 +1454,23 @@ class _InfoPanel extends StatelessWidget {
               Row(
                 children: [
                   if (year != null)
-                    Text(year,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: secondaryColor,
-                          shadows: shadows,
-                        )),
-                  if (year != null && rating != null)
-                    const SizedBox(width: 12),
+                    Text(
+                      year,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: secondaryColor,
+                        shadows: shadows,
+                      ),
+                    ),
+                  if (year != null && rating != null) const SizedBox(width: 12),
                   if (rating != null)
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.star, size: 16, color: AppColors.orange500),
+                        const Icon(
+                          Icons.star,
+                          size: 16,
+                          color: AppColors.orange500,
+                        ),
                         const SizedBox(width: 4),
                         Text(
                           rating.toStringAsFixed(1),
@@ -1432,16 +1482,19 @@ class _InfoPanel extends StatelessWidget {
                       ],
                     ),
                   const SizedBox(width: 12),
-                  Text(mediaType,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: tertiaryColor,
-                        shadows: shadows,
-                      )),
+                  Text(
+                    mediaType,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: tertiaryColor,
+                      shadows: shadows,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 4),
               SizedBox(
-                height: (theme.textTheme.bodySmall?.fontSize ?? 12) * 1.4 * 3 + 8.0,
+                height:
+                    (theme.textTheme.bodySmall?.fontSize ?? 12) * 1.4 * 3 + 8.0,
                 child: item!.overview != null && item!.overview!.isNotEmpty
                     ? Text(
                         item!.overview!,
@@ -1483,11 +1536,13 @@ class _GenreCard extends StatefulWidget {
 }
 
 class _GenreCardState extends State<_GenreCard> with FocusStateMixin {
-
   @override
   Widget build(BuildContext context) {
-    final focusColor =
-        Color(GetIt.instance<UserPreferences>().get(UserPreferences.focusColor).colorValue);
+    final focusColor = Color(
+      GetIt.instance<UserPreferences>()
+          .get(UserPreferences.focusColor)
+          .colorValue,
+    );
     final externallyDriven = widget.externalIsFocused != null;
     // The row drives focus and knows nothing about the mouse, so hovering has
     // to count too. Same rule as MediaCard.
@@ -1516,9 +1571,8 @@ class _GenreCardState extends State<_GenreCard> with FocusStateMixin {
                     OfflineAwareImage(
                       imageUrl: widget.imageUrl!,
                       fit: BoxFit.cover,
-                      errorWidget: (_, _, _) => Container(
-                        color: AppColorScheme.surfaceVariant,
-                      ),
+                      errorWidget: (_, _, _) =>
+                          Container(color: AppColorScheme.surfaceVariant),
                     )
                   else
                     Container(color: AppColorScheme.surfaceVariant),
@@ -1636,11 +1690,13 @@ class _LogoCard extends StatefulWidget {
 }
 
 class _LogoCardState extends State<_LogoCard> with FocusStateMixin {
-
   @override
   Widget build(BuildContext context) {
-    final focusColor =
-        Color(GetIt.instance<UserPreferences>().get(UserPreferences.focusColor).colorValue);
+    final focusColor = Color(
+      GetIt.instance<UserPreferences>()
+          .get(UserPreferences.focusColor)
+          .colorValue,
+    );
     final externallyDriven = widget.externalIsFocused != null;
     // The row drives focus and knows nothing about the mouse, so hovering has
     // to count too. Same rule as MediaCard.
@@ -1683,7 +1739,9 @@ class _LogoCardState extends State<_LogoCard> with FocusStateMixin {
                           child: Text(
                             widget.name,
                             style: TextStyle(
-                              color: AppColorScheme.onSurface.withValues(alpha: 0.7),
+                              color: AppColorScheme.onSurface.withValues(
+                                alpha: 0.7,
+                              ),
                               fontSize: 13,
                             ),
                             textAlign: TextAlign.center,
@@ -1695,7 +1753,9 @@ class _LogoCardState extends State<_LogoCard> with FocusStateMixin {
                       child: Text(
                         widget.name,
                         style: TextStyle(
-                          color: AppColorScheme.onSurface.withValues(alpha: 0.7),
+                          color: AppColorScheme.onSurface.withValues(
+                            alpha: 0.7,
+                          ),
                           fontSize: 13,
                         ),
                         textAlign: TextAlign.center,
