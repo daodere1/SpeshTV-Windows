@@ -51,8 +51,8 @@ void main() {
     'bundled notes match this build and absent notes have safe fallback',
     () async {
       TestWidgetsFlutterBinding.ensureInitialized();
-      final notes = await SpeshReleaseNotes.load(version: '2.8.0+30000209');
-      expect(notes, contains('2.8.0+30000209'));
+      final notes = await SpeshReleaseNotes.load(version: '3.0.0+30000210');
+      expect(notes, contains('SpeshTV Windows 3.0.0'));
       expect(notes, contains('full artwork inside its frame'));
       final missing = await SpeshReleaseNotes.load(
         version: '0.0.0+0',
