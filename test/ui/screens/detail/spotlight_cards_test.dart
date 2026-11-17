@@ -344,9 +344,8 @@ void main() {
     expect(cards.single.title, 'More Episodes');
     expect(cards.single.effectiveModalTitle, 'More Episodes');
     expect(cards.single.subtitle, '3 episodes');
-    expect(cards.single.sections.single.title, 'Season 1');
-    expect(cards.single.sections.single.collapsible, isTrue);
-    expect(cards.single.sections.single.initiallyExpanded, isTrue);
+    expect(cards.single.sections.single.title, _l10n.seasons);
+    expect(cards.single.sections.single.fillsViewport, isTrue);
   });
 
   test('an episode groups multiple seasons with only current season expanded', () {
@@ -379,13 +378,9 @@ void main() {
     expect(cards.single.id, 'episodes');
     expect(cards.single.title, 'More Episodes');
     expect(cards.single.subtitle, '2 seasons · 2 episodes');
-    expect(cards.single.sections.length, 2);
-    expect(cards.single.sections[0].title, 'Season 1');
-    expect(cards.single.sections[0].collapsible, isTrue);
-    expect(cards.single.sections[0].initiallyExpanded, isFalse);
-    expect(cards.single.sections[1].title, 'Season 2');
-    expect(cards.single.sections[1].collapsible, isTrue);
-    expect(cards.single.sections[1].initiallyExpanded, isTrue);
+    expect(cards.single.sections.length, 1);
+    expect(cards.single.sections.single.title, _l10n.seasons);
+    expect(cards.single.sections.single.fillsViewport, isTrue);
   });
 
   test('an episode in seriesEpisodes with null season groups under Specials', () {
@@ -414,9 +409,9 @@ void main() {
     ]);
     final cards = cardsFor(_item('Episode', {'ParentIndexNumber': 1}));
 
-    expect(cards.single.sections.length, 2);
-    expect(cards.single.sections[0].title, 'Specials');
-    expect(cards.single.sections[1].title, 'Season 1');
+    expect(cards.single.sections.length, 1);
+    expect(cards.single.sections.single.title, _l10n.seasons);
+    expect(cards.single.sections.single.fillsViewport, isTrue);
   });
 
   test('a music album gets the track list card', () {

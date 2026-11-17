@@ -104,7 +104,9 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
   final _scrollController = ScrollController();
   final _cardsScrollController = ScrollController();
   final _overviewFocusNode = FocusNode(debugLabel: 'SpotlightOverview');
-  final _collectionSortFocusNode = FocusNode(debugLabel: 'SpotlightCollectionSort');
+  final _collectionSortFocusNode = FocusNode(
+    debugLabel: 'SpotlightCollectionSort',
+  );
   final _cardFocusNodes = <String, FocusNode>{};
   final _trackFocusNodes = <String, FocusNode>{};
 
@@ -154,8 +156,9 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
     }
 
     final localCandidates = collectPersonLocalBackdrops(_vm);
-    final appearancesCandidates =
-        collectPersonSeerrBackdrops(_seerrAppearances);
+    final appearancesCandidates = collectPersonSeerrBackdrops(
+      _seerrAppearances,
+    );
     final crewCandidates = collectPersonSeerrBackdrops(_seerrCrewCredits);
     final allCandidates = [
       ...localCandidates,
@@ -168,7 +171,9 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
     final rng = math.Random();
     final String? mainUrl;
     final String? mainKey;
-    if (!isNewPerson && _personBackdropUrl != null && _personBackdropKey != null) {
+    if (!isNewPerson &&
+        _personBackdropUrl != null &&
+        _personBackdropKey != null) {
       mainUrl = _personBackdropUrl;
       mainKey = _personBackdropKey;
     } else {
@@ -364,35 +369,36 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
           return;
         }
         _closeModalThen(() {
-        if (item.type == 'Episode' && entry.id == item.id) {
-          playItemOnScreen(context);
-        } else if (entry.serverId == 'seerr') {
-          final mediaType = entry.seerrMediaType ??
-              (entry.type == 'Series' || entry.type == 'tv' ? 'tv' : 'movie');
-          final tmdbId = entry.tmdbId;
-          final targetId = (tmdbId != null && tmdbId.isNotEmpty)
-              ? tmdbId
-              : entry.id.replaceAll(RegExp(r'^tmdb:(?:movie:|tv:)?'), '');
-          context.push(
-            Destinations.seerrMedia(
-              targetId,
-              mediaType: mediaType,
-              title: entry.name,
-            ),
-          );
-        } else {
-          final location = Destinations.itemOrPhoto(
-            entry.id,
-            serverId: entry.serverId,
-            type: entry.type,
-            channelId: entry.channelId,
-          );
-          // One episode to the next takes this page's place, so Back leaves
-          // the run of episodes in one press.
-          item.type == 'Episode' && entry.type == 'Episode'
-              ? context.pushReplacement(location)
-              : context.push(location);
-        }
+          if (item.type == 'Episode' && entry.id == item.id) {
+            playItemOnScreen(context);
+          } else if (entry.serverId == 'seerr') {
+            final mediaType =
+                entry.seerrMediaType ??
+                (entry.type == 'Series' || entry.type == 'tv' ? 'tv' : 'movie');
+            final tmdbId = entry.tmdbId;
+            final targetId = (tmdbId != null && tmdbId.isNotEmpty)
+                ? tmdbId
+                : entry.id.replaceAll(RegExp(r'^tmdb:(?:movie:|tv:)?'), '');
+            context.push(
+              Destinations.seerrMedia(
+                targetId,
+                mediaType: mediaType,
+                title: entry.name,
+              ),
+            );
+          } else {
+            final location = Destinations.itemOrPhoto(
+              entry.id,
+              serverId: entry.serverId,
+              type: entry.type,
+              channelId: entry.channelId,
+            );
+            // One episode to the next takes this page's place, so Back leaves
+            // the run of episodes in one press.
+            item.type == 'Episode' && entry.type == 'Episode'
+                ? context.pushReplacement(location)
+                : context.push(location);
+          }
         });
       },
       openPerson: (personId) => _closeModalThen(() {
@@ -430,7 +436,8 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
       playFromChapter: (position) =>
           _closeModalThen(() => widget.onPlayFromChapter?.call(position)),
       playExtra: (extra) => _closeModalThen(() => _playItems([extra], 0)),
-      playTrack: (index) => _closeModalThen(() => _playItems(_vm.tracks, index)),
+      playTrack: (index) =>
+          _closeModalThen(() => _playItems(_vm.tracks, index)),
       playPlaylistTrack: (index) =>
           _closeModalThen(() => _playItems(_vm.playlistItems, index)),
       trackFocusNode: (id) =>
@@ -475,61 +482,82 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
       PlatformDetection.isTV ||
       FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
 
+  bool _seasonModalOpen = false;
   Future<void> _openSeasonEpisodes(AggregatedItem season) async {
-    var episodes = _vm.browseSeasonEpisodes(season);
-    final action = await SpotlightSectionModal.show<VoidCallback>(
-      context,
-      title: '${_vm.item?.name ?? ''} · ${season.name}',
-      icon: Icons.video_library_outlined,
-      showBack: true,
-      sections: [
-        SpotlightModalSection(
-          title: AppLocalizations.of(context).episodes,
-          builder: (modalContext, firstFocusNode) => StatefulBuilder(
-            builder: (modalContext, update) => FutureBuilder<List<AggregatedItem>>(
-              future: episodes,
-              builder: (modalContext, snapshot) {
-                if (snapshot.hasError) {
-                  return TextButton.icon(
-                    onPressed: () => update(() {
-                      episodes = _vm.browseSeasonEpisodes(season);
-                    }),
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Could not load episodes. Retry'),
-                  );
-                }
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.data!.isEmpty) {
-                  return const Text('No episodes available.');
-                }
-                return SpotlightMediaGridSection(
-                  items: snapshot.data!,
-                  imageApi: _vm.imageApi,
-                  prefs: widget.prefs,
-                  aspectRatio: 16 / 9,
-                  landscapeCells: true,
-                  firstFocusNode: firstFocusNode,
-                  currentItemId: _vm.item?.type == 'Episode'
-                      ? _vm.item?.id : _vm.nextUp?.id,
-                  onItemChanged: () {
-                    if (!modalContext.mounted) return;
-                    update(() { episodes = _vm.browseSeasonEpisodes(season); });
-                  },
-                  onItemTap: (episode) {
-                    Navigator.of(modalContext, rootNavigator: true).pop<VoidCallback>(
-                      () => _cardActions(_vm.item!).openItem(episode),
-                    );
-                  },
-                );
-              },
+    if (_seasonModalOpen) return;
+    _seasonModalOpen = true;
+    try {
+      var episodes = _vm.browseSeasonEpisodes(season);
+      final action = await SpotlightSectionModal.show<VoidCallback>(
+        context,
+        title: '${_vm.item?.name ?? ''} · ${season.name}',
+        icon: Icons.video_library_outlined,
+        showBack: true,
+        sections: [
+          SpotlightModalSection(
+            title: AppLocalizations.of(context).episodes,
+            fillsViewport: true,
+            builder: (modalContext, firstFocusNode) => StatefulBuilder(
+              builder: (modalContext, update) =>
+                  FutureBuilder<List<AggregatedItem>>(
+                    future: episodes,
+                    builder: (modalContext, snapshot) {
+                      if (snapshot.hasError) {
+                        return TextButton.icon(
+                          onPressed: () => update(() {
+                            episodes = _vm.browseSeasonEpisodes(season);
+                          }),
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Could not load episodes. Retry'),
+                        );
+                      }
+                      if (!snapshot.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (snapshot.data!.isEmpty) {
+                        return const Text('No episodes available.');
+                      }
+                      return SpotlightMediaGridSection(
+                        items: snapshot.data!,
+                        bounded: true,
+                        requestInitialFocus: true,
+                        key: ValueKey('${season.serverId}|${season.id}'),
+                        imageApi: _vm.imageApi,
+                        prefs: widget.prefs,
+                        aspectRatio: 16 / 9,
+                        landscapeCells: true,
+                        firstFocusNode: firstFocusNode,
+                        currentItemId: _vm.item?.type == 'Episode'
+                            ? _vm.item?.id
+                            : _vm.nextUp?.id,
+                        onItemChanged: () {
+                          if (!modalContext.mounted) return;
+                          update(() {
+                            episodes = _vm.browseSeasonEpisodes(
+                              season,
+                              forceRefresh: true,
+                            );
+                          });
+                        },
+                        onItemTap: (episode) {
+                          Navigator.of(
+                            modalContext,
+                            rootNavigator: true,
+                          ).pop<VoidCallback>(
+                            () => _cardActions(_vm.item!).openItem(episode),
+                          );
+                        },
+                      );
+                    },
+                  ),
             ),
           ),
-        ),
-      ],
-    );
-    if (mounted && action != null) action();
+        ],
+      );
+      if (mounted && action != null) action();
+    } finally {
+      _seasonModalOpen = false;
+    }
   }
 
   Future<void> _openCard(SpotlightCardSpec spec) async {
@@ -638,7 +666,9 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
             child: OfflineAwareImage(
               imageUrl: url,
               fit: BoxFit.cover,
-              alignment: landscape ? Alignment.centerRight : Alignment.topCenter,
+              alignment: landscape
+                  ? Alignment.centerRight
+                  : Alignment.topCenter,
               fadeInDuration: Duration.zero,
               sourceAspectRatio: 16 / 9,
               maxDecodeWidth: ArtworkDecode.maxSourceWidth,
@@ -833,27 +863,27 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
                         ],
                       )
                     : (item.seriesName != null
-                        ? Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  item.seriesName!,
-                                  style: textTheme.labelLarge?.copyWith(
-                                    color: AppColorScheme.onSurface
-                                        .withValues(alpha: 0.7),
-                                    letterSpacing: 1.2,
+                          ? Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    item.seriesName!,
+                                    style: textTheme.labelLarge?.copyWith(
+                                      color: AppColorScheme.onSurface
+                                          .withValues(alpha: 0.7),
+                                      letterSpacing: 1.2,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              if (hasMultipleVersions) ...[
-                                const SizedBox(width: 16),
-                                Flexible(child: versionBadge()),
+                                if (hasMultipleVersions) ...[
+                                  const SizedBox(width: 16),
+                                  Flexible(child: versionBadge()),
+                                ],
                               ],
-                            ],
-                          )
-                        : const SizedBox.shrink()),
+                            )
+                          : const SizedBox.shrink()),
               ),
             ),
           ),
@@ -961,7 +991,9 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
             if (s != null && e != null) addText('S$s:E$e');
           }
           final runtime = item.runtime;
-          if (runtime != null && runtime > Duration.zero && item.type != 'Series') {
+          if (runtime != null &&
+              runtime > Duration.zero &&
+              item.type != 'Series') {
             pieces.add(
               Row(
                 mainAxisSize: MainAxisSize.min,
@@ -981,7 +1013,9 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
-                  color: isEnded ? const Color(0xFFB71C1C) : const Color(0xFF2E7D32),
+                  color: isEnded
+                      ? const Color(0xFFB71C1C)
+                      : const Color(0xFF2E7D32),
                   borderRadius: JellyfinTokens.shapes.smallRadius,
                 ),
                 child: Text(
@@ -1010,7 +1044,9 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
         case DetailMetadataItem.seerrAvailability:
           final seerrStatus = seerrItemStatus(_vm);
           if (seerrStatus != null) {
-            pieces.add(SeerrStatusPills(state: seerrStatus, onlyNoteworthy: true));
+            pieces.add(
+              SeerrStatusPills(state: seerrStatus, onlyNoteworthy: true),
+            );
           }
       }
     }
@@ -1089,9 +1125,7 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
 
   Widget _buildOverview(BuildContext context, String overview) {
     return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxWidth: _landscape ? 800 : double.infinity,
-      ),
+      constraints: BoxConstraints(maxWidth: _landscape ? 800 : double.infinity),
       child: ExpandableBiography(
         text: overview,
         toggleFocusNode: _overviewFocusNode,
@@ -1182,7 +1216,8 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
       widget.selectedMediaSourceId,
     );
     final showTech =
-        !isPerson && widget.prefs.get(UserPreferences.detailShowTechnicalDetails);
+        !isPerson &&
+        widget.prefs.get(UserPreferences.detailShowTechnicalDetails);
     final techRow = showTech
         ? _buildTechnicalDetailsRow(context, item, selectedSource)
         : null;
@@ -1417,11 +1452,7 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
     } else if (cards.length == 1) {
       band = Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: SizedBox(
-          width: cardWidth,
-          height: cardHeight,
-          child: cardAt(0),
-        ),
+        child: SizedBox(width: cardWidth, height: cardHeight, child: cardAt(0)),
       );
     } else {
       // A portrait phone would squeeze five cards into ~60px each, so the
@@ -1446,15 +1477,16 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
             padding: const EdgeInsets.symmetric(horizontal: 20),
             itemCount: cards.length,
             separatorBuilder: (_, _) => const SizedBox(width: 12),
-            itemBuilder: (_, i) =>
-                SizedBox(width: cardWidth, child: cardAt(i)),
+            itemBuilder: (_, i) => SizedBox(width: cardWidth, child: cardAt(i)),
           ),
         ),
       );
     }
 
     final showDesktopControls =
-        PlatformDetection.useDesktopUi && !PlatformDetection.isTV && cards.length > 1;
+        PlatformDetection.useDesktopUi &&
+        !PlatformDetection.isTV &&
+        cards.length > 1;
 
     final Widget content;
     if (showDesktopControls) {
@@ -1465,10 +1497,7 @@ class _SpotlightDetailContentState extends State<SpotlightDetailContent> {
           Align(
             alignment: Alignment.centerRight,
             child: Padding(
-              padding: EdgeInsets.only(
-                right: _landscape ? 0 : 20,
-                bottom: 4,
-              ),
+              padding: EdgeInsets.only(right: _landscape ? 0 : 20, bottom: 4),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [

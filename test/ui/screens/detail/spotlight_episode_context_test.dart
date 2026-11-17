@@ -78,9 +78,11 @@ void main() {
                       title: 'More Episodes',
                       sections: [
                         SpotlightModalSection(
+                          fillsViewport: true,
                           builder: (context, focus) =>
                               SpotlightMediaGridSection(
                                 items: const [episode],
+                                bounded: true,
                                 imageApi: _Images(),
                                 prefs: prefs,
                                 onItemTap: (_) {

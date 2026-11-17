@@ -37,6 +37,12 @@ class _AboutCategoryScreen extends StatelessWidget {
                 trailing: const SizedBox.shrink(),
                 onTap: () {},
               ),
+              _TvSettingsListTile(
+                leading: const Icon(Icons.new_releases_outlined),
+                title: const Text('What’s New'),
+                subtitle: const Text('Changes in this SpeshTV build'),
+                onTap: () => context.pushSettingsScreen(const SpeshWhatsNewScreen()),
+              ),
               if (AppDistribution.supportsInAppUpdates)
                 const _CheckForUpdatesTile(),
               _TvSettingsListTile(

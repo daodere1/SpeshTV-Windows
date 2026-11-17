@@ -23,6 +23,7 @@ class SpotlightModalSection {
   /// False for content with nothing in it the remote can land on, like the
   /// Seerr stats. The opening focus skips it for the next section down.
   final bool focusable;
+  final bool fillsViewport;
   final Widget Function(BuildContext context)? headerActionBuilder;
   final Widget Function(BuildContext context, FocusNode? firstFocusNode)
   builder;
@@ -35,6 +36,7 @@ class SpotlightModalSection {
     this.collapsible = false,
     this.initiallyExpanded = true,
     this.focusable = true,
+    this.fillsViewport = false,
     this.headerActionBuilder,
   });
 }
@@ -81,9 +83,10 @@ abstract final class SpotlightSectionModal {
         showBack: showBack,
       ),
       transitionBuilder: (context, anim, secondAnim, child) {
-        final scale = Tween<double>(begin: 0.96, end: 1.0).animate(
-          CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
-        );
+        final scale = Tween<double>(
+          begin: 0.96,
+          end: 1.0,
+        ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic));
         return FadeTransition(
           opacity: anim,
           child: ScaleTransition(scale: scale, child: child),
@@ -131,6 +134,7 @@ class _SpotlightModalShellState extends State<_SpotlightModalShell> {
   final _firstCellFocusNode = FocusNode(debugLabel: 'SpotlightModalFirstCell');
   final _scrollController = ScrollController();
   bool _dismissed = false;
+  final _backController = SpotlightModalBackController();
 
   late String _title = widget.title;
   late IconData? _icon = widget.icon;
@@ -175,7 +179,8 @@ class _SpotlightModalShellState extends State<_SpotlightModalShell> {
     final onNearEnd = widget.onNearEnd;
     if (onNearEnd == null || !_scrollController.hasClients) return;
     final position = _scrollController.position;
-    if (position.pixels >= position.maxScrollExtent - position.viewportDimension) {
+    if (position.pixels >=
+        position.maxScrollExtent - position.viewportDimension) {
       onNearEnd();
     }
   }
@@ -213,7 +218,8 @@ class _SpotlightModalShellState extends State<_SpotlightModalShell> {
   /// Closes the modal exactly once. [fromKeyEvent] marks the dismissal for
   /// [DialogBackSuppressor] so Android's follow-up popRoute is swallowed
   /// instead of popping the detail screen underneath.
-  void _dismiss({required bool fromKeyEvent}) {
+  void _dismiss({required bool fromKeyEvent, bool forceClose = false}) {
+    if (!forceClose && _backController.handleBack()) return;
     if (_dismissed || !mounted) return;
     _dismissed = true;
     if (fromKeyEvent) {
@@ -317,7 +323,8 @@ class _SpotlightModalShellState extends State<_SpotlightModalShell> {
           for (var i = 0; i < _sections.length; i++) ...[
             if (i > 0)
               SizedBox(
-                height: _sections[i - 1].collapsible &&
+                height:
+                    _sections[i - 1].collapsible &&
                         !_isSectionExpanded(_sections[i - 1], i - 1)
                     ? 8
                     : 24,
@@ -379,18 +386,22 @@ class _SpotlightModalShellState extends State<_SpotlightModalShell> {
               ),
               if (!PlatformDetection.isTV)
                 IconButton(
-                  tooltip: MaterialLocalizations.of(
-                    context,
-                  ).closeButtonTooltip,
+                  tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
                   icon: const AdaptiveIcon(Icons.close),
-                  onPressed: () => _dismiss(fromKeyEvent: false),
+                  onPressed: () =>
+                      _dismiss(fromKeyEvent: false, forceClose: true),
                 ),
             ],
           ),
         ),
         Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
         Expanded(
-          child: showScrollbar
+          child: _sections.length == 1 && _sections.single.fillsViewport
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: _sections.single.builder(context, _firstCellFocusNode),
+                )
+              : showScrollbar
               ? Scrollbar(controller: _scrollController, child: scrollView)
               : scrollView,
         ),
@@ -398,10 +409,7 @@ class _SpotlightModalShellState extends State<_SpotlightModalShell> {
     );
 
     final radius = AppRadius.circular(compact ? 0 : 20);
-    final clippedBody = ClipRRect(
-      borderRadius: radius,
-      child: body,
-    );
+    final clippedBody = ClipRRect(borderRadius: radius, child: body);
 
     final borderDecoration = compact
         ? null
@@ -443,28 +451,51 @@ class _SpotlightModalShellState extends State<_SpotlightModalShell> {
             ),
           );
 
-    return FocusScope(
-      node: _trapScope,
-      child: Focus(
-        canRequestFocus: false,
-        skipTraversal: true,
-        onKeyEvent: (node, event) {
-          if (!event.isActionable) return KeyEventResult.ignored;
-          if (event.logicalKey.isBackKey) {
-            _dismiss(fromKeyEvent: true);
-            return KeyEventResult.handled;
-          }
-          return KeyEventResult.ignored;
-        },
-        child: PopScope(
-          canPop: false,
-          onPopInvokedWithResult: (didPop, _) {
-            if (didPop) return;
-            _dismiss(fromKeyEvent: false);
+    return SpotlightModalBackScope(
+      controller: _backController,
+      child: FocusScope(
+        node: _trapScope,
+        child: Focus(
+          canRequestFocus: false,
+          skipTraversal: true,
+          onKeyEvent: (node, event) {
+            if (!event.isActionable) return KeyEventResult.ignored;
+            if (event.logicalKey.isBackKey) {
+              _dismiss(fromKeyEvent: true);
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
           },
-          child: Material(type: MaterialType.transparency, child: panel),
+          child: PopScope(
+            canPop: false,
+            onPopInvokedWithResult: (didPop, _) {
+              if (didPop) return;
+              _dismiss(fromKeyEvent: false);
+            },
+            child: Material(type: MaterialType.transparency, child: panel),
+          ),
         ),
       ),
     );
   }
+}
+
+class SpotlightModalBackController {
+  bool Function()? handler;
+  bool handleBack() => handler?.call() ?? false;
+}
+
+class SpotlightModalBackScope extends InheritedWidget {
+  const SpotlightModalBackScope({
+    super.key,
+    required this.controller,
+    required super.child,
+  });
+  final SpotlightModalBackController controller;
+  static SpotlightModalBackController? maybeOf(BuildContext context) => context
+      .dependOnInheritedWidgetOfExactType<SpotlightModalBackScope>()
+      ?.controller;
+  @override
+  bool updateShouldNotify(SpotlightModalBackScope oldWidget) =>
+      oldWidget.controller != controller;
 }

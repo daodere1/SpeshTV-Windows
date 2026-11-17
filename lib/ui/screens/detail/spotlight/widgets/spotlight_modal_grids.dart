@@ -137,6 +137,9 @@ class SpotlightMediaGridSection extends StatefulWidget {
   final VoidCallback? onItemChanged;
   final Map<int, int>? seerrSeasonStatus;
   final String? currentItemId;
+  final bool bounded;
+  final bool requestInitialFocus;
+  final Map<String, FocusNode>? itemFocusNodes;
 
   const SpotlightMediaGridSection({
     super.key,
@@ -150,6 +153,9 @@ class SpotlightMediaGridSection extends StatefulWidget {
     this.firstFocusNode,
     this.seerrSeasonStatus,
     this.currentItemId,
+    this.bounded = false,
+    this.requestInitialFocus = false,
+    this.itemFocusNodes,
   });
 
   @override
@@ -160,6 +166,14 @@ class SpotlightMediaGridSection extends StatefulWidget {
 class _SpotlightMediaGridSectionState extends State<SpotlightMediaGridSection> {
   String? _initialId;
   bool _pickedInitial = false;
+  bool _scrollSeeded = false;
+  final _gridScroll = ScrollController();
+  @override
+  void dispose() {
+    _gridScroll.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final items = widget.items;
@@ -205,6 +219,182 @@ class _SpotlightMediaGridSectionState extends State<SpotlightMediaGridSection> {
           maxCellWidth: 300,
         );
         final cellKeys = spotlightCellKeys(items.map((i) => i.id));
+        Widget buildCell(BuildContext cellContext, int i) {
+          final entry = items[i];
+          // A title the library lacks, standing in from Seerr. It
+          // has no play state, so the watched slot goes to
+          // MediaCard's own request-status dot and the Seerr mark
+          // takes the corner a favourite would otherwise use.
+          final isSeerrItem =
+              entry.serverId == 'seerr' || entry.id.startsWith('tmdb:');
+          final isSeason = entry.type == 'Season';
+          final seasonSeerrStatus = isSeason && entry.indexNumber != null
+              ? (seerrSeasonStatus?[entry.indexNumber])
+              : null;
+          final hasSeasonSeerrDot =
+              showAvailabilityBadges &&
+              SeerrMediaStatus.hasDot(seasonSeerrStatus);
+
+          final card = MediaCard(
+            key: ValueKey(cellKeys[i]),
+            title: entry.type == 'Episode' && entry.indexNumber != null
+                ? '${entry.indexNumber}${entry.rawData['IndexNumberEnd'] == null ? '' : '–${entry.rawData['IndexNumberEnd']}'} · ${entry.name}'
+                : entry.name,
+            subtitle: entry.personRole,
+            titleColor: titleColor,
+            imageUrl: spotlightItemImageUrl(imageApi, entry),
+            width: metrics.cellWidth,
+            aspectRatio: aspectRatio,
+            isPlayed: entry.isPlayed,
+            isFavorite: entry.isFavorite,
+            itemType: entry.type,
+            focusNode:
+                widget.itemFocusNodes?[entry.id] ??
+                (i == (initialEpisode ?? 0) ? firstFocusNode : null),
+            focusColor: focusColor,
+            cardFocusExpansion: cardExpansion,
+            suppressFocusGlow: isNeon,
+            watchedBehavior: isSeerrItem
+                ? WatchedIndicatorBehavior.never
+                : watchedBehavior,
+            seerrStatus: isSeerrItem ? entry.seerrStatus : null,
+            overlayOccupiesTopLeft: isSeerrItem || hasSeasonSeerrDot,
+            imageOverlays: [
+              if ((entry.type == 'Episode' || isSeason) &&
+                  entry.rawData['SpeshSeasonPicker'] != true)
+                Positioned(
+                  top: 6,
+                  left: 6,
+                  right: 36,
+                  child: IgnorePointer(
+                    child: isSeason
+                        ? SpeshAnimeBadges(
+                            seriesId: entry.seriesId,
+                            itemId: entry.id,
+                            season: true,
+                          )
+                        : SpeshAnimeItemAudioBadge(
+                            seriesId: entry.seriesId,
+                            itemId: entry.id,
+                          ),
+                  ),
+                ),
+              if (isSeerrItem)
+                const Positioned(top: 6, left: 6, child: SeerrBadge(size: 18)),
+              if (hasSeasonSeerrDot)
+                Positioned(
+                  top: 6,
+                  left: 6,
+                  child: SeerrStatusDot(status: seasonSeerrStatus, size: 18),
+                ),
+              if (entry.id == currentItemId)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: ThemeRegistry.active.borders.cardRadius,
+                        border: Border.all(
+                          color: isNeon
+                              ? const Color(0xFF00FFFF)
+                              : AppColorScheme.accent.withValues(alpha: 0.7),
+                          width: 1.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+            onFocus: () {
+              if (!widget.bounded) {
+                spotlightScrollCellIntoView(cellContext);
+                return;
+              }
+              final box = cellContext.findRenderObject();
+              final view = Scrollable.maybeOf(cellContext)?.context
+                  .findRenderObject();
+              if (box is RenderBox &&
+                  view is RenderBox &&
+                  box.hasSize &&
+                  view.hasSize) {
+                final top = box.localToGlobal(Offset.zero).dy;
+                final edge = view.localToGlobal(Offset.zero).dy;
+                if (top >= edge &&
+                    top + box.size.height <= edge + view.size.height)
+                  return;
+              }
+              Scrollable.ensureVisible(
+                cellContext,
+                duration: Duration.zero,
+                alignment: 0.5,
+              );
+            },
+            onTap: () => onItemTap(entry),
+            onLongPress:
+                isSeerrItem || entry.rawData['SpeshSeasonPicker'] == true
+                ? null
+                : () => showContextMenu(
+                    cellContext,
+                    entry,
+                    onChanged: onItemChanged,
+                  ),
+          );
+          return !widget.bounded && i == initialEpisode
+              ? _InitialEpisodeAnchor(child: card)
+              : card;
+        }
+
+        if (widget.bounded) {
+          final actualWidth =
+              (constraints.maxWidth - metrics.spacing * (metrics.columns - 1)) /
+              metrics.columns;
+          final extent = MediaCard.layoutHeight(
+            context,
+            width: actualWidth,
+            aspectRatio: aspectRatio,
+            hasSubtitle: items.any((e) => e.personRole?.isNotEmpty == true),
+          ).ceilToDouble();
+          if (!_scrollSeeded) {
+            _scrollSeeded = true;
+            final index = initialEpisode ?? 0;
+            final target =
+                (index ~/ metrics.columns) * (extent + metrics.runSpacing);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted || !_gridScroll.hasClients) return;
+              _gridScroll.jumpTo(
+                target.clamp(0.0, _gridScroll.position.maxScrollExtent),
+              );
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted || !widget.requestInitialFocus) return;
+                final node =
+                    widget.itemFocusNodes?[items[index].id] ??
+                    widget.firstFocusNode;
+                if (node?.context != null) node!.requestFocus();
+              });
+              WidgetsBinding.instance.ensureVisualUpdate();
+            });
+          }
+          return GridView.builder(
+            controller: _gridScroll,
+            padding: EdgeInsets.symmetric(vertical: metrics.runSpacing),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: metrics.columns,
+              mainAxisExtent: extent,
+              crossAxisSpacing: metrics.spacing,
+              mainAxisSpacing: metrics.runSpacing,
+            ),
+            itemCount: items.length,
+            findChildIndexCallback: (key) {
+              final index = key is ValueKey<String>
+                  ? cellKeys.indexOf(key.value)
+                  : -1;
+              return index < 0 ? null : index;
+            },
+            itemBuilder: (context, index) => Builder(
+              key: ValueKey(cellKeys[index]),
+              builder: (cellContext) => buildCell(cellContext, index),
+            ),
+          );
+        }
         return Padding(
           padding: cardExpansion
               ? EdgeInsets.symmetric(vertical: metrics.runSpacing)
@@ -216,117 +406,7 @@ class _SpotlightMediaGridSectionState extends State<SpotlightMediaGridSection> {
               for (var i = 0; i < items.length; i++)
                 Builder(
                   key: ValueKey(cellKeys[i]),
-                  builder: (cellContext) {
-                    final entry = items[i];
-                    // A title the library lacks, standing in from Seerr. It
-                    // has no play state, so the watched slot goes to
-                    // MediaCard's own request-status dot and the Seerr mark
-                    // takes the corner a favourite would otherwise use.
-                    final isSeerrItem =
-                        entry.serverId == 'seerr' ||
-                        entry.id.startsWith('tmdb:');
-                    final isSeason = entry.type == 'Season';
-                    final seasonSeerrStatus =
-                        isSeason && entry.indexNumber != null
-                        ? (seerrSeasonStatus?[entry.indexNumber])
-                        : null;
-                    final hasSeasonSeerrDot =
-                        showAvailabilityBadges &&
-                        SeerrMediaStatus.hasDot(seasonSeerrStatus);
-
-                    final card = MediaCard(
-                      key: ValueKey(cellKeys[i]),
-                      title:
-                          entry.type == 'Episode' && entry.indexNumber != null
-                          ? '${entry.indexNumber}${entry.rawData['IndexNumberEnd'] == null ? '' : '–${entry.rawData['IndexNumberEnd']}'} · ${entry.name}'
-                          : entry.name,
-                      subtitle: entry.personRole,
-                      titleColor: titleColor,
-                      imageUrl: spotlightItemImageUrl(imageApi, entry),
-                      width: metrics.cellWidth,
-                      aspectRatio: aspectRatio,
-                      isPlayed: entry.isPlayed,
-                      isFavorite: entry.isFavorite,
-                      itemType: entry.type,
-                      focusNode: i == (initialEpisode ?? 0)
-                          ? firstFocusNode
-                          : null,
-                      focusColor: focusColor,
-                      cardFocusExpansion: cardExpansion,
-                      suppressFocusGlow: isNeon,
-                      watchedBehavior: isSeerrItem
-                          ? WatchedIndicatorBehavior.never
-                          : watchedBehavior,
-                      seerrStatus: isSeerrItem ? entry.seerrStatus : null,
-                      overlayOccupiesTopLeft: isSeerrItem || hasSeasonSeerrDot,
-                      imageOverlays: [
-                        if (entry.type == 'Episode' || isSeason)
-                          Positioned(
-                            top: 6,
-                            left: 6,
-                            right: 36,
-                            child: IgnorePointer(
-                              child: isSeason
-                                  ? SpeshAnimeBadges(
-                                      seriesId: entry.seriesId,
-                                      itemId: entry.id,
-                                      season: true,
-                                    )
-                                  : SpeshAnimeItemAudioBadge(
-                                      seriesId: entry.seriesId,
-                                      itemId: entry.id,
-                                    ),
-                            ),
-                          ),
-                        if (isSeerrItem)
-                          const Positioned(
-                            top: 6,
-                            left: 6,
-                            child: SeerrBadge(size: 18),
-                          ),
-                        if (hasSeasonSeerrDot)
-                          Positioned(
-                            top: 6,
-                            left: 6,
-                            child: SeerrStatusDot(
-                              status: seasonSeerrStatus,
-                              size: 18,
-                            ),
-                          ),
-                        if (entry.id == currentItemId)
-                          Positioned.fill(
-                            child: IgnorePointer(
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  borderRadius:
-                                      ThemeRegistry.active.borders.cardRadius,
-                                  border: Border.all(
-                                    color: isNeon
-                                        ? const Color(0xFF00FFFF)
-                                        : AppColorScheme.accent.withValues(
-                                            alpha: 0.7,
-                                          ),
-                                    width: 1.5,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                      onFocus: () => spotlightScrollCellIntoView(cellContext),
-                      onTap: () => onItemTap(entry),
-                      onLongPress: isSeerrItem
-                          ? null
-                          : () => showContextMenu(
-                              cellContext,
-                              entry,
-                              onChanged: onItemChanged,
-                            ),
-                    );
-                    return i == initialEpisode
-                        ? _InitialEpisodeAnchor(child: card)
-                        : card;
-                  },
+                  builder: (c) => buildCell(c, i),
                 ),
             ],
           ),

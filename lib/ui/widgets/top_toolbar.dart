@@ -1080,7 +1080,7 @@ class _TopToolbarState extends State<TopToolbar> with RouteAware {
                   child: ExpandableIconButton(
                     key: const ValueKey('toolbar_studios'),
                     forceExpanded: alwaysExpanded,
-                    icon: Icons.business_outlined,
+                    icon: Icons.movie_creation_outlined,
                     label: 'Studios',
                     baseColor: nextNavColor(),
                     onPressed: () async {

@@ -1,7 +1,7 @@
 name: moonfin
 description: "SpeshTV - Jellyfin & Emby media client, based on Moonfin"
 publish_to: 'none'
-version: 2.8.0+30000205
+version: 2.8.0+30000207
 
 moonfin:
   android_tv_version: 2.8.0
@@ -294,6 +294,7 @@ flutter:
     - assets/icons/
     - assets/icons/streaming/
     - assets/licenses/streaming-artwork.md
+    - assets/release_notes/
     - assets/icons/ratings/
     - assets/icons/social/
     - assets/fonts/

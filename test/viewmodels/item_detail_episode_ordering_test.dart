@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
@@ -118,6 +119,34 @@ void main() {
   // Jellyfin puts each special in the season it aired in. Without a Next Up,
   // the detail screens pick the first unwatched episode in this order, so the
   // view model keeps it as sent.
+  test('new series refresh wins over an obsolete pending response', () async {
+    when(() => itemsApi.getItem('series-1', mediaSourceId:any(named:'mediaSourceId')))
+      .thenAnswer((_) async => {'Id':'series-1','Type':'Series'});
+    final old = Completer<Map<String,dynamic>>();
+    final fresh = Completer<Map<String,dynamic>>(); var count=0;
+    when(() => itemsApi.getEpisodes('series-1',fields:any(named:'fields')))
+      .thenAnswer((_) => ++count == 1 ? old.future : fresh.future);
+    final vm=createViewModel('series-1'); addTearDown(vm.dispose); await vm.load();
+    final oldRequest=vm.loadAllSeriesEpisodes(); final newRequest=vm.refreshSeriesEpisodes();
+    fresh.complete({'Items':[{'Id':'fresh','Type':'Episode','SeasonId':'s1','ParentIndexNumber':1}]}); await newRequest;
+    old.complete({'Items':[{'Id':'obsolete','Type':'Episode','SeasonId':'s1','ParentIndexNumber':1}]}); await oldRequest;
+    expect(vm.seriesEpisodes.map((e)=>e.id),['fresh']);
+  });
+  test('browsed season reuses loaded DTOs and excludes another server', () async {
+    when(() => itemsApi.getItem('series-1', mediaSourceId:any(named:'mediaSourceId')))
+      .thenAnswer((_) async => {'Id':'series-1','Type':'Series'});
+    when(() => itemsApi.getEpisodes('series-1',fields:any(named:'fields')))
+      .thenAnswer((_) async => {'Items':[
+        {'Id':'one','Type':'Episode','SeasonId':'s1','ParentIndexNumber':1},
+        {'Id':'two','Type':'Episode','SeasonId':'s2','ParentIndexNumber':2}]});
+    final vm=createViewModel('series-1'); addTearDown(vm.dispose); await vm.load(); await vm.loadAllSeriesEpisodes();
+    final season=AggregatedItem(id:'s1',serverId:'http://server',rawData:const {'Type':'Season','SeriesId':'series-1','IndexNumber':1});
+    expect((await vm.browseSeasonEpisodes(season)).map((e)=>e.id),['one']);
+    final foreign=AggregatedItem(id:'s1',serverId:'other-server',rawData:season.rawData);
+    expect(await vm.browseSeasonEpisodes(foreign),isEmpty);
+    verify(() => itemsApi.getEpisodes('series-1',fields:any(named:'fields'))).called(1);
+  });
+
   group('episode lists keep the server order', () {
     final airedOrder = [
       {'Id': 's1e1', 'Type': 'Episode', 'ParentIndexNumber': 1, 'IndexNumber': 1},
