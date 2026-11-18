@@ -162,26 +162,31 @@ void registerAppModule() {
     ),
     dispose: (controller) => controller.dispose(),
   );
-  _getIt.registerLazySingleton(() {
-    final users = _getIt<UserRepository>();
-    final service = AccessScheduleService(
-      loadSchedules: _loadAccessSchedules,
-      onBlocked: _stopPlaybackForAccessSchedule,
-      serverRefuses: _serverRefusesUser,
-    );
-    // An administrator has no schedule to enforce.
-    String? watched(User? user) =>
-        user == null || user.isAdministrator ? null : user.id;
-    service.setUser(watched(users.currentUser));
-    _accessScheduleUserSubscription = users.currentUserStream.listen(
-      (user) => service.setUser(watched(user)),
-    );
-    return service;
-  }, dispose: (service) {
-    unawaited(_accessScheduleUserSubscription?.cancel());
-    service.dispose();
-  });
-  _getIt.registerLazySingleton(() => SetupWizardGate(_getIt<UserPreferences>()));
+  _getIt.registerLazySingleton(
+    () {
+      final users = _getIt<UserRepository>();
+      final service = AccessScheduleService(
+        loadSchedules: _loadAccessSchedules,
+        onBlocked: _stopPlaybackForAccessSchedule,
+        serverRefuses: _serverRefusesUser,
+      );
+      // An administrator has no schedule to enforce.
+      String? watched(User? user) =>
+          user == null || user.isAdministrator ? null : user.id;
+      service.setUser(watched(users.currentUser));
+      _accessScheduleUserSubscription = users.currentUserStream.listen(
+        (user) => service.setUser(watched(user)),
+      );
+      return service;
+    },
+    dispose: (service) {
+      unawaited(_accessScheduleUserSubscription?.cancel());
+      service.dispose();
+    },
+  );
+  _getIt.registerLazySingleton(
+    () => SetupWizardGate(_getIt<UserPreferences>()),
+  );
   _getIt.registerLazySingleton(() => const NativeCastChannel());
   _getIt.registerLazySingleton(() => const NativeDlnaChannel());
   _getIt.registerLazySingleton(() => const NativeAirPlayChannel());
@@ -245,7 +250,8 @@ void registerAppModule() {
     ),
   );
   _getIt.registerLazySingleton<SyncService>(
-    () => SyncService(_getIt<OfflineRepository>(), _getIt<PendingRatingStore>()),
+    () =>
+        SyncService(_getIt<OfflineRepository>(), _getIt<PendingRatingStore>()),
   );
   _getIt.registerLazySingleton(
     () => RemoveWatchedService(
@@ -340,6 +346,7 @@ void _registerUserScopedSingletons() {
       _getIt<UserPreferences>(),
       _getIt<MediaServerClient>(),
     ),
+    dispose: (value) => value.dispose(),
   );
   _getIt.registerLazySingleton(
     () => HomeViewModel(
@@ -349,6 +356,7 @@ void _registerUserScopedSingletons() {
       mediaBarViewModel: _getIt<MediaBarViewModel>(),
       multiServerRepo: _getIt<MultiServerRepository>(),
     ),
+    dispose: (value) => value.dispose(),
   );
   _getIt.registerLazySingleton(
     () => ThemeMusicService(
@@ -357,6 +365,7 @@ void _registerUserScopedSingletons() {
       _getIt<PlaybackManager>(),
       _getIt<PlaybackArbiter>(),
     ),
+    dispose: (value) => value.dispose(),
   );
   _getIt.registerLazySingletonAsync<SeerrRepository>(
     () async => SeerrRepository(

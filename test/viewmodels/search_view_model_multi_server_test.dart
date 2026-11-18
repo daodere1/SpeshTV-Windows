@@ -117,6 +117,7 @@ void main() {
       when(() => factory.getClientIfExists(id)).thenReturn(client);
     }
     when(authStore.getServers).thenReturn(servers);
+    when(() => session.isSpeshManagedProfile).thenReturn(false);
     when(() => session.activeServerId).thenReturn('a');
     when(() => session.activeUserId).thenReturn('user-a');
     multiServer = MultiServerRepository(

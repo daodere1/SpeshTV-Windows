@@ -1,4 +1,7 @@
 import 'dart:async';
+
+import '../../auth/repositories/session_repository.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 import 'package:playback_core/playback_core.dart';
@@ -335,7 +338,9 @@ void registerPlaybackModule() {
 
   if (PlatformDetection.isAppleTV) {
     nativeApplePlayerBackend = NativeApplePlayerBackend(prefs);
-    _getIt.registerSingleton<NativeApplePlayerBackend>(nativeApplePlayerBackend);
+    _getIt.registerSingleton<NativeApplePlayerBackend>(
+      nativeApplePlayerBackend,
+    );
     // Backs the Flutter player option. It sits idle until a video picks it.
     iosBackend = AetherBackend(prefs);
     _getIt.registerSingleton<AetherBackend>(iosBackend);
@@ -349,7 +354,9 @@ void registerPlaybackModule() {
       // Backs the native player option, which plays video through the player
       // the Apple TV app uses. It sits idle until a video picks it.
       nativeApplePlayerBackend = NativeApplePlayerBackend(prefs);
-      _getIt.registerSingleton<NativeApplePlayerBackend>(nativeApplePlayerBackend);
+      _getIt.registerSingleton<NativeApplePlayerBackend>(
+        nativeApplePlayerBackend,
+      );
     }
   } else {
     backend = MediaKitPlayerBackend(prefs);
@@ -442,7 +449,8 @@ void registerPlaybackModule() {
   };
 
   manager.onSecondarySubtitleTrackSelected = (itemId, index, stream) async {
-    final streams = manager.currentResolution?.mediaStreams
+    final streams =
+        manager.currentResolution?.mediaStreams
             .where((s) => s['Type'] == 'Subtitle')
             .toList() ??
         const <Map<String, dynamic>>[];
@@ -482,7 +490,10 @@ void registerPlaybackModule() {
     // A track the item doesn't list, an external one added mid playback say,
     // leaves nothing to recognise it by later, so the last choice stays.
     if (pref.isEmpty) return;
-    _getIt<UserPreferences>().setSeriesSubtitlePreference(series.seriesId, pref);
+    _getIt<UserPreferences>().setSeriesSubtitlePreference(
+      series.seriesId,
+      pref,
+    );
   };
   manager.onAudioTrackSelected = (itemId, index) {
     final series = seriesStreams('audio');
@@ -793,6 +804,8 @@ void resetActiveStreamResolver() {
 }
 
 void setActiveStreamResolver(MediaServerClient client) {
+  final session = _getIt.isRegistered<SessionRepository>() ? _getIt<SessionRepository>() : null;
+  final allowOffline = session == null || !session.isSpeshManagedProfile || client.userId != session.activeUserId;
   if (identical(client, _currentActiveResolverClient) &&
       _getIt.isRegistered<MediaStreamResolver>() &&
       _getIt.isRegistered<PlayerService>()) {
@@ -827,24 +840,28 @@ void setActiveStreamResolver(MediaServerClient client) {
   // Local-first: completed downloads play from disk instead of streaming,
   // with progress mirrored to the downloads DB (and to the server when
   // reachable).
-  final resolver = LocalFirstMediaStreamResolver(
-    inner: serverResolver,
-    offline: _getIt<OfflineStreamResolver>(),
-    streamFromServer: () => _getIt<PlaybackManager>().streamsFromServer,
-    restoreSubtitles: (itemId) async {
-      if (_getIt.isRegistered<DownloadService>()) {
-        await _getIt<DownloadService>().restoreMissingSubtitles(itemId);
-      }
-    },
-  );
-  final service = LocalAwarePlayerService(
-    serverService,
-    _getIt<OfflineRepository>(),
-    canReachServer: () =>
-        !_getIt.isRegistered<ConnectivityService>() ||
-        _getIt<ConnectivityService>().canReachServer,
-    onStopped: _onItemStopped,
-  );
+  final MediaStreamResolver resolver = allowOffline
+      ? LocalFirstMediaStreamResolver(
+          inner: serverResolver,
+          offline: _getIt<OfflineStreamResolver>(),
+          streamFromServer: () => _getIt<PlaybackManager>().streamsFromServer,
+          restoreSubtitles: (itemId) async {
+            if (_getIt.isRegistered<DownloadService>()) {
+              await _getIt<DownloadService>().restoreMissingSubtitles(itemId);
+            }
+          },
+        )
+      : serverResolver;
+  final PlayerService service = allowOffline
+      ? LocalAwarePlayerService(
+          serverService,
+          _getIt<OfflineRepository>(),
+          canReachServer: () =>
+              !_getIt.isRegistered<ConnectivityService>() ||
+              _getIt<ConnectivityService>().canReachServer,
+          onStopped: _onItemStopped,
+        )
+      : serverService;
 
   _getIt.registerSingleton<MediaStreamResolver>(resolver);
   _getIt.registerSingleton<PlayerService>(service);

@@ -8,7 +8,11 @@ import '../services/user_data_sync.dart';
 class ItemMutationRepository {
   final MediaServerClient _client;
 
+  final int _scope = userDataSync.scopeGeneration;
   ItemMutationRepository(this._client);
+  void _publish(String itemId, Map<String, dynamic> patch) {
+    if (_scope == userDataSync.scopeGeneration) userDataSync.publish(itemId, patch);
+  }
 
   Future<void> setFavorite(String itemId, {required bool isFavorite}) async {
     final owner = _client.userId;
@@ -21,7 +25,7 @@ class ItemMutationRepository {
     if (owner == _client.userId && server == _client.baseUrl) {
       MemberListChanges.saved(_client, itemId, MemberListKind.favorite, isFavorite);
     }
-    userDataSync.publish(itemId, {'IsFavorite': isFavorite});
+    _publish(itemId, {'IsFavorite': isFavorite});
   }
 
   Future<void> setPlayed(String itemId, {required bool isPlayed}) async {
@@ -35,7 +39,7 @@ class ItemMutationRepository {
     }
     // Either way the server drops the resume point, so say so here too rather
     // than leave a progress bar under a watched tick.
-    userDataSync.publish(itemId, {
+    _publish(itemId, {
       'Played': isPlayed,
       'PlayedPercentage': null,
       'PlaybackPositionTicks': 0,
@@ -55,7 +59,7 @@ class ItemMutationRepository {
 
   Future<void> setRating(String itemId, {required bool likes}) async {
     await _client.userLibraryApi.updateUserRating(itemId, likes: likes);
-    userDataSync.publish(itemId, {'Likes': likes});
+    _publish(itemId, {'Likes': likes});
   }
 
   Future<void> setNumericRating(String itemId, {required double rating}) async {
@@ -63,12 +67,12 @@ class ItemMutationRepository {
       itemId,
       rating: rating,
     );
-    userDataSync.publish(itemId, {'Rating': rating});
+    _publish(itemId, {'Rating': rating});
   }
 
   Future<void> clearRating(String itemId) async {
     await _client.userLibraryApi.deleteUserRating(itemId);
-    userDataSync.publish(itemId, {'Rating': null, 'Likes': null});
+    _publish(itemId, {'Rating': null, 'Likes': null});
   }
 
   Future<void> addToCollection(String collectionId, List<String> itemIds) async {

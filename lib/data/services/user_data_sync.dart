@@ -101,6 +101,7 @@ class UserDataSync extends ChangeNotifier {
     MediaServerClient client,
     Iterable<String> itemIds,
   ) async {
+    final generation = _scopeGeneration;
     final ids = <String>{
       for (final id in itemIds)
         if (id.isNotEmpty) id,
@@ -120,6 +121,7 @@ class UserDataSync extends ChangeNotifier {
           limit: chunk.length,
           enableTotalRecordCount: false,
         );
+        if (generation != _scopeGeneration) return;
         final changes = <String, Map<String, dynamic>>{};
         for (final raw in (data['Items'] as List? ?? const [])) {
           if (raw is! Map) continue;
@@ -141,8 +143,9 @@ class UserDataSync extends ChangeNotifier {
   void bindTo(Stream<ServerWebSocketMessage> events, {String? userId}) {
     _socketSubscription?.cancel();
     final expectedUser = _normalizeId(userId);
+    final generation = _scopeGeneration;
     _socketSubscription = events.listen((event) {
-      if (event is! UserDataChangedMessage) return;
+      if (generation != _scopeGeneration || event is! UserDataChangedMessage) return;
       // The server only sends this to the owning user's sessions. The check is
       // so a binding left over from the last account can't write over this one.
       final messageUser = _normalizeId(event.userId);
@@ -164,7 +167,11 @@ class UserDataSync extends ChangeNotifier {
 
   /// Drops everything on sign-out or a user switch, so one account's watched
   /// state is never painted onto another's library.
+  int _scopeGeneration = 0;
+  int get scopeGeneration => _scopeGeneration;
+
   void reset() {
+    _scopeGeneration++;
     _socketSubscription?.cancel();
     _socketSubscription = null;
     if (_userData.isEmpty) return;

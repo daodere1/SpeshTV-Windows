@@ -79,6 +79,7 @@ void registerServerModule() {
 void setActiveServerClient(
   MediaServerClient client, {
   bool background = false,
+  bool allowOffline = true,
 }) {
   // The raw client keeps serving downloads, playback, and sockets, while the
   // registered singleton is a wrapper that answers browse and read calls from
@@ -88,7 +89,7 @@ void setActiveServerClient(
       : client;
   final wrapped = ConnectivityAwareMediaServerClient(
     rawClient,
-    useOffline: shouldUseOfflineCatalog,
+    useOffline: () => allowOffline && shouldUseOfflineCatalog(),
     catalog: _getIt<OfflineCatalog>(),
     storagePath: _getIt<StoragePathService>(),
     pendingRatings: _getIt<PendingRatingStore>(),

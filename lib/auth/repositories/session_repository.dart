@@ -44,6 +44,8 @@ import '../../data/services/remote_search_session.dart';
 import '../../data/services/server_messages_service.dart';
 import '../../data/services/socket_handler.dart';
 import '../../data/services/user_data_sync.dart';
+import '../../data/services/spesh_profile_service.dart';
+import '../../ui/widgets/spesh_brand.dart';
 import '../../di/modules/app_module.dart';
 import '../../di/modules/playback_module.dart';
 import '../../di/modules/server_module.dart';
@@ -127,6 +129,223 @@ class SessionRepository {
   Future<void> _remoteVolumeFlight = Future.value();
   int _remoteVolumeGeneration = 0;
   bool _hasCheckedWriteAccess = false;
+  SpeshProfileOwner? _speshOwner;
+  MediaServerClient? _speshOwnerClient;
+  String? _speshProfileId;
+  bool _profileChosen = false;
+  String? _profileReturnRoute;
+  bool _profileTransition = false;
+  int _sessionEpoch = 0;
+  Future<void>? _postLoginFlight;
+  SpeshProfileOwner? get speshOwner => _speshOwner;
+  String? get speshProfileId => _speshProfileId;
+  bool get requiresSpeshProfile => _speshOwner != null && !_profileChosen;
+  bool get isSpeshManagedProfile =>
+      _speshOwner != null && _activeUserId != _speshOwner!.userId;
+  bool get supportsSpeshProfiles => _speshOwner != null;
+  SpeshProfilesApi createSpeshProfilesApi() =>
+      SpeshProfilesApi(_speshOwner!, _clientFactory.deviceInfo);
+
+  void rememberSpeshProfileDestination(String route) {
+    if (route.startsWith('/') &&
+        !route.startsWith('//') &&
+        !route.startsWith(Destinations.profiles)) {
+      _profileReturnRoute = route;
+    }
+  }
+
+  Future<void> requestSpeshProfileSelection() async {
+    if (_speshOwner == null || _profileTransition) return;
+    await _stopAndDrainForProfile();
+    _profileChosen = false;
+    _profileReturnRoute = Destinations.home;
+    _router.go(Destinations.profiles);
+  }
+
+  Future<void> _stopAndDrainForProfile() async {
+    final getIt = GetIt.instance;
+    if (getIt.isRegistered<CastService>()) {
+      final cast = getIt<CastService>();
+      final kind = cast.activeKindNotifier.value;
+      if (kind != null) await cast.stop(kind);
+    }
+    if (getIt.isRegistered<PlaybackManager>()) {
+      final manager = getIt<PlaybackManager>();
+      await manager.stop(userInitiated: false);
+      await manager.drainSessionReports().timeout(const Duration(seconds: 30));
+    }
+  }
+
+  Future<void> continueWithSpeshOwner() async {
+    final owner = _speshOwner!;
+    final current = _clientFactory.getClientIfExists(owner.serverId);
+    // Startup already restored this original account and its offline wrapper.
+    // Reusing it avoids waiting on an unreachable Core or minting any token.
+    if (_activeUserId == owner.userId && current?.accessToken == owner.token) {
+      _speshProfileId = 'main';
+      _profileChosen = true;
+      final destination = _profileReturnRoute ?? Destinations.home;
+      _profileReturnRoute = null;
+      _router.go(destination);
+      return;
+    }
+    await activateSpeshProfile(
+      SpeshProfileSelection(
+        const SpeshViewingProfile(
+          id: 'main',
+          name: 'Profile 1',
+          avatar: 'blue',
+          isPrimary: true,
+        ),
+        owner.userId,
+        owner.token,
+      ),
+      expectedOwner: owner,
+    );
+  }
+
+  Future<void> activateSpeshProfile(
+    SpeshProfileSelection selection, {
+    required SpeshProfileOwner expectedOwner,
+  }) async {
+    final owner = _speshOwner;
+    if (_profileTransition ||
+        owner == null ||
+        !identical(owner, expectedOwner)) {
+      throw StateError('The account changed. Reopen the profile picker.');
+    }
+    final primary = selection.profile.isPrimary;
+    if ((primary &&
+            (selection.profile.id != 'main' ||
+                selection.userId != owner.userId ||
+                selection.token != owner.token)) ||
+        (!primary &&
+            (selection.userId == owner.userId ||
+                selection.token.isEmpty ||
+                selection.token == owner.token))) {
+      throw StateError('Invalid profile identity.');
+    }
+    _profileTransition = true;
+    MediaServerClient? fresh;
+    try {
+      // Finish owner settings work before resetting shared state.
+      await _postLoginFlight?.timeout(const Duration(seconds: 45));
+      fresh = _clientFactory.createSessionClient(
+        serverType: ServerType.jellyfin,
+        baseUrl: owner.baseUrl,
+      );
+      fresh.accessToken = selection.token;
+      fresh.userId = selection.userId;
+      ServerUser? details;
+      final savedOwner = primary
+          ? _authStore.getUser(owner.serverId, owner.userId)
+          : null;
+      try {
+        details = await fresh.usersApi.getCurrentUser();
+      } on DioException catch (error) {
+        // Only the already-saved original login can use its existing offline
+        // library. HTTP authentication/policy refusals never fall back.
+        if (!primary || error.response != null || savedOwner == null) rethrow;
+      }
+      if (details != null && details.id != selection.userId)
+        throw StateError('Profile identity could not be confirmed.');
+      await _stopAndDrainForProfile();
+      if (!identical(_speshOwner, owner))
+        throw StateError('The account changed.');
+      _setState(SessionState.switching);
+      _sessionEpoch++;
+      _remoteVolumeGeneration++;
+      _remoteNavigationGeneration++;
+      _remoteSearch?.close();
+      await _remoteCommandSubscription?.cancel();
+      await _pluginEventSubscription?.cancel();
+      await _socketConnectionSubscription?.cancel();
+      _socketHandler.disconnect();
+      _cancelSocketIdleTimer();
+      _pluginSyncService.resetState();
+      if (GetIt.instance.isRegistered<AchievementsService>())
+        GetIt.instance<AchievementsService>().reset();
+      if (GetIt.instance.isRegistered<ServerMessagesService>())
+        GetIt.instance<ServerMessagesService>().clear();
+      userDataSync.reset();
+      final user = PrivateUser(
+        id: selection.userId,
+        serverId: owner.serverId,
+        accessToken: selection.token,
+        name: selection.profile.name,
+        lastUsed: DateTime.now(),
+        isAdministrator:
+            primary &&
+            (details?.policy?.isAdministrator ??
+                savedOwner?.isAdministrator ??
+                false),
+        canDownload:
+            primary &&
+            (details?.policy?.enableContentDownloading ??
+                savedOwner?.canDownload ??
+                false),
+        canManageSubtitles:
+            primary &&
+            (details?.policy?.canFetchRemoteSubtitles ??
+                savedOwner?.canManageSubtitles ??
+                false),
+        canManageCollections:
+            primary &&
+            (details?.policy?.enableCollectionManagement ??
+                savedOwner?.canManageCollections ??
+                false),
+        canManageLiveTv:
+            primary &&
+            (details?.policy?.enableLiveTvManagement ??
+                savedOwner?.canManageLiveTv ??
+                false),
+      );
+      _activeUserId = selection.userId;
+      _speshProfileId = selection.profile.id;
+      _profileChosen = true;
+      final old = _clientFactory.getClientIfExists(owner.serverId);
+      _clientFactory.replaceSessionClient(owner.serverId, fresh);
+      setActiveServerClient(fresh, allowOffline: primary);
+      _userRepository.setCurrentUser(
+        user,
+      ); // session only, before dependent services
+      resetUserScopedSingletons();
+      setActiveStreamResolver(fresh);
+      _hasCheckedWriteAccess = false;
+      _socketSuspended = false;
+      _socketHandler.connectTo(fresh);
+      _bindRemoteCommandHandling();
+      _bindCapabilityReporting(fresh);
+      _bindPluginEventHandling(fresh);
+      userDataSync.bindTo(_socketHandler.events, userId: selection.userId);
+      _refreshCarBrowseTree(signedIn: true);
+      if (old != null && !identical(old, _speshOwnerClient)) old.dispose();
+      final sync = _postLoginSync(
+        fresh,
+        user,
+        owner.serverId,
+        null,
+        null,
+        preFetchedServerUser: details,
+        persistUser: false,
+      ).catchError((_) {});
+      _postLoginFlight = sync;
+      await Future.any([sync, Future<void>.delayed(_initialLoginSyncWait)]);
+      _setState(SessionState.ready);
+      final destination = _profileReturnRoute ?? Destinations.home;
+      if (!requiresSpeshProfile) _profileReturnRoute = null;
+      _router.go(requiresSpeshProfile ? Destinations.profiles : destination);
+    } catch (_) {
+      _profileChosen = false;
+      if (fresh != null &&
+          !identical(fresh, _clientFactory.getClientIfExists(owner.serverId)))
+        fresh.dispose();
+      _setState(SessionState.ready);
+      rethrow;
+    } finally {
+      _profileTransition = false;
+    }
+  }
 
   static const Duration _socketIdleGrace = Duration(seconds: 60);
   Timer? _socketIdleTimer;
@@ -160,7 +379,7 @@ class SessionRepository {
   Future<void> applyAutoLoginForBehavior(UserSelectBehavior behavior) async {
     if (behavior == UserSelectBehavior.currentUser) {
       final serverId = _activeServerId;
-      final userId = _activeUserId;
+      final userId = _speshOwner?.userId ?? _activeUserId;
       if (serverId != null && userId != null) {
         await _authPrefs.setAutoLogin(serverId, userId);
       }
@@ -173,7 +392,8 @@ class SessionRepository {
   bool get activeUserIsAutoLoginTarget =>
       _activeUserId != null &&
       _activeServerId != null &&
-      _authPrefs.savedAutoLoginUserId == _activeUserId &&
+      _authPrefs.savedAutoLoginUserId ==
+          (_speshOwner?.userId ?? _activeUserId) &&
       _authPrefs.savedAutoLoginServerId == _activeServerId;
 
   // the name of the saved auto-login user or null if none.
@@ -238,8 +458,14 @@ class SessionRepository {
     bool validateToken = false,
   }) async {
     if (serverId != _activeServerId || userId != _activeUserId) {
-      await _stopPlaybackForSessionChange();
+      if (_speshOwner != null)
+        await _stopAndDrainForProfile();
+      else
+        await _stopPlaybackForSessionChange();
     }
+    if (_speshOwner != null)
+      await _postLoginFlight?.timeout(const Duration(seconds: 45));
+    _sessionEpoch++;
     _setState(SessionState.switching);
     _remoteVolumeGeneration++;
     _remoteNavigationGeneration++;
@@ -340,6 +566,19 @@ class SessionRepository {
     _activeServerId = serverId;
     _activeUserId = userId;
 
+    _sessionEpoch++;
+    _speshOwner = speshWeb && client.serverType == ServerType.jellyfin
+        ? SpeshProfileOwner(
+            serverId: serverId,
+            userId: userId,
+            baseUrl: client.baseUrl,
+            token: accessToken,
+          )
+        : null;
+    _speshOwnerClient = _speshOwner == null ? null : client;
+    _speshProfileId = null;
+    _profileChosen = false;
+    _profileReturnRoute = null;
     _userRepository.setCurrentUser(user);
     await _authPrefs.setLastServerId(serverId);
     await _authPrefs.setLastUserId(userId);
@@ -355,6 +594,7 @@ class SessionRepository {
       preFetchedServerUser: validatedUser,
     ).catchError((_) {});
 
+    _postLoginFlight = postLoginSyncFuture;
     if (shouldPrioritizeInitialSync) {
       // Give first-login server sync a short head start so Home can build
       // from synced preferences, without blocking startup indefinitely.
@@ -394,8 +634,11 @@ class SessionRepository {
     String? username,
     String? password, {
     ServerUser? preFetchedServerUser,
+    bool persistUser = true,
   }) async {
+    final epoch = _sessionEpoch;
     await _reportRemoteCapabilities(client);
+    if (epoch != _sessionEpoch) return;
 
     // A server is signed in now, so crash reports from earlier runs can go.
     try {
@@ -405,14 +648,22 @@ class SessionRepository {
     try {
       final serverUser =
           preFetchedServerUser ?? await client.usersApi.getCurrentUser();
-      final isAdmin = serverUser.policy?.isAdministrator ?? false;
-      final canDownload = serverUser.policy?.enableContentDownloading ?? false;
+      if (epoch != _sessionEpoch) return;
+      final isAdmin =
+          !isSpeshManagedProfile &&
+          (serverUser.policy?.isAdministrator ?? false);
+      final canDownload =
+          !isSpeshManagedProfile &&
+          (serverUser.policy?.enableContentDownloading ?? false);
       final canManageSubtitles =
-          serverUser.policy?.canFetchRemoteSubtitles ?? false;
+          !isSpeshManagedProfile &&
+          (serverUser.policy?.canFetchRemoteSubtitles ?? false);
       final canManageCollections =
-          serverUser.policy?.enableCollectionManagement ?? false;
+          !isSpeshManagedProfile &&
+          (serverUser.policy?.enableCollectionManagement ?? false);
       final canManageLiveTv =
-          serverUser.policy?.enableLiveTvManagement ?? false;
+          !isSpeshManagedProfile &&
+          (serverUser.policy?.enableLiveTvManagement ?? false);
 
       if (isAdmin != user.isAdministrator ||
           canDownload != user.canDownload ||
@@ -426,7 +677,7 @@ class SessionRepository {
           canManageCollections: canManageCollections,
           canManageLiveTv: canManageLiveTv,
         );
-        await _authStore.putUser(updatedUser);
+        if (persistUser) await _authStore.putUser(updatedUser);
         _userRepository.setCurrentUser(updatedUser);
       }
 
@@ -437,6 +688,12 @@ class SessionRepository {
         );
       }
     } on DioException catch (e) {
+      if (epoch != _sessionEpoch) return;
+      if (e.response?.statusCode == 401 && !persistUser) {
+        _profileChosen = false;
+        _router.go(Destinations.profiles);
+        return;
+      }
       if (e.response?.statusCode == 401) {
         _logger.w('Access token expired or unauthorized. Logging out.');
         await destroyCurrentSession(tokenKnownInvalid: true);
@@ -454,7 +711,8 @@ class SessionRepository {
       final achievements = GetIt.instance<AchievementsService>();
       unawaited(
         achievements.refreshAvailability(client).then((available) {
-          if (available) achievements.startPolling(client);
+          if (available && epoch == _sessionEpoch)
+            achievements.startPolling(client);
         }),
       );
     }
@@ -464,6 +722,7 @@ class SessionRepository {
     if (client.serverType == ServerType.plex) return;
 
     await _pluginSyncService.syncOnLogin(client, serverId: serverId);
+    if (epoch != _sessionEpoch) return;
 
     // Register the FCM token now that a session exists, and push the current
     // notification prefs so defaults reach the plugin. Startup registration
@@ -483,7 +742,7 @@ class SessionRepository {
       username: username ?? user.name,
       password: password,
     );
-    if (seerrCameUp) {
+    if (seerrCameUp && epoch == _sessionEpoch) {
       homeRefreshBus.requestNowOrAfterNavigation(newSectionsOnly: true);
     }
   }
@@ -579,6 +838,7 @@ class SessionRepository {
     if (!GetIt.instance.isRegistered<PlaybackManager>()) return;
     try {
       await GetIt.instance<PlaybackManager>().stop(userInitiated: false);
+      await GetIt.instance<PlaybackManager>().drainSessionReports();
     } catch (_) {}
   }
 
@@ -588,7 +848,16 @@ class SessionRepository {
     _remoteNavigationGeneration++;
     _remoteSearch?.close();
     final serverId = _activeServerId;
-    final userId = _activeUserId;
+    final userId = _speshOwner?.userId ?? _activeUserId;
+    if (_speshOwner != null) await _stopAndDrainForProfile();
+    _sessionEpoch++;
+    if (_speshOwnerClient != null &&
+        isSpeshManagedProfile &&
+        !tokenKnownInvalid) {
+      try {
+        await _speshOwnerClient!.authApi.logout();
+      } catch (_) {}
+    }
 
     _cancelSocketIdleTimer();
     _socketSuspended = false;
@@ -645,6 +914,10 @@ class SessionRepository {
 
     _activeServerId = null;
     _activeUserId = null;
+    _speshOwner = null;
+    _speshOwnerClient = null;
+    _speshProfileId = null;
+    _profileChosen = false;
     _hasCheckedWriteAccess = false;
     _userRepository.setCurrentUser(null);
     _refreshCarBrowseTree(signedIn: false);
@@ -672,7 +945,9 @@ class SessionRepository {
         GetIt.instance<MoonfinAudioHandler>().notifyChildrenChanged();
       }
       if (GetIt.instance.isRegistered<CarPlayService>()) {
-        GetIt.instance<CarPlayService>().notifySignInChanged(signedIn: signedIn);
+        GetIt.instance<CarPlayService>().notifySignInChanged(
+          signedIn: signedIn,
+        );
       }
     } catch (_) {}
   }
@@ -1170,8 +1445,7 @@ class SessionRepository {
           // Another controller's text has no Search to land in yet, so it
           // opens one. Edits from a phone whose input session ended stay
           // dropped.
-          final opened = RemoteSearchSession(null)
-            ..receive(message.arguments);
+          final opened = RemoteSearchSession(null)..receive(message.arguments);
           await _openRemoteSearch(manager, opened);
         }
       default:

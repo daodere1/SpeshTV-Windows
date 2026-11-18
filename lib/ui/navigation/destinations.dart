@@ -32,6 +32,8 @@ extension NavigationX on BuildContext {
 class Destinations {
   const Destinations._();
 
+  static const profiles = '/profiles';
+
   // Auth
   static const startup = '/';
   static const serverSelect = '/server-select';

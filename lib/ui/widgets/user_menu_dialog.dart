@@ -265,7 +265,9 @@ class _AccountDialogState extends State<_AccountDialog> {
         decoration: BoxDecoration(
           color: AppColorScheme.surface.withValues(alpha: 0.9),
           borderRadius: AppRadius.circular(20),
-          border: Border.fromBorderSide(ThemeRegistry.active.borders.chipBorder),
+          border: Border.fromBorderSide(
+            ThemeRegistry.active.borders.chipBorder,
+          ),
         ),
         padding: const EdgeInsets.symmetric(vertical: 20),
         child: SingleChildScrollView(
@@ -290,7 +292,9 @@ class _AccountDialogState extends State<_AccountDialog> {
                     if (!PlatformDetection.isTV)
                       _CircleActionButton(
                         icon: Icons.close,
-                        onPressed: _busy ? null : () => Navigator.of(context).pop(),
+                        onPressed: _busy
+                            ? null
+                            : () => Navigator.of(context).pop(),
                         focusColor: focusColor,
                       ),
                   ],
@@ -300,6 +304,19 @@ class _AccountDialogState extends State<_AccountDialog> {
                 height: 1,
                 color: AppColorScheme.onSurface.withValues(alpha: 0.08),
               ),
+              if (GetIt.instance<SessionRepository>().supportsSpeshProfiles)
+                ListTile(
+                  leading: const Icon(Icons.switch_account_outlined),
+                  title: const Text('Switch profile'),
+                  onTap: _busy
+                      ? null
+                      : () async {
+                          final session = GetIt.instance<SessionRepository>();
+                          Navigator.of(context).pop();
+                          try { await session.requestSpeshProfileSelection(); }
+                    catch (_) { /* Keep the current identity when playback cannot drain. */ }
+                        },
+                ),
               const SizedBox(height: 16),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -308,7 +325,11 @@ class _AccountDialogState extends State<_AccountDialog> {
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       final cards = <Widget>[
-                        for (var index = 0; index < _accounts.length; index++) ...[
+                        for (
+                          var index = 0;
+                          index < _accounts.length;
+                          index++
+                        ) ...[
                           if (index > 0) const SizedBox(width: 20),
                           _AccountCard(
                             username: _accounts[index].user.name,
@@ -316,7 +337,9 @@ class _AccountDialogState extends State<_AccountDialog> {
                             avatarUrl: _avatarUrl(_accounts[index]),
                             active: _isActive(_accounts[index]),
                             autofocus: index == initialAccountFocusIndex,
-                            onTap: _busy ? null : () => _switchAccount(_accounts[index]),
+                            onTap: _busy
+                                ? null
+                                : () => _switchAccount(_accounts[index]),
                             focusColor: focusColor,
                           ),
                         ],
@@ -332,7 +355,9 @@ class _AccountDialogState extends State<_AccountDialog> {
                       return SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
                         child: ConstrainedBox(
-                          constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                          constraints: BoxConstraints(
+                            minWidth: constraints.maxWidth,
+                          ),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: cards,
@@ -414,9 +439,9 @@ class _AccountDialogState extends State<_AccountDialog> {
                       label: l10n.quickConnect,
                       onPressed: _busy
                           ? null
-                          : () => Navigator.of(
-                              context,
-                            ).pop(_AccountDialogAction.quickConnect),
+                          : () =>
+                                Navigator.of(context)
+                                    .pop(_AccountDialogAction.quickConnect),
                       focusColor: focusColor,
                     ),
                     second: _ActionButton(
@@ -742,7 +767,9 @@ class _ActionButtonState extends State<_ActionButton> {
                     ? (_focused
                           ? focusBorder.copyWith(color: widget.focusColor)
                           : baseBorder.copyWith(
-                              color: AppColorScheme.onSurface.withValues(alpha: 0.12),
+                              color: AppColorScheme.onSurface.withValues(
+                                alpha: 0.12,
+                              ),
                             ))
                     : baseBorder.copyWith(
                         color: AppColorScheme.onSurface.withValues(alpha: 0.08),
@@ -766,7 +793,9 @@ class _ActionButtonState extends State<_ActionButton> {
                   fontSize: 17,
                   fontWeight: FontWeight.w500,
                   color: enabled
-                      ? (_focused ? widget.focusColor : AppColorScheme.onSurface)
+                      ? (_focused
+                            ? widget.focusColor
+                            : AppColorScheme.onSurface)
                       : AppColorScheme.onSurface.withValues(alpha: 0.45),
                 ),
               ),
@@ -878,7 +907,9 @@ class _AccountCardState extends State<_AccountCard> {
                     child: _avatarFailed || widget.avatarUrl == null
                         ? Icon(
                             Icons.person,
-                            color: AppColorScheme.onSurface.withValues(alpha: 0.55),
+                            color: AppColorScheme.onSurface.withValues(
+                              alpha: 0.55,
+                            ),
                             size: 68,
                           )
                         : Image.network(
@@ -891,16 +922,19 @@ class _AccountCardState extends State<_AccountCard> {
                             ),
                             errorBuilder: (_, _, _) {
                               if (!_avatarFailed) {
-                                WidgetsBinding.instance
-                                    .addPostFrameCallback((_) {
-                                      if (mounted) {
-                                        setState(() => _avatarFailed = true);
-                                      }
-                                    });
+                                WidgetsBinding.instance.addPostFrameCallback((
+                                  _,
+                                ) {
+                                  if (mounted) {
+                                    setState(() => _avatarFailed = true);
+                                  }
+                                });
                               }
                               return Icon(
                                 Icons.person,
-                                color: AppColorScheme.onSurface.withValues(alpha: 0.55),
+                                color: AppColorScheme.onSurface.withValues(
+                                  alpha: 0.55,
+                                ),
                                 size: 68,
                               );
                             },
@@ -989,10 +1023,10 @@ class _AddUserCardState extends State<_AddUserCard> {
   Widget build(BuildContext context) {
     final borderColor = _focused
         ? widget.focusColor
-      : AppColorScheme.onSurface.withValues(alpha: 0.25);
+        : AppColorScheme.onSurface.withValues(alpha: 0.25);
     final bg = _focused
         ? widget.focusColor.withValues(alpha: 0.14)
-      : AppColorScheme.onSurface.withValues(alpha: 0.06);
+        : AppColorScheme.onSurface.withValues(alpha: 0.06);
 
     return Focus(
       focusNode: _focusNode,

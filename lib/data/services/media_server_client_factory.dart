@@ -142,6 +142,14 @@ class MediaServerClientFactory {
     }
   }
 
+  /// New immutable credential scope. In-flight old requests keep their old client.
+  MediaServerClient createSessionClient({required ServerType serverType, required String baseUrl}) =>
+      _createRawClient(serverType: serverType, baseUrl: normalizeServerBaseUrl(baseUrl));
+
+  void replaceSessionClient(String serverId, MediaServerClient client) {
+    _clients[serverId] = client;
+  }
+
   void removeClient(String serverId) {
     _clients.remove(serverId)?.dispose();
   }

@@ -238,6 +238,25 @@ PlaybackManager _manager(
   ..setPlayerService(service);
 
 void main() {
+  testWidgets('profile handoff drains late progress and its compensating stop', (tester) async {
+    final service = _TestService(stallProgress: true);
+    final manager = _manager(_TestBackend(), _TestResolver(), service);
+    await manager.playItems([{'Id': 'profile-movie', 'Type': 'Movie'}]);
+    manager.reportVolumeState(volume: 40, isMuted: false, reportImmediately: true);
+    expect(service.progressRequests, hasLength(1));
+    await manager.stop(userInitiated: false);
+    bool drained = false;
+    final pending = manager.drainSessionReports().then((_) => drained = true);
+    await tester.pump();
+    expect(drained, false);
+    service.progressRequests.single.completer.complete();
+    await tester.pump();
+    await pending;
+    expect(drained, true);
+    expect(service.events.last, 'stop:session-1');
+    manager.dispose();
+  });
+
   for (final type in <String>['Movie', 'Episode']) {
     test(
       '$type background stop preserves queue and fresh-resolves position',

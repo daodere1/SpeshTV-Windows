@@ -89,6 +89,13 @@ class MultiServerRepository {
   }
 
   Future<List<ServerUserSession>> getLoggedInServers() async {
+    if (_sessionRepo.isSpeshManagedProfile) {
+      final serverId = _sessionRepo.activeServerId;
+      final server = _authStore.getServers().where((s) => s.id == serverId).firstOrNull;
+      final client = serverId == null ? null : _clientFactory.getClientIfExists(serverId);
+      if (server == null || client == null || client.userId == null) return [];
+      return [ServerUserSession(server: server, userId: client.userId!, client: client)];
+    }
     if (_cachedSessions != null && DateTime.now().isBefore(_cacheExpiry)) {
       return _cachedSessions!;
     }

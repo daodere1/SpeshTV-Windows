@@ -31,6 +31,7 @@ import '../screens/auth/login_screen.dart';
 import '../screens/auth/server_screen.dart';
 import '../screens/auth/server_select_screen.dart';
 import '../screens/auth/startup_screen.dart';
+import '../screens/auth/spesh_profiles_screen.dart';
 import '../screens/web_diagnostics_screen.dart';
 import '../screens/browse/all_genres_screen.dart';
 import '../screens/browse/collection_screen.dart';
@@ -191,6 +192,14 @@ final appRouter = GoRouter(
       return Destinations.startup;
     }
 
+    if (path != Destinations.profiles && session.requiresSpeshProfile) {
+      session.rememberSpeshProfileDestination(state.uri.toString());
+      return Destinations.profiles;
+    }
+    if (path == Destinations.profiles && !session.supportsSpeshProfiles)
+      return Destinations.home;
+    if (path == Destinations.profiles) return null;
+
     // Has to sit above every other rule and below the signed-out one: the
     // wizard needs a user to set up, and nothing else is worth showing until
     // it has had its turn. Exempting its own path is what stops it redirecting
@@ -297,6 +306,11 @@ final appRouter = GoRouter(
           resetPin: state.uri.queryParameters['resetPin'] == '1',
         );
       },
+    ),
+
+    GoRoute(
+      path: Destinations.profiles,
+      builder: (context, state) => const SpeshProfilesScreen(),
     ),
 
     // General
@@ -695,7 +709,11 @@ final appRouter = GoRouter(
       builder: (context, state) {
         final videoId = state.uri.queryParameters['videoId'];
         final url = state.uri.queryParameters['url'];
-        return TrailerPlayerScreen(videoId: videoId, trailerUrl: url, retryAlternative: state.extra == true);
+        return TrailerPlayerScreen(
+          videoId: videoId,
+          trailerUrl: url,
+          retryAlternative: state.extra == true,
+        );
       },
     ),
     GoRoute(
