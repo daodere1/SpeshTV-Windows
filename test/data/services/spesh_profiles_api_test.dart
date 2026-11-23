@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moonfin/data/services/spesh_profile_service.dart';
@@ -30,6 +28,31 @@ const child = SpeshViewingProfile(
   isPrimary: false,
 );
 void main() {
+  test('Users/Me validates managed identity and rejects admin tokens', () {
+    const selection = SpeshProfileSelection(
+      child,
+      'managed-two',
+      'child-token',
+    );
+    selection.validateIdentity(const ServerUser(id: 'managed-two'));
+    expect(
+      () => selection.validateIdentity(const ServerUser(id: 'owner')),
+      throwsStateError,
+    );
+    final privileged = ServerUser.fromJson({
+      'Id': 'managed-two',
+      'Policy': {'IsAdministrator': true},
+    });
+    expect(() => selection.validateIdentity(privileged), throwsStateError);
+    const primary = SpeshProfileSelection(mainProfile, 'owner', 'owner-token');
+    primary.validateIdentity(
+      ServerUser.fromJson({
+        'Id': 'owner',
+        'Policy': {'IsAdministrator': true},
+      }),
+    );
+  });
+
   test(
     'catalogue and both selections always use owner auth with DeviceId',
     () async {

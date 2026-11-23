@@ -45,6 +45,18 @@ class SpeshProfileSelection {
   const SpeshProfileSelection(this.profile, this.userId, this.token);
   final SpeshViewingProfile profile;
   final String userId, token;
+
+  /// Confirm the token's actual Users/Me identity before installing a session.
+  void validateIdentity(ServerUser user) {
+    if (user.id != userId) {
+      throw StateError('Profile identity could not be confirmed.');
+    }
+    if (!profile.isPrimary && user.policy?.isAdministrator == true) {
+      throw StateError(
+        'A managed profile cannot use an administrator identity.',
+      );
+    }
+  }
 }
 
 class SpeshProfilesApi {

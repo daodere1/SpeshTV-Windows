@@ -247,8 +247,7 @@ class SessionRepository {
         // library. HTTP authentication/policy refusals never fall back.
         if (!primary || error.response != null || savedOwner == null) rethrow;
       }
-      if (details != null && details.id != selection.userId)
-        throw StateError('Profile identity could not be confirmed.');
+      if (details != null) selection.validateIdentity(details);
       await _stopAndDrainForProfile();
       if (!identical(_speshOwner, owner))
         throw StateError('The account changed.');

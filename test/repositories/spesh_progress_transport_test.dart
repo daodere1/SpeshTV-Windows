@@ -52,7 +52,7 @@ void main() {
     },
   );
   test(
-    'Next Up Home does not query recent history just to sort cards',
+    'Next Up enrichment keeps history lookups scoped to the selected user',
     () async {
       final dio = Dio(BaseOptions(baseUrl: 'https://server.invalid'));
       final adapter = RecordingAdapter();
@@ -84,7 +84,12 @@ void main() {
       ).loadNextUp('server', startIndex: 0);
       expect(row.items.single.id, 'episode');
       expect(row.totalCount, 0);
-      expect(adapter.requests.map((r) => r.path), ['/Shows/NextUp']);
+      expect(adapter.requests.map((r) => r.path), [
+        '/Shows/NextUp', '/Users/viewer/Items', '/Users/viewer/Items',
+      ]);
+      expect(adapter.requests.every((r) =>
+          r.queryParameters['UserId'] == 'viewer' ||
+          r.path.startsWith('/Users/viewer/')), true);
       dio.close();
     },
   );

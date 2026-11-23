@@ -15,16 +15,36 @@ class JellyfinItemsApi implements ItemsApi {
     String path,
     Map<String, dynamic> queryParameters,
   ) async {
+    final userId = _getUserId();
+    if (userId.trim().isEmpty) {
+      throw StateError('A selected user is required for playback history.');
+    }
+    final scoped = <String, dynamic>{...queryParameters, 'UserId': userId};
+    final options = Options(
+      method: 'GET',
+      headers: {'Cache-Control': 'no-store', 'Pragma': 'no-cache'},
+    );
+    void ensureCurrentUser() {
+      if (_getUserId() != userId) {
+        throw StateError('Playback history belongs to a previous user.');
+      }
+    }
+
     if ((!const bool.fromEnvironment('SPESHTV_WEB') &&
             !const bool.fromEnvironment('SPESHMEDIA_CLIENT')) ||
         queryParameters['MediaTypes'] == 'Audio') {
-      return _dio.get(path, queryParameters: queryParameters);
+      final response = await _dio.get(
+        path,
+        queryParameters: scoped,
+        options: options,
+      );
+      ensureCurrentUser();
+      return response;
     }
     // Match the lightweight SpeshTV feed, not the full catalog-detail DTO.
     // Counting every resumable item is particularly costly on large libraries.
     final lean = <String, dynamic>{
-      ...queryParameters,
-      'UserId': _getUserId(),
+      ...scoped,
       'Fields': 'ProviderIds,ProductionYear,PrimaryImageAspectRatio',
       'EnableUserData': true,
       'EnableTotalRecordCount': false,
@@ -32,15 +52,16 @@ class JellyfinItemsApi implements ItemsApi {
       if (path == '/Shows/NextUp') 'EnableRewatching': false,
     }..remove('EnableImageTypes');
     final route = path == '/UserItems/Resume'
-        ? '/Users/${Uri.encodeComponent(_getUserId())}/Items/Resume'
+        ? '/Users/${Uri.encodeComponent(userId)}/Items/Resume'
         : path;
-    final options = Options(method: 'GET')
+    final request = options
         .compose(_dio.options, route, queryParameters: lean)
         .copyWith(
           connectTimeout: const Duration(seconds: 30),
           receiveTimeout: const Duration(seconds: 30),
         );
-    final response = await _dio.fetch<dynamic>(options);
+    final response = await _dio.fetch<dynamic>(request);
+    ensureCurrentUser();
     // No-count responses can report only this page's length, not the total.
     // Let the progress feed detect the end from a short page instead.
     if (response.data is Map<String, dynamic>) {

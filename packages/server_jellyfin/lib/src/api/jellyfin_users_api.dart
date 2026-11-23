@@ -8,7 +8,12 @@ class JellyfinUsersApi implements UsersApi {
 
   @override
   Future<ServerUser> getCurrentUser() async {
-    final response = await _dio.get('/Users/Me');
+    final response = await _dio.get(
+      '/Users/Me',
+      options: Options(
+        headers: {'Cache-Control': 'no-store', 'Pragma': 'no-cache'},
+      ),
+    );
     return ServerUser.fromJson(response.data as Map<String, dynamic>);
   }
 
