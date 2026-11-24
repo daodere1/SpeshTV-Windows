@@ -157,6 +157,10 @@ class _SpeshProfilesScreenState extends State<SpeshProfilesScreen> {
                                     : () => _choose(_profiles![i]),
                                 style: OutlinedButton.styleFrom(
                                   padding: const EdgeInsets.all(8),
+                                  fixedSize: const Size.square(130),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(28),
+                                  ),
                                 ),
                                 child: Stack(
                                   children: [
@@ -195,6 +199,12 @@ class _SpeshProfilesScreenState extends State<SpeshProfilesScreen> {
                                 width: 130,
                                 child: OutlinedButton(
                                   onPressed: _busy ? null : () => _edit(),
+                                  style: OutlinedButton.styleFrom(
+                                    fixedSize: const Size.square(130),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(28),
+                                    ),
+                                  ),
                                   child: const Icon(Icons.add, size: 64),
                                 ),
                               ),
@@ -341,6 +351,10 @@ class _EditorState extends State<_Editor> {
                               : () => setState(() => _avatar = avatar),
                           style: OutlinedButton.styleFrom(
                             padding: const EdgeInsets.all(5),
+                            fixedSize: const Size.square(70),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(18),
+                            ),
                             side: BorderSide(
                               width: 3,
                               color: _avatar == avatar

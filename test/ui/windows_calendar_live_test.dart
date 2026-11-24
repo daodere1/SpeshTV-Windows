@@ -51,8 +51,8 @@ void main() {
     'bundled notes match this build and absent notes have safe fallback',
     () async {
       TestWidgetsFlutterBinding.ensureInitialized();
-      final notes = await SpeshReleaseNotes.load(version: '3.1.1+30000213');
-      expect(notes, contains('SpeshTV Windows 3.1.1'));
+      final notes = await SpeshReleaseNotes.load(version: '3.1.2+30000214');
+      expect(notes, contains('SpeshTV Windows 3.1.2'));
       expect(notes, contains('Profile 1 retains'));
       final missing = await SpeshReleaseNotes.load(
         version: '0.0.0+0',

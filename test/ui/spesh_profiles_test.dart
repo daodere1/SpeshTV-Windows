@@ -88,6 +88,37 @@ class _Session extends Fake implements SessionRepository {
 }
 
 void main() {
+  testWidgets('avatar tiles override circular theme and align with Add', (t) async {
+    await t.pumpWidget(MaterialApp(
+      theme: ThemeData(outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(shape: const CircleBorder()),
+      )),
+      home: SpeshProfilesScreen(api: _Api(), session: _Session()),
+    ));
+    await t.pumpAndSettle();
+    final profile = find.ancestor(of: find.byType(SpeshProfileAvatar),
+        matching: find.byType(OutlinedButton));
+    final add = find.ancestor(of: find.byIcon(Icons.add),
+        matching: find.byType(OutlinedButton));
+    for (final finder in [profile, add]) {
+      final button = t.widget<OutlinedButton>(finder);
+      expect(button.style!.shape!.resolve({}), isA<RoundedRectangleBorder>());
+      expect(t.getSize(finder), const Size.square(130));
+    }
+    expect(t.getTopLeft(profile).dy, t.getTopLeft(add).dy);
+    await t.tap(find.text('Manage profiles'));
+    await t.pumpAndSettle();
+    await t.tap(profile);
+    await t.pumpAndSettle();
+    final choices = find.descendant(of: find.byType(AlertDialog),
+        matching: find.byType(OutlinedButton));
+    expect(choices, findsNWidgets(8));
+    for (final element in choices.evaluate()) {
+      final button = element.widget as OutlinedButton;
+      expect(button.style!.shape!.resolve({}), isA<RoundedRectangleBorder>());
+    }
+  });
+
   Future<void> open(WidgetTester t, _Api api, _Session session) async {
     await t.pumpWidget(
       MaterialApp(
