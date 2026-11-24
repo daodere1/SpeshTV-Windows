@@ -1,0 +1,122 @@
+name: Sign and publish Windows release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing draft release tag, for example v3.1.3
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: windows-sign-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  sign:
+    if: github.repository == 'daodere1/SpeshTV-Windows' && github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    timeout-minutes: 30
+    environment: windows-signing
+    permissions:
+      contents: write
+      id-token: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      WORK: ${{ runner.temp }}\speshtv-signing
+      EXPECTED_PUBLISHER: ${{ vars.WINDOWS_SIGNING_PUBLISHER }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check signing guards
+        run: ./windows/signing/test-signing-guards.ps1
+      - name: Require signing configuration and matching draft source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          ENDPOINT: ${{ vars.WINDOWS_SIGNING_ENDPOINT }}
+          ACCOUNT: ${{ vars.WINDOWS_SIGNING_ACCOUNT }}
+          PROFILE: ${{ vars.WINDOWS_SIGNING_PROFILE }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid tag.' }
+          foreach ($name in @('CLIENT_ID','TENANT_ID','SUBSCRIPTION_ID','ENDPOINT','ACCOUNT','PROFILE','EXPECTED_PUBLISHER')) {
+            if (![Environment]::GetEnvironmentVariable($name)) { throw "Configure windows-signing variable: $name" }
+          }
+          $release = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json isDraft,targetCommitish | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or !$release.isDraft) { throw 'Only an existing draft may be signed; published releases are never replaced.' }
+          if ($release.targetCommitish -ne (git rev-parse HEAD)) { throw 'Draft target must be the exact current main commit.' }
+          New-Item -ItemType Directory -Path $env:WORK | Out-Null
+          $version = $env:RELEASE_TAG.Substring(1)
+          gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir $env:WORK --pattern "SpeshTV-Windows-$version-Portable.zip" --pattern SHA256SUMS.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Draft payload download failed.' }
+          ./windows/signing/package-signed-release.ps1 -Phase Prepare -WorkDirectory $env:WORK -Tag $env:RELEASE_TAG
+      - name: Azure login using GitHub OIDC
+        uses: azure/login@935127ca5bb3c4b02c9c2c10060028383878f33f # v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign SpeshTV executable
+        uses: azure/artifact-signing-action@c0ae2c1d0c1847ab81ac0ab8521bee597cfedd30 # v2
+        with:
+          endpoint: ${{ vars.WINDOWS_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.WINDOWS_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.WINDOWS_SIGNING_PROFILE }}
+          files: ${{ env.WORK }}\payload\SpeshTV\SpeshTV.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Build installer containing the signed executable
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          if (!(Test-Path -LiteralPath $iscc)) { throw 'Inno Setup 6 must be installed on this runner.' }
+          ./windows/signing/package-signed-release.ps1 -Phase Package -WorkDirectory $env:WORK -Tag $env:RELEASE_TAG -ExpectedPublisher $env:EXPECTED_PUBLISHER -IsccPath $iscc
+      - name: Sign installer
+        uses: azure/artifact-signing-action@c0ae2c1d0c1847ab81ac0ab8521bee597cfedd30 # v2
+        with:
+          endpoint: ${{ vars.WINDOWS_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.WINDOWS_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.WINDOWS_SIGNING_PROFILE }}
+          files-folder: ${{ env.WORK }}\signed
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Verify and package final bytes
+        run: |
+          $version = $env:RELEASE_TAG.Substring(1)
+          git archive --format=zip --output="$env:WORK/signed/SpeshTV-Windows-$version-Source.zip" HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Source archive creation failed.' }
+          ./windows/signing/package-signed-release.ps1 -Phase Finalize -WorkDirectory $env:WORK -Tag $env:RELEASE_TAG -ExpectedPublisher $env:EXPECTED_PUBLISHER
+      - name: Upload verified signed downloads and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $release = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json isDraft,targetCommitish | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or !$release.isDraft -or $release.targetCommitish -ne (git rev-parse HEAD)) { throw 'Draft changed during signing.' }
+          $files = @(Get-ChildItem -LiteralPath "$env:WORK/signed" -File | ForEach-Object FullName)
+          gh release upload $env:RELEASE_TAG @files --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Signed asset upload failed; draft remains unpublished.' }
+          $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot verify uploaded assets.' }
+          $matches = @($releases | Where-Object tag_name -eq $env:RELEASE_TAG)
+          if ($matches.Count -ne 1 -or !$matches[0].draft) { throw 'Draft could not be verified.' }
+          $uploaded = $matches[0]
+          foreach ($file in Get-ChildItem -LiteralPath "$env:WORK/signed" -File) {
+            $asset = @($uploaded.assets | Where-Object name -eq $file.Name)
+            $digest = 'sha256:' + (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($asset.Count -ne 1 -or $asset[0].size -ne $file.Length -or $asset[0].digest -ne $digest) { throw "Uploaded asset differs: $($file.Name)" }
+          }
+          foreach ($asset in @($uploaded.assets | Where-Object name -like '*-Setup-unsigned.exe')) {
+            gh release delete-asset $env:RELEASE_TAG $asset.name --repo $env:GITHUB_REPOSITORY --yes
+            if ($LASTEXITCODE -ne 0) { throw 'Unsigned installer cleanup failed; draft remains unpublished.' }
+          }
+          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Publication failed.' }
