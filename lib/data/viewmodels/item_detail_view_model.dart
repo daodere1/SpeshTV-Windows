@@ -1244,6 +1244,25 @@ class ItemDetailViewModel extends ChangeNotifier {
     }
   }
 
+  Future<List<AggregatedItem>?> fetchSpotlightSeason(String seasonId) async {
+    final item = _item;
+    final seriesId = item?.seriesId;
+    if (_isDisposed || item == null || seriesId == null || seriesId.isEmpty) {
+      return null;
+    }
+    try {
+      final data = await _client.itemsApi
+          .getEpisodes(seriesId, seasonId: seasonId, fields: _episodeOverviewFields)
+          .timeout(const Duration(seconds: 12));
+      if (_isDisposed || _item?.seriesId != seriesId) return null;
+      final items = data['Items'];
+      if (items is! List) return null;
+      return _mapItems(items, fallbackRating: item.officialRating);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> refreshSeriesEpisodes() {
     _seriesEpisodesRequested = false;
     _seriesEpisodesLoaded = false;

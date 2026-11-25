@@ -44,6 +44,17 @@ String? spotlightItemImageUrl(ImageApi imageApi, AggregatedItem item) {
   return null;
 }
 
+String? spotlightSeasonSeriesImageUrl(ImageApi imageApi, AggregatedItem item) {
+  if (item.rawData['SpeshSeasonPicker'] != true) return null;
+  final seriesId = item.seriesId;
+  if (seriesId == null || seriesId.isEmpty) return null;
+  return imageApi.getPrimaryImageUrl(
+    seriesId,
+    maxHeight: 360,
+    tag: item.seriesPrimaryImageTag,
+  );
+}
+
 /// A person's portrait: the server image when [id] and [tag] name a library
 /// person, else the TMDB profile at [tmdbProfileBase], else null.
 String? spotlightPersonImageUrl(

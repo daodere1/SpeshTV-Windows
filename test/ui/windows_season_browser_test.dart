@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -45,6 +47,8 @@ void main() {
     await store.init();
     prefs = UserPreferences(store);
     images = _Images();
+    when(() => images.getPrimaryImageUrl('show', maxHeight: 360))
+        .thenReturn('');
     for (var n = 1; n <= 14; n++) {
       when(() => images.getPrimaryImageUrl('s$n', maxHeight: 360))
           .thenReturn('');
@@ -56,6 +60,7 @@ void main() {
     ValueNotifier<Map<int, List<AggregatedItem>>> groups, {
     int currentSeason = 1,
     String current = 'ep1-1',
+    Future<List<AggregatedItem>?> Function(String)? refreshSeason,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -76,6 +81,7 @@ void main() {
                           valueListenable: groups,
                           builder: (context, data, _) => SpotlightSeasonBrowser(
                             groups: data,
+                            refreshSeason: refreshSeason,
                             currentItemId: current,
                             currentSeason: currentSeason,
                             imageApi: images,
@@ -95,6 +101,71 @@ void main() {
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
   }
+
+  testWidgets('Down reaches the last episode from a missing column', (
+    tester,
+  ) async {
+    final groups = ValueNotifier({1: [for (var n = 1; n <= 18; n++) ep(1, n)]});
+    addTearDown(groups.dispose);
+    await open(tester, groups);
+    await tester.tap(find.text('Season 1'));
+    await tester.pumpAndSettle();
+    final grid = tester.widget<GridView>(find.byType(GridView).last);
+    final delegate = grid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount;
+    final columns = delegate.crossAxisCount;
+    expect(columns, greaterThan(1));
+    groups.value = {1: [for (var n = 1; n <= columns + 1; n++) ep(1, n)]};
+    await tester.pumpAndSettle();
+    for (var column = 1; column < columns; column++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+    }
+    final previous = FocusManager.instance.primaryFocus;
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    final tail = tester.widget<MediaCard>(
+      find.widgetWithText(MediaCard, '${columns + 1} · Episode 1-${columns + 1}'),
+    );
+    expect(tail.focusNode, isNot(same(previous)));
+    expect(tail.focusNode?.hasPrimaryFocus, isTrue);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('fresh season retains cached episodes and ignores a late result', (
+    tester,
+  ) async {
+    final groups = ValueNotifier({4: [ep(4, 8), ep(4, 9)]});
+    addTearDown(groups.dispose);
+    final requests = <Completer<List<AggregatedItem>?>>[];
+    when(() => images.getPrimaryImageUrl('s4', maxHeight: 360)).thenReturn('');
+    await open(tester, groups, currentSeason: 4, current: 'ep4-9',
+        refreshSeason: (seasonId) {
+      expect(seasonId, 's4');
+      final result = Completer<List<AggregatedItem>?>();
+      requests.add(result);
+      return result.future;
+    });
+    await tester.tap(find.text('Season 4'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Episode 4-9'), findsOneWidget);
+    final focused = FocusManager.instance.primaryFocus;
+    requests[0].complete([ep(4, 8), ep(4, 9), ep(4, 10)]);
+    await tester.pumpAndSettle();
+    expect(find.text('3 episodes'), findsOneWidget);
+    expect(FocusManager.instance.primaryFocus, same(focused));
+
+    await tester.tap(find.byKey(const ValueKey('episode_seasons_back')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Season 4'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('episode_seasons_back')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Season 4'));
+    await tester.pumpAndSettle();
+    requests[2].complete([ep(4, 8), ep(4, 9), ep(4, 10), ep(4, 11)]);
+    requests[1].complete([ep(4, 8)]);
+    await tester.pumpAndSettle();
+    expect(find.text('4 episodes'), findsOneWidget);
+  });
 
   testWidgets(
     'one-season show requires picker, then Back returns through picker',

@@ -7,8 +7,7 @@ import 'spotlight_modal_grids.dart';
 import 'spotlight_section_modal.dart';
 
 /// A season picker and one virtualized episode viewport in the same modal.
-/// Series DTOs are supplied by the authenticated detail view model, not fetched
-/// again when switching seasons. Keeping the picker mounted preserves its view.
+/// Cached episodes stay visible while the selected season refreshes.
 class SpotlightSeasonBrowser extends StatefulWidget {
   const SpotlightSeasonBrowser({
     super.key,
@@ -20,6 +19,7 @@ class SpotlightSeasonBrowser extends StatefulWidget {
     required this.seasonLabel,
     required this.onItemTap,
     this.onItemChanged,
+    this.refreshSeason,
   });
   final Map<int, List<AggregatedItem>> groups;
   final String currentItemId;
@@ -29,6 +29,7 @@ class SpotlightSeasonBrowser extends StatefulWidget {
   final String Function(int) seasonLabel;
   final ValueChanged<AggregatedItem> onItemTap;
   final VoidCallback? onItemChanged;
+  final Future<List<AggregatedItem>?> Function(String)? refreshSeason;
   @override
   State<SpotlightSeasonBrowser> createState() => _SpotlightSeasonBrowserState();
 }
@@ -36,6 +37,22 @@ class SpotlightSeasonBrowser extends StatefulWidget {
 class _SpotlightSeasonBrowserState extends State<SpotlightSeasonBrowser> {
   int? _active;
   int? _selected;
+  int _refreshGeneration = 0;
+  final _refreshed = <int, List<AggregatedItem>>{};
+
+  Future<void> _refresh(int season) async {
+    final generation = ++_refreshGeneration;
+    final seasonId = widget.groups[season]?.firstOrNull?.seasonId;
+    final refresh = widget.refreshSeason;
+    if (seasonId == null || seasonId.isEmpty || refresh == null) return;
+    final episodes = await refresh(seasonId);
+    if (!mounted || generation != _refreshGeneration || _active != season ||
+        widget.groups[season]?.firstOrNull?.seasonId != seasonId ||
+        episodes == null) {
+      return;
+    }
+    setState(() => _refreshed[season] = episodes);
+  }
   final _pickerNodes = <String, FocusNode>{};
   final _episodeFocus = FocusNode();
   SpotlightModalBackController? _backController;
@@ -53,6 +70,7 @@ class _SpotlightSeasonBrowserState extends State<SpotlightSeasonBrowser> {
 
   bool _back() {
     if (!mounted || _active == null) return false;
+    _refreshGeneration++;
     setState(() => _active = null);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -89,6 +107,8 @@ class _SpotlightSeasonBrowserState extends State<SpotlightSeasonBrowser> {
             'IndexNumber': number,
             'SpeshSeasonPicker': true,
             'PrimaryImageItemId': groups[number]!.first.seasonId,
+            'SeriesId': groups[number]!.first.seriesId,
+            'SeriesPrimaryImageTag': groups[number]!.first.seriesPrimaryImageTag,
             if (groups[number]!.first.rawData['SeasonPrimaryImageTag'] != null)
               'PrimaryImageTag':
                   groups[number]!.first.rawData['SeasonPrimaryImageTag'],
@@ -100,7 +120,7 @@ class _SpotlightSeasonBrowserState extends State<SpotlightSeasonBrowser> {
       _pickerNodes.putIfAbsent(season.id, () => FocusNode());
     }
     final active = _active;
-    final episodes = groups[active] ?? const <AggregatedItem>[];
+    final episodes = _refreshed[active] ?? groups[active] ?? const <AggregatedItem>[];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -138,10 +158,14 @@ class _SpotlightSeasonBrowserState extends State<SpotlightSeasonBrowser> {
                     requestInitialFocus: true,
                     currentItemId: 'season_${widget.currentSeason}',
                     itemFocusNodes: _pickerNodes,
-                    onItemTap: (season) => setState(() {
-                      _selected = season.indexNumber;
-                      _active = season.indexNumber;
-                    }),
+                    onItemTap: (season) {
+                      final number = season.indexNumber!;
+                      setState(() {
+                        _selected = number;
+                        _active = number;
+                      });
+                      _refresh(number);
+                    },
                   ),
                 ),
               ),
@@ -163,7 +187,10 @@ class _SpotlightSeasonBrowserState extends State<SpotlightSeasonBrowser> {
                       ? widget.currentItemId
                       : null,
                   onItemTap: widget.onItemTap,
-                  onItemChanged: widget.onItemChanged,
+                  onItemChanged: () {
+                    widget.onItemChanged?.call();
+                    _refresh(active);
+                  },
                 ),
             ],
           ),

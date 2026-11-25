@@ -102,9 +102,12 @@ class AppUpdateService {
     required bool respectNotificationPreference,
     required bool suppressIfAlreadyNotified,
   }) async {
-    // Fork releases must not offer an upstream installer.
-    if ((Platform.isWindows && const bool.fromEnvironment('SPESHMEDIA_CLIENT', defaultValue: true)) ||
-        !AppDistribution.supportsInAppUpdates) {
+    if (AppDistribution.channel == DistributionChannel.microsoftStore) {
+      return const DesktopUpdateCheckResult(
+        status: DesktopUpdateCheckStatus.managedByStore,
+      );
+    }
+    if (!AppDistribution.supportsInAppUpdates) {
       return const DesktopUpdateCheckResult(
         status: DesktopUpdateCheckStatus.unsupportedPlatform,
       );
@@ -162,7 +165,10 @@ class AppUpdateService {
 
     await _store.setString(_lastNotifiedVersionKey, release.version);
 
-    final asset = _selectAsset(release.assets);
+    // The Windows release page lets installed and portable users choose.
+    final asset = AppDistribution.channel == DistributionChannel.windows
+        ? null
+        : _selectAsset(release.assets);
     return DesktopUpdateCheckResult(
       status: DesktopUpdateCheckStatus.updateAvailable,
       update: DesktopUpdateInfo(
@@ -218,7 +224,8 @@ class AppUpdateService {
         return null;
       }
 
-      final body = await response.transform(utf8.decoder).join();
+      final body = await response.transform(utf8.decoder).join()
+          .timeout(const Duration(seconds: 10));
       final decoded = jsonDecode(body);
       if (decoded is! Map<String, dynamic>) {
         return null;
@@ -270,15 +277,6 @@ class AppUpdateService {
             _firstByExtension(assets, const ['.apk']);
       case DistributionChannel.macosDmg:
         return _firstByExtension(assets, const ['.dmg']);
-      case DistributionChannel.windows:
-        final isArm64 = Platform.version.toLowerCase().contains('windows_arm64');
-        if (isArm64) {
-          return _firstWhere(assets, '.exe', requireSubstring: 'arm64') ??
-              _firstByExtension(assets, const ['.exe']);
-        } else {
-          return _firstWhere(assets, '.exe', excludeSubstring: 'arm64') ??
-              _firstByExtension(assets, const ['.exe']);
-        }
       default:
         return null;
     }
@@ -288,13 +286,11 @@ class AppUpdateService {
     List<_ReleaseAsset> assets,
     String extension, {
     String? requireSubstring,
-    String? excludeSubstring,
   }) {
     for (final asset in assets) {
       final lower = asset.name.toLowerCase();
       if (!lower.endsWith(extension)) continue;
       if (requireSubstring != null && !lower.contains(requireSubstring)) continue;
-      if (excludeSubstring != null && lower.contains(excludeSubstring)) continue;
       return asset;
     }
     return null;

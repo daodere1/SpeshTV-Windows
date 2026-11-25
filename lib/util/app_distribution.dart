@@ -41,7 +41,16 @@ class AppDistribution {
   static const _raw =
       String.fromEnvironment('DISTRIBUTION_CHANNEL');
 
+  static bool _packagedWindows = false;
+
+  static void initialize(List<String> arguments) {
+    _packagedWindows = !kIsWeb &&
+        Platform.isWindows &&
+        arguments.contains('--speshtv-packaged-windows');
+  }
+
   static DistributionChannel get channel {
+    if (_packagedWindows) return DistributionChannel.microsoftStore;
     switch (_raw.toLowerCase().trim()) {
       case 'apk':
         return DistributionChannel.apk;
@@ -55,6 +64,7 @@ class AppDistribution {
         return DistributionChannel.macosDmg;
       case 'macos_pkg':
         return DistributionChannel.macosPkg;
+      case 'speshtv-windows':
       case 'windows':
         return DistributionChannel.windows;
       case 'msstore':

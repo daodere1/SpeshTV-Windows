@@ -103,6 +103,7 @@ class MediaCard extends StatefulWidget {
   final String? subtitle;
   final Widget? subtitleWidget;
   final String? imageUrl;
+  final String? fallbackImageUrl;
   final double width;
   final double aspectRatio;
   final VoidCallback? onTap;
@@ -177,6 +178,7 @@ class MediaCard extends StatefulWidget {
     this.subtitle,
     this.subtitleWidget,
     this.imageUrl,
+    this.fallbackImageUrl,
     this.width = 150,
     this.aspectRatio = 2 / 3,
     this.onTap,
@@ -460,6 +462,7 @@ class _MediaCardState extends State<MediaCard> with FocusStateMixin {
                         : Alignment.center,
                     child: _CardImage(
                       imageUrl: widget.imageUrl,
+                      fallbackImageUrl: widget.fallbackImageUrl,
                       title: widget.title,
                       aspectRatio: widget.aspectRatio,
                       isFavorite: widget.isFavorite,
@@ -741,6 +744,7 @@ class _TvFocusParallaxState extends State<_TvFocusParallax>
 
 class _CardImage extends StatelessWidget {
   final String? imageUrl;
+  final String? fallbackImageUrl;
   final String? title;
   final double aspectRatio;
   final bool isFavorite;
@@ -767,6 +771,7 @@ class _CardImage extends StatelessWidget {
 
   const _CardImage({
     this.imageUrl,
+    this.fallbackImageUrl,
     this.title,
     required this.aspectRatio,
     required this.isFavorite,
@@ -870,10 +875,18 @@ class _CardImage extends StatelessWidget {
                                 imageSourceAspectRatio ?? aspectRatio,
                               ),
                               sourceAspectRatio: imageSourceAspectRatio,
-                              errorBuilder: (_, _, _) => _PlaceholderIcon(
-                                itemType: itemType,
-                                title: title,
-                              ),
+                              errorBuilder: (_, _, _) {
+                                final fallback = fallbackImageUrl;
+                                if (fallback != null && fallback != imageUrl) {
+                                  return BoundedNetworkImage(
+                                    imageUrl: fallback,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, _, _) =>
+                                        _PlaceholderIcon(itemType: itemType, title: title),
+                                  );
+                                }
+                                return _PlaceholderIcon(itemType: itemType, title: title);
+                              },
                             ),
                             ...imageUnderlays,
                             if (isGenreFallback) ...[

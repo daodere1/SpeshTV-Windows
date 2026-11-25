@@ -902,6 +902,7 @@ class _SpotlightCardsBuilder {
             'more_seasons_${item.serverId}_${item.seriesId ?? item.id}',
           ),
           groups: seasonGroups,
+          refreshSeason: vm.fetchSpotlightSeason,
           currentItemId: item.id,
           currentSeason: item.parentIndexNumber,
           imageApi: _imageApi,

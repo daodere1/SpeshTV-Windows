@@ -16,6 +16,7 @@ import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
+import 'util/app_distribution.dart';
 import 'data/models/aggregated_item.dart';
 import 'background/watch_next_background.dart' as watch_next_bg;
 import 'data/services/carplay_service.dart';
@@ -849,7 +850,8 @@ Future<void> watchNextBackgroundMain() => watch_next_bg.watchNextBackgroundMain(
 Future<void> autoDownloadBackgroundMain() =>
     auto_download_bg.autoDownloadBackgroundMain();
 
-void main() async {
+void main(List<String> args) async {
+  AppDistribution.initialize(args);
   final startupTimer = Stopwatch()..start();
   configureHttpOverrides();
   ScrollSensitivityBinding.ensureInitialized();

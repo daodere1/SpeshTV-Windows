@@ -168,9 +168,11 @@ class _SpotlightMediaGridSectionState extends State<SpotlightMediaGridSection> {
   bool _pickedInitial = false;
   bool _scrollSeeded = false;
   final _gridScroll = ScrollController();
+  final _tailFocus = FocusNode();
   @override
   void dispose() {
     _gridScroll.dispose();
+    _tailFocus.dispose();
     super.dispose();
   }
 
@@ -235,6 +237,8 @@ class _SpotlightMediaGridSectionState extends State<SpotlightMediaGridSection> {
               showAvailabilityBadges &&
               SeerrMediaStatus.hasDot(seasonSeerrStatus);
 
+          final imageUrl = spotlightItemImageUrl(imageApi, entry);
+          final fallbackUrl = spotlightSeasonSeriesImageUrl(imageApi, entry);
           final card = MediaCard(
             key: ValueKey(cellKeys[i]),
             title: entry.type == 'Episode' && entry.indexNumber != null
@@ -242,7 +246,8 @@ class _SpotlightMediaGridSectionState extends State<SpotlightMediaGridSection> {
                 : entry.name,
             subtitle: entry.personRole,
             titleColor: titleColor,
-            imageUrl: spotlightItemImageUrl(imageApi, entry),
+            imageUrl: imageUrl ?? fallbackUrl,
+            fallbackImageUrl: imageUrl == null ? null : fallbackUrl,
             width: metrics.cellWidth,
             aspectRatio: aspectRatio,
             isPlayed: entry.isPlayed,
@@ -250,7 +255,32 @@ class _SpotlightMediaGridSectionState extends State<SpotlightMediaGridSection> {
             itemType: entry.type,
             focusNode:
                 widget.itemFocusNodes?[entry.id] ??
-                (i == (initialEpisode ?? 0) ? firstFocusNode : null),
+                (i == (initialEpisode ?? 0) && firstFocusNode != null
+                    ? firstFocusNode
+                    : widget.bounded && landscapeCells && i == items.length - 1
+                    ? _tailFocus
+                    : null),
+            onKeyEvent: (_, event) {
+              if (!widget.bounded || !landscapeCells || !event.isActionable ||
+                  !event.logicalKey.isDownKey) {
+                return KeyEventResult.ignored;
+              }
+              final columns = metrics.columns;
+              final last = items.length - 1;
+              if (i ~/ columns + 1 != last ~/ columns || i + columns <= last ||
+                  !_gridScroll.hasClients) {
+                return KeyEventResult.ignored;
+              }
+              final target = last == (initialEpisode ?? 0) && firstFocusNode != null
+                  ? firstFocusNode
+                  : _tailFocus;
+              _gridScroll.jumpTo(_gridScroll.position.maxScrollExtent);
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted && target.context != null) target.requestFocus();
+              });
+              WidgetsBinding.instance.ensureVisualUpdate();
+              return KeyEventResult.handled;
+            },
             focusColor: focusColor,
             cardFocusExpansion: cardExpansion,
             suppressFocusGlow: isNeon,
